@@ -1,0 +1,25 @@
+# Ubuntu desktop and session foundation.
+ubuntu-desktop-minimal
+gnome-shell
+mutter
+gdm3
+network-manager
+pipewire
+wireplumber
+systemd
+
+# Real image tooling and package validation are installed only in the Linux builder.
+live-build
+debootstrap
+dpkg-dev
+*** Add File: C:\Users\Jacob\OneDrive\Personal Files\Development\Visual Studio\HavenOS-Platform\platform\ubuntu\image\live-build\auto\config
+#!/bin/sh
+set -eu
+
+lb config noauto \
+  --mode ubuntu \
+  --distribution resolute \
+  --architectures amd64 \
+  --archive-areas "main restricted universe multiverse" \
+  --debian-installer live \
+  --bootappend-live "boot=live components hostname=havenos username=haven"
