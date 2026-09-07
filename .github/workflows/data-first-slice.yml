@@ -54,6 +54,7 @@ jobs:
           .data-venv/bin/python -m py_compile apps/Data/workers/duckdb_worker.py
           .data-venv/bin/python -m py_compile apps/Data/Tests/test_workers.py
           .data-venv/bin/python -m py_compile apps/Data/Tests/test_duckdb_publish.py
+          .data-venv/bin/python -m py_compile apps/Data/Tests/test_calc_formula_corpus.py
 
       - name: Run worker integration checks
         env:
@@ -62,6 +63,7 @@ jobs:
         run: |
           .data-venv/bin/python apps/Data/Tests/test_workers.py
           .data-venv/bin/python apps/Data/Tests/test_duckdb_publish.py
+          .data-venv/bin/python apps/Data/Tests/test_calc_formula_corpus.py
 
       - name: Run .NET-to-worker integration checks
         env:
