@@ -355,12 +355,6 @@ void PresentEngine::saveAs(
     }
 }
 
-std::string PresentEngine::presentationInfo() const
-{
-    impl_->requireDocument();
-    return impl_->takeString(impl_->document->getPresentationInfo());
-}
-
 void PresentEngine::setEventCallback(EventCallback callback)
 {
     impl_->eventCallback = std::move(callback);
