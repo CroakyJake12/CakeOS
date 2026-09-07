@@ -6,6 +6,7 @@ build/
 cache/
 **/bin/
 **/obj/
+**/.dart_tool/
 *.iso
 *.qcow2
 *.vdi
