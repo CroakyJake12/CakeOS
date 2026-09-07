@@ -101,6 +101,17 @@ try
     Assert(aggregate.Result.Columns.SequenceEqual(["total"]), "DuckDB aggregate column metadata was not returned through .NET.");
     Assert(aggregate.Result.Rows.Count == 1 && aggregate.Result.Rows[0][0] == "62", "DuckDB did not aggregate the Calc-published values through the .NET boundary.");
 
+    var materializedAggregate = await queries.MaterializeAsync(opened.Workbook.Id, aggregate, "Query Result");
+    Assert(materializedAggregate.DataRowCount == 1, "The .NET query materialiser reported the wrong data row count.");
+    var aggregateSheet = await spreadsheet.ReadRangeAsync(opened.Workbook.Id, materializedAggregate.Range);
+    Assert(aggregateSheet.Values.Count == 2 && aggregateSheet.Values[0][0] == "total" && aggregateSheet.Values[1][0] == "62",
+        "DuckDB aggregate was not materialized into Calc through the .NET boundary.");
+
+    var formulaLookingQuery = await queries.ExecuteAsync("SELECT '=1+1' AS literal", maxRows: 20);
+    var literalMaterialization = await queries.MaterializeAsync(opened.Workbook.Id, formulaLookingQuery, "Literal Result");
+    var literalSheet = await spreadsheet.ReadRangeAsync(opened.Workbook.Id, literalMaterialization.Range);
+    Assert(literalSheet.Values[1][0] == "=1+1", "Formula-looking DuckDB output was executed instead of materialized as literal Calc text.");
+
     await grid.SaveAsAsync(savedOds);
     Assert(File.Exists(savedOds) && new FileInfo(savedOds).Length > 0, "Calc save-as through .NET did not produce an ODS file.");
     await queries.CloseAsync();
@@ -108,9 +119,20 @@ try
 
     var reopened = await grid.OpenAsync(savedOds, readOnly: true);
     Assert(reopened.Grid.Values[3][0] == "Total" && reopened.Grid.Values[3][1] == "62", "Saved ODS did not preserve the .NET-edited formula after reopen.");
+    var reopenedSheets = await spreadsheet.ListSheetsAsync(reopened.Workbook.Id);
+    Assert(reopenedSheets.Any(sheet => sheet.Name == "Query Result") && reopenedSheets.Any(sheet => sheet.Name == "Literal Result"),
+        "Saved ODS did not preserve materialized query-result sheets.");
+    var reopenedAggregate = await spreadsheet.ReadRangeAsync(
+        reopened.Workbook.Id,
+        new DataRangeRequest("Query Result", 0, 0, 2, 1));
+    Assert(reopenedAggregate.Values[1][0] == "62", "Saved ODS changed the materialized aggregate result.");
+    var reopenedLiteral = await spreadsheet.ReadRangeAsync(
+        reopened.Workbook.Id,
+        new DataRangeRequest("Literal Result", 0, 0, 2, 1));
+    Assert(reopenedLiteral.Values[1][0] == "=1+1", "Saved ODS converted literal query output into a formula.");
     await grid.CloseAsync();
 
-    Console.WriteLine("Haven Data .NET-to-worker runtime integration checks passed.");
+    Console.WriteLine("Haven Data .NET-to-worker bidirectional runtime integration checks passed.");
 }
 finally
 {
