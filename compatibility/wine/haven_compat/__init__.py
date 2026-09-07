@@ -8,13 +8,16 @@ this code.
 from .broker import CompatibilityBroker, CompatibilityError
 from .lifecycle import LifecycleError, UnitStatus, UserSystemdSupervisor, unit_name
 from .manifest import AppManifest, ManifestError
+from .registry import AppRegistry, RegistryError
 
 __all__ = [
     "AppManifest",
+    "AppRegistry",
     "CompatibilityBroker",
     "CompatibilityError",
     "LifecycleError",
     "ManifestError",
+    "RegistryError",
     "UnitStatus",
     "UserSystemdSupervisor",
     "unit_name",
