@@ -182,6 +182,18 @@ jobs:
           grep -q '^structure_inventory=passed$' /tmp/present-structure.log
           grep -q '^structure_text=Alpha$' /tmp/present-structure.log
 
+      - name: Probe semantic text transform history
+        run: |
+          rm -f \
+            /tmp/cakeos-present-text-updated.odp \
+            /tmp/cakeos-present-text-undo.odp \
+            /tmp/cakeos-present-text-undo-redo.odp
+          build/present-engine/cakeos-present-text-history-probe \
+            /tmp/cakeos-present-normalized/cakeos-present-reorder-source.odp \
+            /tmp/cakeos-present-text-updated.odp \
+            /tmp/cakeos-present-text-undo.odp | tee /tmp/present-text-history.log
+          grep -q '^text_transform=passed$' /tmp/present-text-history.log
+
       - name: Prove framed HUI worker protocol
         run: |
           rm -f \
