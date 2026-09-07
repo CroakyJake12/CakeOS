@@ -65,6 +65,7 @@ jobs:
           .data-venv/bin/python -m py_compile apps/Data/Tests/test_calc_named_ranges.py
           .data-venv/bin/python -m py_compile apps/Data/Tests/test_calc_validation.py
           .data-venv/bin/python -m py_compile apps/Data/Tests/test_calc_sort.py
+          .data-venv/bin/python -m py_compile apps/Data/Tests/test_calc_filter.py
 
       - name: Run worker integration checks
         env:
@@ -78,6 +79,7 @@ jobs:
           .data-venv/bin/python apps/Data/Tests/test_calc_named_ranges.py
           .data-venv/bin/python apps/Data/Tests/test_calc_validation.py
           .data-venv/bin/python apps/Data/Tests/test_calc_sort.py
+          .data-venv/bin/python apps/Data/Tests/test_calc_filter.py
 
       - name: Run .NET-to-worker integration checks
         env:
