@@ -10,6 +10,10 @@ from typing import Any
 from worker_protocol_smoke import WorkerClient, require_semantic_mutation_events
 
 
+def checkpoint(name: str) -> None:
+    print(f"selection_checkpoint={name}", flush=True)
+
+
 def find_ref(response: dict[str, Any], expected_text: str) -> str:
     result = response.get("result", {})
     if result.get("referenceStability") != "snapshot-only":
@@ -94,15 +98,18 @@ def main() -> int:
                 raise RuntimeError(f"worker is missing selection capability {capability}")
         if "elementSelectionChanged" not in hello["result"]["events"]:
             raise RuntimeError("worker does not advertise the stable selection event")
+        checkpoint("hello")
 
         opened, _ = client.require_ok("open", path=str(source))
         if [slide["name"] for slide in opened["result"]["slides"]] != ["Alpha", "Beta", "Gamma"]:
             raise RuntimeError("selection fixture did not open with the expected slide order")
+        checkpoint("fixture_open")
 
         inventory, payload = client.require_ok("listElements", slideIndex=0)
         if payload:
             raise RuntimeError("listElements unexpectedly returned binary data")
         alpha_ref = find_ref(inventory, "Alpha")
+        checkpoint("inventory")
 
         # Clear any open/render events before testing selection correlation.
         client.require_ok("listSlides")
@@ -113,10 +120,12 @@ def main() -> int:
             raise RuntimeError("selectElement unexpectedly returned binary data")
         if selected["result"].get("ref") != alpha_ref or selected["result"].get("selected") is not True:
             raise RuntimeError(f"selectElement returned invalid metadata: {selected}")
+        checkpoint("select_response")
 
         client.require_ok("listSlides")
         selection_events = client.take_events()
         first_geometry = selected_event(selection_events, alpha_ref)
+        checkpoint("selection_geometry")
 
         cleared, payload = client.require_ok("clearElementSelection")
         if payload or cleared["result"].get("selected") is not False:
@@ -124,16 +133,19 @@ def main() -> int:
         client.require_ok("listSlides")
         clear_events = client.take_events()
         require_cleared(clear_events, alpha_ref, "explicitClear")
+        checkpoint("explicit_clear")
 
         # Re-select, then mutate the document. The worker must invalidate both
         # the saved snapshot and its snapshot-scoped live selection.
         client.require_ok("selectElement", ref=alpha_ref)
         client.require_ok("listSlides")
         selected_event(client.take_events(), alpha_ref)
+        checkpoint("reselection_geometry")
 
         moved, _ = client.require_ok("moveSlide", fromIndex=0, toIndex=2)
         if [slide["name"] for slide in moved["result"]["slides"]] != ["Beta", "Gamma", "Alpha"]:
             raise RuntimeError("selection mutation did not reorder the fixture")
+        checkpoint("move")
 
         stale, stale_payload = client.request("selectElement", ref=alpha_ref)
         if stale.get("ok") or stale_payload:
@@ -141,20 +153,27 @@ def main() -> int:
         stale_message = str(stale.get("error", {}).get("message", ""))
         if "stale" not in stale_message or "save" not in stale_message:
             raise RuntimeError(f"worker did not explain stale selection ref: {stale}")
+        checkpoint("stale_rejected")
+
         mutation_events = client.take_events()
         require_cleared(mutation_events, alpha_ref, "documentMutation")
         require_semantic_mutation_events(mutation_events, "moveSlide")
+        checkpoint("mutation_events")
 
         client.require_ok("saveAs", path=str(output), format="odp")
         if not output.exists() or output.stat().st_size == 0:
             raise RuntimeError("selection test did not persist reordered output")
+        checkpoint("save")
 
         refreshed, _ = client.require_ok("listElements", slideIndex=0)
         beta_ref = find_ref(refreshed, "Beta")
+        checkpoint("refreshed_inventory")
+
         client.require_ok("selectElement", ref=beta_ref)
         client.require_ok("listSlides")
         refreshed_events = client.take_events()
         selected_event(refreshed_events, beta_ref)
+        checkpoint("refreshed_geometry")
 
         rect = first_geometry["data"]["rectTwips"]
         print("worker_element_selection=passed")
@@ -165,6 +184,7 @@ def main() -> int:
             "worker_selection_rect_twips="
             f"{rect['x']},{rect['y']},{rect['width']},{rect['height']}"
         )
+        checkpoint("complete")
         return 0
     finally:
         client.close()
