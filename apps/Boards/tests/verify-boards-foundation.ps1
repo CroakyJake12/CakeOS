@@ -12,6 +12,7 @@ $huiProject = Join-Path $boards 'hui/CakeOS.Apps.Boards.Hui.csproj'
 $huiTestProject = Join-Path $boards 'hui-tests/CakeOS.Apps.Boards.Hui.Tests.csproj'
 $huiTests = Join-Path $boards 'hui-tests/HavenBoardsHuiSceneTests.cs'
 $harness = Join-Path $boards 'appflowy_poc/lib/main.dart'
+$flutterTests = Join-Path $boards 'appflowy_poc/test/appflowy_board_poc_test.dart'
 $testProject = Join-Path $boards 'tests/CakeOS.Apps.Boards.Tests.csproj'
 $contractTests = Join-Path $boards 'tests/HavenBoardContractTests.cs'
 
@@ -26,6 +27,7 @@ $required = @(
     $huiTestProject,
     $huiTests,
     $harness,
+    $flutterTests,
     $testProject,
     $contractTests
 )
@@ -99,6 +101,17 @@ if ($storeText -match 'HttpClient|WebSocket|https?://') {
 $harnessText = Get-Content -LiteralPath $harness -Raw
 if ($harnessText -notmatch 'package:appflowy_board/appflowy_board.dart') {
     throw 'Flutter proof harness is not using appflowy-board.'
+}
+if ($harnessText -notmatch 'this\.enablePersistence\s*=\s*true') {
+    throw 'Flutter proof harness must keep local persistence enabled by default.'
+}
+
+$flutterTestsText = Get-Content -LiteralPath $flutterTests -Raw
+if ($flutterTestsText -notmatch 'HavenBoardsPocApp\(enablePersistence:\s*false\)') {
+    throw 'Flutter widget tests must disable filesystem persistence and test UI behavior deterministically.'
+}
+if ($flutterTestsText -notmatch 'find\.byType\(AppFlowyBoard\)') {
+    throw 'Flutter widget tests must prove the real AppFlowy Board is mounted.'
 }
 
 $testProjectText = Get-Content -LiteralPath $testProject -Raw
