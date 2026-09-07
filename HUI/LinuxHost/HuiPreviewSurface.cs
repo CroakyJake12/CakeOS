@@ -360,8 +360,8 @@ public sealed class HuiPreviewSurface : Control, IHavenMeasureContext, IDisposab
         _canvasDocumentBounds = frame.Bounds;
         if (!_canvasViewportInitialized)
         {
-            _canvasViewportCenterX = frame.Bounds.X;
-            _canvasViewportCenterY = frame.Bounds.Y;
+            _canvasViewportCenterX = Math.Clamp(0d, frame.Bounds.X, frame.Bounds.X + frame.Bounds.Width);
+            _canvasViewportCenterY = Math.Clamp(0d, frame.Bounds.Y, frame.Bounds.Y + frame.Bounds.Height);
             _canvasViewportInitialized = true;
         }
         previous?.Dispose();
