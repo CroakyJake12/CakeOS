@@ -18,8 +18,14 @@ permissions:
 
 jobs:
   verify:
-    name: Build and worker integration
-    runs-on: ubuntu-24.04
+    name: Build and worker integration (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os:
+          - ubuntu-24.04
+          - ubuntu-26.04
+    runs-on: ${{ matrix.os }}
     timeout-minutes: 20
 
     steps:
