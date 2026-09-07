@@ -19,12 +19,14 @@ find_package(nlohmann_json 3.2.0 REQUIRED)
 include(CheckCXXSourceCompiles)
 set(CMAKE_REQUIRED_INCLUDES ${LIBREOFFICEKIT_INCLUDE_DIR})
 set(CMAKE_REQUIRED_DEFINITIONS -DLOK_USE_UNSTABLE_API)
-check_cxx_source_compiles([[ 
+check_cxx_source_compiles([[
 #include <LibreOfficeKit/LibreOfficeKit.hxx>
 int main()
 {
-    auto method = &lok::Office::extractDocumentStructureRequest;
-    (void)method;
+    auto extractMethod = &lok::Office::extractDocumentStructureRequest;
+    auto freeMethod = &lok::Office::freeMemory;
+    (void)extractMethod;
+    (void)freeMethod;
     return 0;
 }
 ]] CAKEOS_PRESENT_HAS_STRUCTURE_REQUEST)
@@ -52,8 +54,14 @@ target_include_directories(cakeos-present-engine
         ${LIBREOFFICEKIT_INCLUDE_DIR}
 )
 
-target_compile_definitions(cakeos-present-engine PRIVATE LOK_USE_UNSTABLE_API)
-target_link_libraries(cakeos-present-engine PRIVATE ${CMAKE_DL_LIBS})
+target_compile_definitions(cakeos-present-engine PRIVATE
+    LOK_USE_UNSTABLE_API
+    CAKEOS_PRESENT_HAS_STRUCTURE_REQUEST=$<BOOL:${CAKEOS_PRESENT_HAS_STRUCTURE_REQUEST}>
+)
+target_link_libraries(cakeos-present-engine PRIVATE
+    ${CMAKE_DL_LIBS}
+    nlohmann_json::nlohmann_json
+)
 cakeos_enable_strict_warnings(cakeos-present-engine)
 
 add_executable(cakeos-present-worker
