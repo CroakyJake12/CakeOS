@@ -77,8 +77,13 @@ try
     var applied = await grid.ApplyListValidationAsync(1, 1, 2, 1, ["Open", "Closed", "Pending"], allowBlank: false);
     Assert(applied.Enabled && applied.Values.SequenceEqual(["Open", "Closed", "Pending"]) && !applied.AllowBlank,
         "DataGridSession did not apply the requested validation through Calc.");
-    Assert(await grid.GetListValidationAsync(1, 1, 2, 1) == applied,
-        "DataGridSession did not read back the Calc validation rule.");
+    var readBack = await grid.GetListValidationAsync(1, 1, 2, 1);
+    Assert(
+        readBack.Range == applied.Range &&
+        readBack.Enabled == applied.Enabled &&
+        readBack.Values.SequenceEqual(applied.Values) &&
+        readBack.AllowBlank == applied.AllowBlank,
+        "DataGridSession did not read back the Calc validation rule semantically.");
 
     _ = await grid.InsertRowsAsync(0);
     var shiftedRow = await grid.GetListValidationAsync(2, 1, 2, 1);
