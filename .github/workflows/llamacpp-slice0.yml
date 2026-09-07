@@ -115,6 +115,8 @@ jobs:
 
   package-runtime-amd64:
     runs-on: ubuntu-latest
+    outputs:
+      package_required: ${{ steps.package_scope.outputs.required }}
     steps:
       - name: Checkout CakeOS packaging branch
         uses: actions/checkout@v4
@@ -321,6 +323,7 @@ jobs:
   installed-package-runtime-proof:
     runs-on: ubuntu-latest
     needs: package-runtime-amd64
+    if: ${{ needs['package-runtime-amd64'].outputs.package_required == 'true' }}
     timeout-minutes: 10
     steps:
       - name: Checkout CakeOS proof harness

@@ -28,6 +28,14 @@ class InstalledPackageProofContractTests(unittest.TestCase):
         package_scope = WORKFLOW.split('id: package_scope', 1)[1].split('Checkout pinned upstream llama.cpp', 1)[0]
         self.assertIn('.github/workflows/llamacpp-slice0.yml', package_scope)
 
+    def test_installed_proof_is_gated_by_same_run_package_output(self) -> None:
+        package_section = WORKFLOW.split('package-runtime-amd64:', 1)[1].split('real-cpu-inference-proof:', 1)[0]
+        self.assertIn('outputs:', package_section)
+        self.assertIn("package_required: ${{ steps.package_scope.outputs.required }}", package_section)
+        installed_section = WORKFLOW.split('installed-package-runtime-proof:', 1)[1]
+        self.assertIn("needs: package-runtime-amd64", installed_section)
+        self.assertIn("needs['package-runtime-amd64'].outputs.package_required == 'true'", installed_section)
+
     def test_artifact_verifier_rejects_install_side_effects_before_dpkg(self) -> None:
         self.assertIn('dpkg-deb --control', VERIFIER)
         for forbidden in ('preinst', 'postinst', 'prerm', 'postrm', 'config', 'triggers'):
