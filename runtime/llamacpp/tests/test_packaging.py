@@ -45,6 +45,13 @@ class PackagingTests(unittest.TestCase):
         self.assertNotIn("systemctl start", builder)
         self.assertIn("libgcc-s1", builder)
 
+    def test_builder_normalizes_debian_archive_root_mode(self) -> None:
+        builder = (REPOSITORY / "packaging/llamacpp/build-deb.sh").read_text(encoding="utf-8")
+        self.assertIn('chmod 0755 "$STAGE"', builder)
+        verifier = (REPOSITORY / "packaging/llamacpp/verify-installable-deb.sh").read_text(encoding="utf-8")
+        self.assertIn('drwxr-xr-x', verifier)
+        self.assertIn('Package root directory must be mode 0755', verifier)
+
 
 if __name__ == "__main__":
     unittest.main()

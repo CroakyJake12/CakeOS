@@ -6,6 +6,10 @@ GGUF. This script deliberately performs no network I/O. It validates the file,
 imports it through the production model manager, starts the production broker,
 loads the real pinned llama-server worker over AF_UNIX, performs one short
 streamed chat completion, unloads the worker, and writes prompt-free evidence.
+
+By default the proof uses the repository source tree. Installed-package mode is
+explicit and verifies dpkg ownership before exercising the installed modelctl,
+broker, and llama-server paths.
 """
 from __future__ import annotations
 
@@ -28,6 +32,11 @@ RUNTIME = pathlib.Path(__file__).resolve().parents[1]
 LOCK_PATH = RUNTIME / "test-model.lock.json"
 MODEL_ID = "ci-smollm2-135m"
 REQUEST_ID = "real-ci-proof-1"
+PACKAGE_NAME = "haven-llamacpp-runtime"
+INSTALLED_MODELCTL = pathlib.Path("/usr/bin/haven-modelctl")
+INSTALLED_BROKER = pathlib.Path("/usr/lib/haven/inference/broker.py")
+INSTALLED_LLAMA_SERVER = pathlib.Path("/usr/lib/haven/llama.cpp/llama-server")
+INSTALLED_UNIT = pathlib.Path("/usr/lib/systemd/user/haven-inference-broker.service")
 
 
 class ProofError(RuntimeError):
@@ -53,13 +62,20 @@ def _load_lock() -> dict[str, Any]:
     return value
 
 
-def _hash_regular_file(path: pathlib.Path) -> tuple[str, int]:
+def _require_regular_file(path: pathlib.Path, label: str, *, executable: bool = False) -> pathlib.Path:
     try:
         info = path.lstat()
     except OSError as exc:
-        raise ProofError(f"cannot stat model file: {exc}") from exc
+        raise ProofError(f"cannot stat {label}: {exc}") from exc
     if not stat.S_ISREG(info.st_mode) or path.is_symlink():
-        raise ProofError("real-runtime proof model must be a regular non-symlink file")
+        raise ProofError(f"{label} must be a regular non-symlink file: {path}")
+    if executable and not os.access(path, os.X_OK):
+        raise ProofError(f"{label} is not executable: {path}")
+    return path
+
+
+def _hash_regular_file(path: pathlib.Path) -> tuple[str, int]:
+    _require_regular_file(path, "real-runtime proof model")
     digest = hashlib.sha256()
     total = 0
     with path.open("rb") as handle:
@@ -67,6 +83,55 @@ def _hash_regular_file(path: pathlib.Path) -> tuple[str, int]:
             digest.update(chunk)
             total += len(chunk)
     return digest.hexdigest(), total
+
+
+def _installed_package_state(
+    modelctl_path: pathlib.Path,
+    broker_path: pathlib.Path,
+    llama_server: pathlib.Path,
+) -> str:
+    expected = {
+        str(INSTALLED_MODELCTL),
+        str(INSTALLED_BROKER),
+        str(INSTALLED_LLAMA_SERVER),
+        str(INSTALLED_UNIT),
+    }
+    supplied = {str(modelctl_path), str(broker_path), str(llama_server)}
+    if supplied != {str(INSTALLED_MODELCTL), str(INSTALLED_BROKER), str(INSTALLED_LLAMA_SERVER)}:
+        raise ProofError("installed-package proof must use the canonical installed CakeOS runtime paths")
+
+    state = subprocess.run(
+        ["dpkg-query", "-W", "-f=${Status}\t${Version}", PACKAGE_NAME],
+        check=False,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        timeout=10,
+    )
+    if state.returncode != 0:
+        raise ProofError(f"{PACKAGE_NAME} is not installed: {state.stderr.strip()}")
+    try:
+        status, version = state.stdout.strip().split("\t", 1)
+    except ValueError as exc:
+        raise ProofError("dpkg returned an unexpected package-state record") from exc
+    if status != "install ok installed" or not version:
+        raise ProofError(f"unexpected dpkg state for {PACKAGE_NAME}: {state.stdout.strip()}")
+
+    listing = subprocess.run(
+        ["dpkg-query", "-L", PACKAGE_NAME],
+        check=False,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        timeout=10,
+    )
+    if listing.returncode != 0:
+        raise ProofError(f"cannot list installed files for {PACKAGE_NAME}: {listing.stderr.strip()}")
+    owned = {line.strip() for line in listing.stdout.splitlines() if line.strip()}
+    missing = sorted(expected - owned)
+    if missing:
+        raise ProofError(f"installed package does not own required runtime paths: {', '.join(missing)}")
+    return version
 
 
 def _request(
@@ -158,32 +223,41 @@ def _stop_broker(process: subprocess.Popen[bytes]) -> None:
         process.wait(timeout=3)
 
 
-def _broker_log_tail(log_path: pathlib.Path, limit: int = 8192) -> str:
-    try:
-        data = log_path.read_bytes()
-    except OSError:
-        return ""
-    return data[-limit:].decode("utf-8", errors="replace")
-
-
 def run() -> dict[str, Any]:
     lock = _load_lock()
     model_raw = os.environ.get("HAVEN_REAL_MODEL_PATH", "").strip()
     server_raw = os.environ.get("HAVEN_LLAMA_SERVER", "").strip()
     output_raw = os.environ.get("HAVEN_RUNTIME_PROOF_OUTPUT", "").strip()
+    proof_surface = os.environ.get("HAVEN_PROOF_SURFACE", "source-tree").strip()
+    modelctl_raw = os.environ.get("HAVEN_MODELCTL_EXECUTABLE", "").strip()
+    broker_raw = os.environ.get("HAVEN_BROKER_SCRIPT", "").strip()
     if not model_raw or not server_raw or not output_raw:
         raise ProofError("HAVEN_REAL_MODEL_PATH, HAVEN_LLAMA_SERVER, and HAVEN_RUNTIME_PROOF_OUTPUT are required")
+    if proof_surface not in {"source-tree", "installed-package"}:
+        raise ProofError("HAVEN_PROOF_SURFACE must be 'source-tree' or 'installed-package'")
+    if proof_surface == "installed-package" and (not modelctl_raw or not broker_raw):
+        raise ProofError("installed-package proof requires HAVEN_MODELCTL_EXECUTABLE and HAVEN_BROKER_SCRIPT")
 
     model_path = pathlib.Path(model_raw)
-    llama_server = pathlib.Path(server_raw)
+    llama_server = _require_regular_file(pathlib.Path(server_raw), "llama-server", executable=True)
     output_path = pathlib.Path(output_raw)
+    modelctl_path = pathlib.Path(modelctl_raw) if modelctl_raw else RUNTIME / "modelctl.py"
+    broker_path = pathlib.Path(broker_raw) if broker_raw else RUNTIME / "broker.py"
+    _require_regular_file(modelctl_path, "modelctl", executable=bool(modelctl_raw))
+    _require_regular_file(broker_path, "broker")
+
+    package_version: str | None = None
+    if proof_surface == "installed-package":
+        package_version = _installed_package_state(modelctl_path, broker_path, llama_server)
+        modelctl_command = [str(modelctl_path)]
+    else:
+        modelctl_command = [sys.executable, str(modelctl_path)]
+
     digest, size = _hash_regular_file(model_path)
     if digest != str(lock["sha256"]):
         raise ProofError(f"model SHA-256 mismatch: expected {lock['sha256']}, got {digest}")
     if size != int(lock["size"]):
         raise ProofError(f"model size mismatch: expected {lock['size']}, got {size}")
-    if not llama_server.is_file() or not os.access(llama_server, os.X_OK):
-        raise ProofError(f"pinned llama-server is not executable: {llama_server}")
 
     with tempfile.TemporaryDirectory(prefix="haven-real-runtime-") as temp_name:
         root = pathlib.Path(temp_name)
@@ -207,8 +281,7 @@ def run() -> dict[str, Any]:
 
         import_result = subprocess.run(
             [
-                sys.executable,
-                str(RUNTIME / "modelctl.py"),
+                *modelctl_command,
                 "--model-root", str(model_root),
                 "--runtime-dir", str(runtime_dir),
                 "import", str(model_path),
@@ -243,7 +316,7 @@ def run() -> dict[str, Any]:
         try:
             with log_path.open("wb") as broker_log:
                 broker_process = subprocess.Popen(
-                    [sys.executable, str(RUNTIME / "broker.py")],
+                    [sys.executable, str(broker_path)],
                     stdin=subprocess.DEVNULL,
                     stdout=broker_log,
                     stderr=subprocess.STDOUT,
@@ -326,11 +399,24 @@ def run() -> dict[str, Any]:
         if not unloaded:
             raise ProofError("real model did not complete the unload path")
 
+        runtime_surface: dict[str, Any] = {
+            "kind": proof_surface,
+            "systemdManaged": False,
+            "installedPackagePathsVerified": proof_surface == "installed-package",
+        }
+        if package_version is not None:
+            runtime_surface.update({
+                "package": PACKAGE_NAME,
+                "packageVersion": package_version,
+                "pathsOwnedByPackage": True,
+            })
+
         evidence = {
             "schemaVersion": 1,
-            "proofType": "real-model-cpu-inference-ci",
+            "proofType": "installed-package-real-model-cpu-inference-ci" if proof_surface == "installed-package" else "real-model-cpu-inference-ci",
             "provider": "llamacpp",
             "providerKey": str(lock["providerKey"]),
+            "runtimeSurface": runtime_surface,
             "upstream": {
                 "llamaCppTag": "v0.4.0",
                 "llamaCppCommit": "5266f24da75dc449bd56cbed7addb9c8e4a6a73e",
@@ -373,6 +459,7 @@ def run() -> dict[str, Any]:
                 "gpuRuntimeProven": False,
                 "productionModelBenchmarked": False,
                 "modelPackagedOrUploaded": False,
+                "systemdManagedRuntimeProven": False,
             },
         }
         output_path.parent.mkdir(parents=True, exist_ok=True)

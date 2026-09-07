@@ -40,6 +40,9 @@ STAGE=$(mktemp -d "$OUTPUT_DIR/.haven-llamacpp-stage.XXXXXX")
 cleanup() { rm -rf "$STAGE"; }
 trap cleanup EXIT HUP INT TERM
 umask 022
+# mktemp intentionally creates private 0700 directories. Debian archives also
+# encode the staging root as './', so normalize it before package assembly.
+chmod 0755 "$STAGE"
 
 mkdir -p \
   "$STAGE/DEBIAN" \

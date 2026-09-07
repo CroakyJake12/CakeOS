@@ -59,6 +59,8 @@ jobs:
         run: sh -n packaging/bin/haven-modelctl
       - name: Validate Debian package builder syntax
         run: sh -n packaging/llamacpp/build-deb.sh
+      - name: Validate installable Debian verifier syntax
+        run: sh -n packaging/llamacpp/verify-installable-deb.sh
 
   build-pinned-llamacpp-cpu:
     runs-on: ubuntu-latest
@@ -113,6 +115,8 @@ jobs:
 
   package-runtime-amd64:
     runs-on: ubuntu-latest
+    outputs:
+      package_required: ${{ steps.package_scope.outputs.required }}
     steps:
       - name: Checkout CakeOS packaging branch
         uses: actions/checkout@v4
@@ -129,6 +133,7 @@ jobs:
           if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
             echo 'required=true' >> "$GITHUB_OUTPUT"
           elif git -C cakeos diff --quiet "$BASE_SHA" "$HEAD_SHA" -- \
+              .github/workflows/llamacpp-slice0.yml \
               packaging/bin/haven-modelctl \
               packaging/systemd/user/haven-inference-broker.service \
               packaging/llamacpp \
@@ -180,6 +185,7 @@ jobs:
         run: |
           deb=$(find package-out -maxdepth 1 -type f -name '*.deb' -print -quit)
           test -n "$deb"
+          sh cakeos/packaging/llamacpp/verify-installable-deb.sh "$deb"
           test "$(dpkg-deb --field "$deb" Package)" = 'haven-llamacpp-runtime'
           test "$(dpkg-deb --field "$deb" Architecture)" = 'amd64'
           dpkg-deb --contents "$deb" | tee package-out/contents.txt
@@ -288,10 +294,13 @@ jobs:
           value = json.loads(Path('real-runtime-evidence.json').read_text())
           checks = value['checks']
           assert all(checks.values()), checks
+          assert value['runtimeSurface']['kind'] == 'source-tree'
+          assert value['runtimeSurface']['systemdManaged'] is False
           assert value['claimBoundaries']['approvedVmRuntimeProven'] is False
           assert value['claimBoundaries']['gpuRuntimeProven'] is False
           assert value['claimBoundaries']['productionModelBenchmarked'] is False
           assert value['claimBoundaries']['modelPackagedOrUploaded'] is False
+          assert value['claimBoundaries']['systemdManagedRuntimeProven'] is False
           serialized = json.dumps(value).lower()
           assert 'reply with one word' not in serialized
           assert 'generatedtext' not in serialized
@@ -310,3 +319,101 @@ jobs:
         run: |
           MODEL_PATH="$RUNNER_TEMP/SmolLM2-135M-Instruct-Q4_K_M.gguf"
           rm -f "$MODEL_PATH"
+
+  installed-package-runtime-proof:
+    runs-on: ubuntu-latest
+    needs: package-runtime-amd64
+    if: ${{ needs['package-runtime-amd64'].outputs.package_required == 'true' }}
+    timeout-minutes: 10
+    steps:
+      - name: Checkout CakeOS proof harness
+        uses: actions/checkout@v4
+        with:
+          path: cakeos
+      - name: Download same-run package artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: haven-llamacpp-runtime-amd64
+          path: installed-package-artifact
+      - name: Verify checksum and install package on ephemeral runner
+        shell: bash
+        run: |
+          set -euo pipefail
+          DEB=$(find installed-package-artifact -maxdepth 1 -type f -name '*.deb' -print -quit)
+          test -n "$DEB"
+          SHA_FILE="$DEB.sha256"
+          test -f "$SHA_FILE"
+          (cd "$(dirname "$DEB")" && sha256sum -c "$(basename "$SHA_FILE")")
+          sh cakeos/packaging/llamacpp/verify-installable-deb.sh "$DEB"
+          test "$(dpkg-deb --field "$DEB" Package)" = 'haven-llamacpp-runtime'
+          test "$(dpkg-deb --field "$DEB" Architecture)" = 'amd64'
+          sudo dpkg -i "$DEB"
+          test "$(dpkg-query -W -f='${Status}' haven-llamacpp-runtime)" = 'install ok installed'
+          test -x /usr/bin/haven-modelctl
+          test -f /usr/lib/haven/inference/broker.py
+          test -x /usr/lib/haven/llama.cpp/llama-server
+          test -f /usr/lib/systemd/user/haven-inference-broker.service
+          grep -F '"--offline"' /usr/lib/haven/inference/broker.py
+          /usr/lib/haven/llama.cpp/llama-server --version
+          test ! -e /var/lib/dpkg/info/haven-llamacpp-runtime.postinst
+          if [[ -d "$HOME/.config/systemd/user" ]] && find "$HOME/.config/systemd/user" -type l -name 'haven-inference-broker.service' -print -quit | grep -q .; then
+            echo 'Package unexpectedly enabled the user service.' >&2
+            exit 1
+          fi
+      - name: Download and independently verify pinned CI model
+        shell: bash
+        run: |
+          set -euo pipefail
+          MODEL_PATH="$RUNNER_TEMP/SmolLM2-135M-Instruct-Q4_K_M.gguf"
+          URL=$(/usr/bin/python3 -c "import json; print(json.load(open('cakeos/runtime/llamacpp/test-model.lock.json'))['downloadUrl'])")
+          EXPECTED_SIZE=$(/usr/bin/python3 -c "import json; print(json.load(open('cakeos/runtime/llamacpp/test-model.lock.json'))['size'])")
+          EXPECTED_SHA=$(/usr/bin/python3 -c "import json; print(json.load(open('cakeos/runtime/llamacpp/test-model.lock.json'))['sha256'])")
+          curl --fail --location --retry 3 --retry-all-errors --proto '=https' --tlsv1.2 --output "$MODEL_PATH" "$URL"
+          test "$(stat -c '%s' "$MODEL_PATH")" = "$EXPECTED_SIZE"
+          printf '%s  %s\n' "$EXPECTED_SHA" "$MODEL_PATH" | sha256sum -c -
+      - name: Run real model through installed package paths
+        env:
+          HAVEN_PROOF_SURFACE: installed-package
+          HAVEN_REAL_MODEL_PATH: ${{ runner.temp }}/SmolLM2-135M-Instruct-Q4_K_M.gguf
+          HAVEN_MODELCTL_EXECUTABLE: /usr/bin/haven-modelctl
+          HAVEN_BROKER_SCRIPT: /usr/lib/haven/inference/broker.py
+          HAVEN_LLAMA_SERVER: /usr/lib/haven/llama.cpp/llama-server
+          HAVEN_RUNTIME_PROOF_OUTPUT: ${{ github.workspace }}/installed-package-runtime-evidence.json
+        run: /usr/bin/python3 cakeos/runtime/llamacpp/tests/real_runtime_proof.py
+      - name: Validate installed-package proof evidence
+        run: |
+          /usr/bin/python3 - <<'PY'
+          import json
+          from pathlib import Path
+          value = json.loads(Path('installed-package-runtime-evidence.json').read_text())
+          assert value['proofType'] == 'installed-package-real-model-cpu-inference-ci'
+          assert all(value['checks'].values()), value['checks']
+          surface = value['runtimeSurface']
+          assert surface['kind'] == 'installed-package'
+          assert surface['installedPackagePathsVerified'] is True
+          assert surface['pathsOwnedByPackage'] is True
+          assert surface['package'] == 'haven-llamacpp-runtime'
+          assert surface['systemdManaged'] is False
+          assert value['claimBoundaries']['approvedVmRuntimeProven'] is False
+          assert value['claimBoundaries']['gpuRuntimeProven'] is False
+          assert value['claimBoundaries']['productionModelBenchmarked'] is False
+          assert value['claimBoundaries']['modelPackagedOrUploaded'] is False
+          assert value['claimBoundaries']['systemdManagedRuntimeProven'] is False
+          serialized = json.dumps(value).lower()
+          assert 'reply with one word' not in serialized
+          assert 'generatedtext' not in serialized
+          PY
+      - name: Upload installed-package evidence only
+        uses: actions/upload-artifact@v4
+        with:
+          name: haven-llamacpp-installed-package-proof
+          path: installed-package-runtime-evidence.json
+          if-no-files-found: error
+          retention-days: 14
+      - name: Remove CI model and installed package
+        if: always()
+        shell: bash
+        run: |
+          MODEL_PATH="$RUNNER_TEMP/SmolLM2-135M-Instruct-Q4_K_M.gguf"
+          rm -f "$MODEL_PATH"
+          sudo dpkg -r haven-llamacpp-runtime || true
