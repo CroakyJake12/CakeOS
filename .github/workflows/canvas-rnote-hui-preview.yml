@@ -1,0 +1,184 @@
+name: Canvas Rnote HUI graphical preview
+
+on:
+  push:
+    branches:
+      - integration/canvas-rnote-hui-preview
+    paths:
+      - 'apps/canvas/rnote-poc/**'
+      - 'HUI/**'
+      - 'tests/verify-hui-preview.sh'
+      - '.github/workflows/canvas-rnote-hui-preview.yml'
+  workflow_dispatch:
+
+concurrency:
+  group: canvas-rnote-hui-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  graphical-canvas:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 35
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout isolated integration branch
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+          submodules: false
+
+      - name: Set up .NET 10
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.0.x
+
+      - name: Install Rust 1.92
+        uses: dtolnay/rust-toolchain@1.92.0
+
+      - name: Install native and graphical validation dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            build-essential \
+            cmake \
+            pkg-config \
+            libglib2.0-dev \
+            libcairo2-dev \
+            libpango1.0-dev \
+            librsvg2-dev \
+            jq \
+            xvfb \
+            imagemagick \
+            openbox \
+            xdotool \
+            x11-utils
+
+      - name: Stage pinned HUI source
+        run: |
+          bash tests/verify-hui-preview.sh
+          bash HUI/stage-donor.sh
+          bash tests/verify-hui-preview.sh
+
+      - name: Validate headless Rnote dependency boundary
+        shell: bash
+        run: |
+          cargo generate-lockfile --manifest-path apps/canvas/rnote-poc/Cargo.toml
+          cargo tree --manifest-path apps/canvas/rnote-poc/Cargo.toml | tee /tmp/canvas-rnote-tree.txt
+          if grep -E '(^|[[:space:]])(gtk4|libadwaita)[[:space:]]' /tmp/canvas-rnote-tree.txt; then
+            echo 'Canvas Rnote core unexpectedly depends on GTK4 or Libadwaita.' >&2
+            exit 1
+          fi
+
+      - name: Build and test Canvas native bridge
+        run: |
+          cargo build --manifest-path apps/canvas/rnote-poc/Cargo.toml --lib --verbose
+          cargo test --manifest-path apps/canvas/rnote-poc/Cargo.toml --all-targets --verbose -- --nocapture
+          native=apps/canvas/rnote-poc/target/debug/libcakeos_canvas_rnote_poc.so
+          test -f "$native"
+          ldd "$native" | tee /tmp/canvas-native-dependencies.txt
+          if grep -Ei 'gtk|libadwaita' /tmp/canvas-native-dependencies.txt; then
+            echo 'Canvas native bridge unexpectedly links GTK or Libadwaita.' >&2
+            exit 1
+          fi
+          if grep -q 'not found' /tmp/canvas-native-dependencies.txt; then
+            echo 'Canvas native bridge has unresolved native dependencies.' >&2
+            exit 1
+          fi
+
+      - name: Build HUI Linux host with Canvas adapter
+        run: bash HUI/build-linux-host.sh
+
+      - name: Check HUI host native closure
+        run: |
+          app=artifacts/hui-linux-host/publish/cakeos-hui-linux-preview
+          ldd "$app" | tee /tmp/canvas-hui-host-dependencies.txt
+          if grep -q 'not found' /tmp/canvas-hui-host-dependencies.txt; then
+            echo 'Canvas HUI host has unresolved native dependencies.' >&2
+            exit 1
+          fi
+
+      - name: Run Canvas through HUI and capture real window
+        shell: bash
+        run: |
+          mkdir -p artifacts/canvas-rnote-hui
+          set +e
+          xvfb-run -a -s '-screen 0 1280x800x24' bash -c '
+            set +e
+            openbox > artifacts/canvas-rnote-hui/openbox.log 2>&1 &
+            wm_pid=$!
+            export CAKEOS_HUI_CANVAS_PREVIEW=1
+            export CAKEOS_HUI_PREVIEW_SELF_TEST=1
+            export CAKEOS_HUI_PREVIEW_AUTO_EXIT_MS=12000
+            export LD_LIBRARY_PATH="$GITHUB_WORKSPACE/apps/canvas/rnote-poc/target/debug${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+            artifacts/hui-linux-host/publish/cakeos-hui-linux-preview > artifacts/canvas-rnote-hui/window.log 2>&1 &
+            pid=$!
+
+            window_id=""
+            for attempt in $(seq 1 120); do
+              window_id=$(xdotool search --pid "$pid" --onlyvisible 2>/dev/null | head -n 1)
+              if test -z "$window_id"; then
+                window_id=$(xdotool search --name "CakeOS HUI Canvas / Rnote Preview" 2>/dev/null | head -n 1)
+              fi
+              if test -n "$window_id"; then break; fi
+              if ! kill -0 "$pid" 2>/dev/null; then break; fi
+              sleep 0.1
+            done
+
+            xwininfo -root -tree > artifacts/canvas-rnote-hui/x11-window-tree.txt 2>&1 || true
+
+            if test -n "$window_id"; then
+              xdotool windowmap "$window_id" >/dev/null 2>&1
+              xdotool windowraise "$window_id" >/dev/null 2>&1 || true
+              sleep 1
+              import -window "$window_id" artifacts/canvas-rnote-hui/window.png
+              screenshot_status=$?
+              printf "%s\n" "$window_id" > artifacts/canvas-rnote-hui/window-id.txt
+            else
+              screenshot_status=20
+              printf "%s\n" "window-not-found" > artifacts/canvas-rnote-hui/window-id.txt
+            fi
+
+            wait "$pid"
+            app_status=$?
+            kill "$wm_pid" >/dev/null 2>&1 || true
+            printf "%s\n" "$app_status" > artifacts/canvas-rnote-hui/app-exit-code.txt
+            printf "%s\n" "$screenshot_status" > artifacts/canvas-rnote-hui/screenshot-exit-code.txt
+            if test "$app_status" -ne 0; then exit "$app_status"; fi
+            exit "$screenshot_status"
+          '
+          runtime_status=$?
+          set -e
+
+          test -e artifacts/canvas-rnote-hui/window.log || touch artifacts/canvas-rnote-hui/window.log
+          echo '--- application log ---'
+          cat artifacts/canvas-rnote-hui/window.log
+          echo '--- X11 window tree ---'
+          cat artifacts/canvas-rnote-hui/x11-window-tree.txt 2>/dev/null || true
+
+          grep -q 'CANVAS_RNOTE_HUI_RENDER_READY abi=1 format=svg coordinate=document' artifacts/canvas-rnote-hui/window.log
+          test -s artifacts/canvas-rnote-hui/window.png
+          identify artifacts/canvas-rnote-hui/window.png | tee artifacts/canvas-rnote-hui/screenshot-info.txt
+          cp /tmp/canvas-native-dependencies.txt artifacts/canvas-rnote-hui/native-bridge-dependencies.txt
+          cp /tmp/canvas-hui-host-dependencies.txt artifacts/canvas-rnote-hui/hui-host-dependencies.txt
+          echo "Runtime status: $runtime_status"
+          exit "$runtime_status"
+
+      - name: Upload Canvas HUI graphical evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: canvas-rnote-hui-graphical-preview
+          path: |
+            artifacts/canvas-rnote-hui/window.png
+            artifacts/canvas-rnote-hui/window.log
+            artifacts/canvas-rnote-hui/openbox.log
+            artifacts/canvas-rnote-hui/window-id.txt
+            artifacts/canvas-rnote-hui/x11-window-tree.txt
+            artifacts/canvas-rnote-hui/screenshot-info.txt
+            artifacts/canvas-rnote-hui/native-bridge-dependencies.txt
+            artifacts/canvas-rnote-hui/hui-host-dependencies.txt
+            artifacts/canvas-rnote-hui/app-exit-code.txt
+            artifacts/canvas-rnote-hui/screenshot-exit-code.txt
+          if-no-files-found: warn
