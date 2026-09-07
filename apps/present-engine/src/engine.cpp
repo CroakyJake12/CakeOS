@@ -350,7 +350,13 @@ void PresentEngine::moveSlide(int fromIndex, int toIndex)
         rawDocument->pClass->selectPart(rawDocument, index, 0);
     }
     rawDocument->pClass->selectPart(rawDocument, fromIndex, 1);
-    rawDocument->pClass->moveSelectedParts(rawDocument, toIndex, false);
+
+    // Impress MovePages() inserts the selected page(s) after a target in the
+    // current ordering. CakeOS exposes the more natural final zero-based index.
+    // Moving upward therefore targets the page immediately before toIndex;
+    // -1 is LibreOffice's sentinel for inserting before the first page.
+    const int impressTarget = toIndex < fromIndex ? toIndex - 1 : toIndex;
+    rawDocument->pClass->moveSelectedParts(rawDocument, impressTarget, false);
     impl_->document->setPart(toIndex);
 }
 
