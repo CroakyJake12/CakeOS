@@ -6,6 +6,59 @@
 
 namespace cakeos::present {
 
+namespace {
+
+const ElementSnapshot& requireSnapshotElement(
+    const std::vector<ElementSnapshot>& elements,
+    int objectIndex)
+{
+    const auto match = std::find_if(elements.begin(), elements.end(), [objectIndex](const ElementSnapshot& element) {
+        return element.objectIndex == objectIndex;
+    });
+    if (match == elements.end()) {
+        throw std::out_of_range("element reference does not exist in the saved presentation snapshot");
+    }
+    return *match;
+}
+
+} // namespace
+
+void PresentEngine::selectElement(
+    std::string_view snapshotPathOrUrl,
+    int slideIndex,
+    int objectIndex)
+{
+    if (!supportsElementSnapshots()) {
+        throw std::runtime_error(
+            "this LibreOfficeKit runtime does not support semantic element snapshots");
+    }
+    if (objectIndex < 0) {
+        throw std::out_of_range("object index must not be negative");
+    }
+
+    const auto elements = elementSnapshot(snapshotPathOrUrl, slideIndex);
+    (void)requireSnapshotElement(elements, objectIndex);
+    setCurrentSlide(slideIndex);
+    postUnoCommand(
+        ".uno:TransformDocumentStructure",
+        "{\"DataJson\":{\"type\":\"string\",\"value\":\"{\\\"Transforms\\\":{\\\"SlideCommands\\\":[{\\\"MarkObject\\\":" +
+            std::to_string(objectIndex) + "}]}}\"}}",
+        true);
+}
+
+void PresentEngine::clearElementSelection(int slideIndex, int objectIndex)
+{
+    if (objectIndex < 0) {
+        throw std::out_of_range("object index must not be negative");
+    }
+    setCurrentSlide(slideIndex);
+    postUnoCommand(
+        ".uno:TransformDocumentStructure",
+        "{\"DataJson\":{\"type\":\"string\",\"value\":\"{\\\"Transforms\\\":{\\\"SlideCommands\\\":[{\\\"UnMarkObject\\\":" +
+            std::to_string(objectIndex) + "}]}}\"}}",
+        true);
+}
+
 bool PresentEngine::replaceElementText(
     std::string_view snapshotPathOrUrl,
     int slideIndex,
@@ -25,18 +78,13 @@ bool PresentEngine::replaceElementText(
     }
 
     const auto elements = elementSnapshot(snapshotPathOrUrl, slideIndex);
-    const auto match = std::find_if(elements.begin(), elements.end(), [objectIndex](const ElementSnapshot& element) {
-        return element.objectIndex == objectIndex;
-    });
-    if (match == elements.end()) {
-        throw std::out_of_range("element reference does not exist in the saved presentation snapshot");
-    }
-    if (match->text.size() != 1U) {
+    const ElementSnapshot& match = requireSnapshotElement(elements, objectIndex);
+    if (match.text.size() != 1U) {
         throw std::logic_error(
             "whole-object text replacement currently requires exactly one text value; rich or multi-part text is not supported");
     }
 
-    const std::string beforeText = match->text.front();
+    const std::string beforeText = match.text.front();
     const std::string afterText(text);
     if (beforeText == afterText) {
         return false;
