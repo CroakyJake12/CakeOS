@@ -6,7 +6,7 @@
 
 namespace cakeos::present {
 
-void PresentEngine::replaceElementText(
+bool PresentEngine::replaceElementText(
     std::string_view snapshotPathOrUrl,
     int slideIndex,
     int objectIndex,
@@ -18,6 +18,10 @@ void PresentEngine::replaceElementText(
     }
     if (objectIndex < 0) {
         throw std::out_of_range("object index must not be negative");
+    }
+    if (text.find('\n') != std::string_view::npos || text.find('\r') != std::string_view::npos) {
+        throw std::invalid_argument(
+            "whole-object text replacement currently supports single-line plain text only");
     }
 
     const auto elements = elementSnapshot(snapshotPathOrUrl, slideIndex);
@@ -35,11 +39,12 @@ void PresentEngine::replaceElementText(
     const std::string beforeText = match->text.front();
     const std::string afterText(text);
     if (beforeText == afterText) {
-        return;
+        return false;
     }
 
     applyElementText(slideIndex, objectIndex, afterText);
     recordTextMutation(slideIndex, objectIndex, beforeText, afterText);
+    return true;
 }
 
 void PresentEngine::addSlideAfter(int slideIndex)
