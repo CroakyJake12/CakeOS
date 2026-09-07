@@ -1,0 +1,84 @@
+name: llama.cpp Slice 0
+
+on:
+  pull_request:
+    paths:
+      - 'runtime/llamacpp/**'
+      - 'packaging/systemd/user/haven-inference-broker.service'
+      - '.github/workflows/llamacpp-slice0.yml'
+      - 'havenos.lock'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test-runtime:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Compile Python sources
+        run: python -m compileall -q runtime/llamacpp
+      - name: Run unit tests
+        run: python -m unittest discover -s runtime/llamacpp/tests -v
+      - name: Check pinned provenance and build policy
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          lock = json.loads(Path('runtime/llamacpp/upstream.lock.json').read_text())
+          assert lock['tag'] == 'v0.4.0'
+          assert lock['commit'] == '5266f24da75dc449bd56cbed7addb9c8e4a6a73e'
+          assert lock['build']['target'] == 'llama-server'
+          flags = set(lock['build']['cmake'])
+          for required in {
+              '-DBUILD_SHARED_LIBS=OFF',
+              '-DLLAMA_BUILD_UI=OFF',
+              '-DLLAMA_USE_PREBUILT_UI=OFF',
+              '-DLLAMA_OPENSSL=OFF',
+              '-DLLAMA_SUBPROCESS=OFF',
+              '-DGGML_NATIVE=OFF',
+              '-DGGML_RPC=OFF',
+              '-DGGML_CUDA=OFF',
+              '-DGGML_HIP=OFF',
+              '-DGGML_VULKAN=OFF',
+              '-DGGML_SYCL=OFF',
+              '-DGGML_OPENCL=OFF',
+              '-DGGML_OPENVINO=OFF',
+          }:
+              assert required in flags, required
+          PY
+      - name: Validate shell recipe syntax
+        run: sh -n runtime/llamacpp/build-cpu.sh
+
+  build-pinned-llamacpp-cpu:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout CakeOS runtime branch
+        uses: actions/checkout@v4
+        with:
+          path: cakeos
+      - name: Checkout pinned upstream llama.cpp
+        uses: actions/checkout@v4
+        with:
+          repository: ggml-org/llama.cpp
+          ref: 5266f24da75dc449bd56cbed7addb9c8e4a6a73e
+          path: llama-src
+          fetch-depth: 1
+      - name: Verify exact upstream commit
+        run: test "$(git -C llama-src rev-parse HEAD)" = '5266f24da75dc449bd56cbed7addb9c8e4a6a73e'
+      - name: Build and smoke-test CPU runtime
+        env:
+          LLAMA_SOURCE: ${{ github.workspace }}/llama-src
+          LLAMA_BUILD_DIR: ${{ github.workspace }}/llama-build
+          LLAMA_BUILD_PARALLEL: '2'
+        run: sh cakeos/runtime/llamacpp/build-cpu.sh
+      - name: Record binary provenance
+        run: |
+          test -x llama-build/bin/llama-server
+          llama-build/bin/llama-server --version
+          sha256sum llama-build/bin/llama-server
+          ldd llama-build/bin/llama-server || true

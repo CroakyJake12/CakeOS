@@ -34,6 +34,12 @@
       "classification": "haven-native",
       "path": "apps",
       "migrationDonor": "CroakyJake12/HavenAI"
+    },
+    "local-inference-runtime": {
+      "classification": "haven-native",
+      "path": "runtime/llamacpp",
+      "upstream": "https://github.com/ggml-org/llama.cpp.git",
+      "upstreamRevision": "5266f24da75dc449bd56cbed7addb9c8e4a6a73e"
     }
   }
 }
