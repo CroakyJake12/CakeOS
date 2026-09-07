@@ -8,6 +8,7 @@ $contract = Join-Path $boards 'contract/HavenBoardContract.cs'
 $contractProject = Join-Path $boards 'contract/CakeOS.Apps.Boards.Contract.csproj'
 $store = Join-Path $boards 'contract/JsonFileHavenBoardStore.cs'
 $hui = Join-Path $boards 'hui/HavenBoardsHuiScene.cs'
+$huiSession = Join-Path $boards 'hui/HavenBoardsHuiSession.cs'
 $huiProject = Join-Path $boards 'hui/CakeOS.Apps.Boards.Hui.csproj'
 $huiTestProject = Join-Path $boards 'hui-tests/CakeOS.Apps.Boards.Hui.Tests.csproj'
 $huiTests = Join-Path $boards 'hui-tests/HavenBoardsHuiSceneTests.cs'
@@ -23,6 +24,7 @@ $required = @(
     $contractProject,
     $store,
     $hui,
+    $huiSession,
     $huiProject,
     $huiTestProject,
     $huiTests,
@@ -68,6 +70,21 @@ if ($huiText -notmatch 'SetState\(HavenElementState\.Disabled,\s*!enabled\)' -or
     throw 'HUI board controls must synchronize Enabled, accessibility, and Disabled state.'
 }
 
+$huiSessionText = Get-Content -LiteralPath $huiSession -Raw
+if ($huiSessionText -match 'HttpClient|WebSocket|https?://') {
+    throw 'Composed HUI session must remain local-only and contain no network dependency.'
+}
+if ($huiSessionText -notmatch 'Scene\.CommandRequested \+= OnSceneCommandRequested' -or
+    $huiSessionText -notmatch 'await _store\.SaveAsync\(updated' -or
+    $huiSessionText -notmatch 'Snapshot = updated') {
+    throw 'Composed HUI session must bind typed scene commands through durable storage.'
+}
+$sessionSaveIndex = $huiSessionText.IndexOf('await _store.SaveAsync(updated', [System.StringComparison]::Ordinal)
+$sessionPublishIndex = $huiSessionText.IndexOf('Snapshot = updated', [System.StringComparison]::Ordinal)
+if ($sessionSaveIndex -lt 0 -or $sessionPublishIndex -lt 0 -or $sessionSaveIndex -gt $sessionPublishIndex) {
+    throw 'Composed HUI session must persist a mutation before publishing it as the visible snapshot.'
+}
+
 $huiProjectText = Get-Content -LiteralPath $huiProject -Raw
 if ($huiProjectText -notmatch 'HavenUiProjectPath' -or
     $huiProjectText -notmatch 'RequireRealHavenUi' -or
@@ -88,6 +105,10 @@ $huiTestsText = Get-Content -LiteralPath $huiTests -Raw
 if ($huiTestsText -notmatch 'Disabled_keyboard_move_cannot_emit_command' -or
     $huiTestsText -notmatch 'Enabled_keyboard_move_emits_typed_neutral_command') {
     throw 'HUI tests must cover enabled and disabled keyboard command paths.'
+}
+if ($huiTestsText -notmatch 'Open_execute_dispose_reopen_preserves_durable_snapshot_and_scene' -or
+    $huiTestsText -notmatch 'Keyboard_scene_command_flushes_to_disk_and_survives_reopen') {
+    throw 'HUI tests must cover composed durable reopen and keyboard-originated persistence.'
 }
 
 $storeText = Get-Content -LiteralPath $store -Raw
