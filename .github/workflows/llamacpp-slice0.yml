@@ -1,0 +1,39 @@
+name: llama.cpp Slice 0
+
+on:
+  push:
+    branches:
+      - runtime/llamacpp-slice0
+  pull_request:
+    paths:
+      - 'runtime/llamacpp/**'
+      - 'packaging/systemd/user/haven-inference-broker.service'
+      - '.github/workflows/llamacpp-slice0.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  test-runtime:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Compile Python sources
+        run: python -m compileall -q runtime/llamacpp
+      - name: Run unit tests
+        run: python -m unittest discover -s runtime/llamacpp/tests -v
+      - name: Check pinned provenance
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          lock = json.loads(Path('runtime/llamacpp/upstream.lock.json').read_text())
+          assert lock['tag'] == 'v0.4.0'
+          assert lock['commit'] == '5266f24da75dc449bd56cbed7addb9c8e4a6a73e'
+          assert '-DGGML_RPC=OFF' in lock['build']['cmake']
+          PY
+      - name: Validate shell recipe syntax
+        run: sh -n runtime/llamacpp/build-cpu.sh
