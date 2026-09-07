@@ -21,6 +21,7 @@ using Json = nlohmann::json;
 constexpr std::uint32_t ProtocolVersion = 1;
 constexpr std::uint32_t MaxMetadataBytes = 1024U * 1024U;
 constexpr std::uint32_t MaxPayloadBytes = 64U * 1024U * 1024U;
+constexpr std::size_t MaxSemanticTextBytes = 256U * 1024U;
 constexpr int MaxRenderDimension = 4096;
 constexpr std::uint64_t MaxRenderPixels = 16U * 1024U * 1024U;
 constexpr std::size_t MaxQueuedEvents = 256U;
@@ -44,6 +45,11 @@ struct ElementSnapshotState {
         path.clear();
         fresh = false;
     }
+};
+
+struct ElementRef {
+    int slideIndex{};
+    int objectIndex{};
 };
 
 std::uint32_t decodeU32Le(const std::array<std::uint8_t, 8>& header, std::size_t offset)
@@ -179,6 +185,58 @@ std::optional<long> parseLong(std::string_view value)
         return std::nullopt;
     }
     return parsed;
+}
+
+std::optional<int> parseNonNegativeInt(std::string_view value)
+{
+    if (value.empty()) {
+        return std::nullopt;
+    }
+    int parsed = -1;
+    const auto result = std::from_chars(value.data(), value.data() + value.size(), parsed);
+    if (result.ec != std::errc{} || result.ptr != value.data() + value.size() || parsed < 0) {
+        return std::nullopt;
+    }
+    return parsed;
+}
+
+std::optional<ElementRef> parseElementRef(std::string_view value)
+{
+    constexpr std::string_view SlidePrefix{"slide:"};
+    constexpr std::string_view ObjectMarker{"/object:"};
+    if (value.rfind(SlidePrefix, 0) != 0) {
+        return std::nullopt;
+    }
+
+    const auto marker = value.find(ObjectMarker, SlidePrefix.size());
+    if (marker == std::string_view::npos) {
+        return std::nullopt;
+    }
+    const auto slideIndex = parseNonNegativeInt(
+        value.substr(SlidePrefix.size(), marker - SlidePrefix.size()));
+    const auto objectIndex = parseNonNegativeInt(
+        value.substr(marker + ObjectMarker.size()));
+    if (!slideIndex.has_value() || !objectIndex.has_value()) {
+        return std::nullopt;
+    }
+    return ElementRef{*slideIndex, *objectIndex};
+}
+
+void requireFreshElementSnapshot(
+    const cakeos::present::PresentEngine& engine,
+    const ElementSnapshotState& snapshot)
+{
+    if (!engine.isOpen()) {
+        throw std::logic_error("no presentation is open");
+    }
+    if (!engine.supportsElementSnapshots()) {
+        throw std::runtime_error(
+            "this LibreOfficeKit runtime does not support semantic element snapshots");
+    }
+    if (!snapshot.fresh || snapshot.path.empty()) {
+        throw std::runtime_error(
+            "element inventory is stale after unsaved mutations; save the presentation before using semantic element references");
+    }
 }
 
 std::vector<long> parseCommaSeparatedLongs(std::string_view payload)
@@ -332,17 +390,7 @@ Json elementListResult(
     const ElementSnapshotState& snapshot,
     int slideIndex)
 {
-    if (!engine.isOpen()) {
-        throw std::logic_error("no presentation is open");
-    }
-    if (!engine.supportsElementSnapshots()) {
-        throw std::runtime_error(
-            "this LibreOfficeKit runtime does not support semantic element snapshots");
-    }
-    if (!snapshot.fresh || snapshot.path.empty()) {
-        throw std::runtime_error(
-            "element inventory is stale after unsaved mutations; save the presentation before requesting listElements");
-    }
+    requireFreshElementSnapshot(engine, snapshot);
 
     // Validate against the live document as well as the saved snapshot.
     (void)engine.slideExtent(slideIndex);
@@ -383,6 +431,7 @@ Json helloResult(const cakeos::present::PresentEngine& engine)
     });
     if (engine.supportsElementSnapshots()) {
         capabilities.push_back("listElements");
+        capabilities.push_back("replaceElementText");
     }
 
     return Json{
@@ -453,6 +502,29 @@ int main()
                         engine,
                         elementSnapshot,
                         request.at("slideIndex").get<int>())));
+                } else if (operation == "replaceElementText") {
+                    requireFreshElementSnapshot(engine, elementSnapshot);
+                    const std::string ref = request.at("ref").get<std::string>();
+                    const auto elementRef = parseElementRef(ref);
+                    if (!elementRef.has_value()) {
+                        throw std::invalid_argument(
+                            "element ref must use the CakeOS snapshot format slide:<index>/object:<index>");
+                    }
+                    const std::string text = request.at("text").get<std::string>();
+                    if (text.size() > MaxSemanticTextBytes) {
+                        throw std::invalid_argument("replacement text exceeds the semantic text size limit");
+                    }
+                    engine.replaceElementText(
+                        elementSnapshot.path,
+                        elementRef->slideIndex,
+                        elementRef->objectIndex,
+                        text);
+                    elementSnapshot.fresh = false;
+                    writeFrame(std::cout, success(id, Json{
+                        {"ref", ref},
+                        {"snapshotFresh", false}
+                    }));
+                    queueMutationEvents(eventQueue, engine, operation);
                 } else if (operation == "slideExtent") {
                     const int slideIndex = request.at("slideIndex").get<int>();
                     const auto extent = engine.slideExtent(slideIndex);
