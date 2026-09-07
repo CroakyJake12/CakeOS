@@ -91,7 +91,9 @@ public sealed class HavenBoardFreeformContractTests
 
             Assert.NotNull(loaded);
             HavenBoardReducer.Validate(loaded);
-            Assert.Equal(snapshot.Freeform, loaded.Freeform);
+            Assert.NotNull(snapshot.Freeform);
+            Assert.NotNull(loaded.Freeform);
+            Assert.Equal(snapshot.Freeform.Items.ToArray(), loaded.Freeform.Items.ToArray());
         }
         finally
         {
