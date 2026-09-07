@@ -211,10 +211,19 @@ public sealed class HuiPreviewSurface : Control, IHavenMeasureContext
     {
         var maxWidth = double.IsFinite(layout.MaxWidth) ? Math.Max(1d, layout.MaxWidth) : 10000d;
         return new FormattedText(layout.Text, CultureInfo.CurrentCulture, FlowDirection.LeftToRight,
-            new Typeface(FontFamily.Default, layout.Italic ? FontStyle.Italic : FontStyle.Normal, new FontWeight(layout.FontWeight), FontStretch.Normal),
+            new Typeface(FontFamily.Default, layout.Italic ? FontStyle.Italic : FontStyle.Normal, Weight(layout.FontWeight), FontStretch.Normal),
             layout.FontSize <= 0 ? 14d : layout.FontSize, brush)
         { MaxTextWidth = maxWidth };
     }
+
+    private static FontWeight Weight(int weight) => weight switch
+    {
+        >= 800 => FontWeight.ExtraBold,
+        >= 700 => FontWeight.Bold,
+        >= 600 => FontWeight.SemiBold,
+        >= 500 => FontWeight.Medium,
+        _ => FontWeight.Normal,
+    };
 
     private static IBrush Brush(HavenBrush brush, double opacity)
     {
