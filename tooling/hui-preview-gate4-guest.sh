@@ -80,6 +80,29 @@ find_package() {
   return 1
 }
 
+export_evidence() {
+  local package_path="$1"
+  local evidence="$2"
+  local transfer_mount
+  transfer_mount="$(findmnt -rn -T "$package_path" -t vboxsf -o TARGET 2>/dev/null | head -n 1 || true)"
+  if [[ -z "$transfer_mount" ]]; then
+    echo 'Gate 4 evidence export failed: accepted package is not on a VirtualBox shared-folder mount.' >&2
+    return 1
+  fi
+  if [[ ! -w "$transfer_mount" ]]; then
+    echo "Gate 4 evidence export failed: shared-folder mount is not writable: $transfer_mount" >&2
+    return 1
+  fi
+
+  local export_root="$transfer_mount/cakeos-gate4-evidence"
+  local export_dir="$export_root/$(basename "$evidence")"
+  mkdir -p "$export_dir"
+  printf '%s\n' "$export_dir" > "$evidence/export-path.txt"
+  cp -a "$evidence/." "$export_dir/"
+  sync "$export_dir" 2>/dev/null || true
+  printf '%s\n' "$export_dir"
+}
+
 if [[ "$mode" == rollback ]]; then
   shell_ping
   if dpkg-query -W -f='${Status}' "$package_name" 2>/dev/null | grep -Fqx 'install ok installed'; then
@@ -148,7 +171,9 @@ if [[ "$mode" == probe ]]; then
   capture_platform_versions "$evidence/platform-after.txt"
   cmp "$evidence/platform-before.txt" "$evidence/platform-after.txt"
   printf 'probe=passed\npackage_sha256=%s\n' "$actual_sha256" > "$evidence/result.txt"
-  echo "Gate 4 rootless probe passed. Evidence: $evidence"
+  exported="$(export_evidence "$package_path" "$evidence")"
+  echo "Gate 4 rootless probe passed. Local evidence: $evidence"
+  echo "Exported evidence: $exported"
   exit 0
 fi
 
@@ -188,6 +213,8 @@ capture_platform_versions "$evidence/platform-after.txt"
 cmp "$evidence/platform-before.txt" "$evidence/platform-after.txt"
 printf 'install=passed\npackage_sha256=%s\ninstalled_version=%s\n' \
   "$actual_sha256" "$installed_version" > "$evidence/result.txt"
+exported="$(export_evidence "$package_path" "$evidence")"
 
-echo "Gate 4 install/runtime checks passed. Evidence: $evidence"
+echo "Gate 4 install/runtime checks passed. Local evidence: $evidence"
+echo "Exported evidence: $exported"
 echo "Rollback command: $0 rollback"
