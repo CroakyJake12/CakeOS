@@ -1,0 +1,111 @@
+name: One-shot Calc sort compatibility patch
+
+on:
+  push:
+    branches:
+      - data-calc-duckdb-first-slice
+    paths:
+      - '.github/workflows/data-sort-compat-patch.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: data-calc-duckdb-first-slice
+          fetch-depth: 0
+      - name: Patch published legacy and v2 Calc sort descriptors
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          path = Path('apps/Data/workers/calc_worker.py')
+          text = path.read_text(encoding='utf-8')
+          old = (
+              '        descriptor = list(cell_range.createSortDescriptor())\n'
+              '        sort_field = uno.createUnoStruct("com.sun.star.util.SortField")\n'
+              '        sort_field.Field = key\n'
+              '        sort_field.SortAscending = bool(ascending)\n'
+              '\n'
+              '        seen: set[str] = set()\n'
+              '        for item in descriptor:\n'
+              '            if item.Name == "SortFields":\n'
+              '                item.Value = (sort_field,)\n'
+              '                seen.add(item.Name)\n'
+              '            elif item.Name == "ContainsHeader":\n'
+              '                item.Value = bool(contains_header)\n'
+              '                seen.add(item.Name)\n'
+              '            elif item.Name == "SortColumns":\n'
+              '                item.Value = False\n'
+              '                seen.add(item.Name)\n'
+              '            elif item.Name == "IsCaseSensitive":\n'
+              '                item.Value = False\n'
+              '            elif item.Name == "BindFormatsToContent":\n'
+              '                item.Value = True\n'
+              '            elif item.Name == "CopyOutputData":\n'
+              '                item.Value = False\n'
+              '            elif item.Name == "IsUserListEnabled":\n'
+              '                item.Value = False\n'
+              '\n'
+              '        required = {"SortFields", "ContainsHeader", "SortColumns"}\n'
+              '        missing = required.difference(seen)\n'
+          )
+          new = (
+              '        descriptor = list(cell_range.createSortDescriptor())\n'
+              '        property_names = {str(item.Name) for item in descriptor}\n'
+              '        uses_v2 = "IsSortColumns" in property_names\n'
+              '        if uses_v2:\n'
+              '            sort_field = uno.createUnoStruct("com.sun.star.table.TableSortField")\n'
+              '            sort_field.Field = key\n'
+              '            sort_field.IsAscending = bool(ascending)\n'
+              '            sort_field.IsCaseSensitive = False\n'
+              '            sort_field.FieldType = uno.Enum("com.sun.star.table.TableSortFieldType", "AUTOMATIC")\n'
+              '            direction_property = "IsSortColumns"\n'
+              '        else:\n'
+              '            sort_field = uno.createUnoStruct("com.sun.star.util.SortField")\n'
+              '            sort_field.Field = key\n'
+              '            sort_field.SortAscending = bool(ascending)\n'
+              '            direction_property = "SortColumns"\n'
+              '\n'
+              '        seen: set[str] = set()\n'
+              '        for item in descriptor:\n'
+              '            if item.Name == "SortFields":\n'
+              '                item.Value = (sort_field,)\n'
+              '                seen.add(item.Name)\n'
+              '            elif item.Name == "ContainsHeader":\n'
+              '                item.Value = bool(contains_header)\n'
+              '                seen.add(item.Name)\n'
+              '            elif item.Name == direction_property:\n'
+              '                item.Value = False\n'
+              '                seen.add(item.Name)\n'
+              '            elif item.Name == "IsCaseSensitive":\n'
+              '                item.Value = False\n'
+              '            elif item.Name == "BindFormatsToContent":\n'
+              '                item.Value = True\n'
+              '            elif item.Name == "CopyOutputData":\n'
+              '                item.Value = False\n'
+              '            elif item.Name == "IsUserListEnabled":\n'
+              '                item.Value = False\n'
+              '\n'
+              '        required = {"SortFields", "ContainsHeader", direction_property}\n'
+              '        missing = required.difference(seen)\n'
+          )
+          if old not in text:
+              raise SystemExit('Calc sort descriptor patch anchor not found')
+          path.write_text(text.replace(old, new, 1), encoding='utf-8')
+          PY
+      - name: Commit compatibility patch and remove workflow
+        shell: bash
+        run: |
+          rm .github/workflows/data-sort-compat-patch.yml
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add apps/Data/workers/calc_worker.py .github/workflows/data-sort-compat-patch.yml
+          git diff --cached --check
+          git commit -m 'Support LibreOffice legacy and v2 Calc sort descriptors'
+          git push origin HEAD:data-calc-duckdb-first-slice
