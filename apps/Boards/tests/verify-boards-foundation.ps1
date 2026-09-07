@@ -7,6 +7,7 @@ $thirdParty = Join-Path $boards 'THIRD_PARTY.md'
 $contract = Join-Path $boards 'contract/HavenBoardContract.cs'
 $contractProject = Join-Path $boards 'contract/CakeOS.Apps.Boards.Contract.csproj'
 $store = Join-Path $boards 'contract/JsonFileHavenBoardStore.cs'
+$attachmentStore = Join-Path $boards 'contract/ContentAddressedHavenBoardAttachmentStore.cs'
 $hui = Join-Path $boards 'hui/HavenBoardsHuiScene.cs'
 $huiSession = Join-Path $boards 'hui/HavenBoardsHuiSession.cs'
 $huiProject = Join-Path $boards 'hui/CakeOS.Apps.Boards.Hui.csproj'
@@ -23,6 +24,7 @@ $required = @(
     $contract,
     $contractProject,
     $store,
+    $attachmentStore,
     $hui,
     $huiSession,
     $huiProject,
@@ -53,6 +55,9 @@ if ($thirdPartyText -notmatch 'MPL-?2\.0|Mozilla Public License 2\.0') {
 $contractText = Get-Content -LiteralPath $contract -Raw
 if ($contractText -match '(?mi)^\s*using\s+(AppFlowy|Avalonia)\b|package:(appflowy_board|flutter)') {
     throw 'Neutral Haven board contract contains a renderer/vendor import.'
+}
+if ($contractText -notmatch 'AddAttachmentCommand' -or $contractText -notmatch 'RemoveAttachmentCommand') {
+    throw 'Neutral Haven board contract must retain typed attachment metadata commands.'
 }
 
 $huiText = Get-Content -LiteralPath $hui -Raw
@@ -110,6 +115,9 @@ if ($huiTestsText -notmatch 'Open_execute_dispose_reopen_preserves_durable_snaps
     $huiTestsText -notmatch 'Keyboard_scene_command_flushes_to_disk_and_survives_reopen') {
     throw 'HUI tests must cover composed durable reopen and keyboard-originated persistence.'
 }
+if ($huiTestsText -notmatch 'Attachment_blob_metadata_and_hui_count_survive_reopen') {
+    throw 'HUI tests must cover attachment blob/metadata survival across reopen.'
+}
 
 $storeText = Get-Content -LiteralPath $store -Raw
 if ($storeText -notmatch '\.json\.bak' -or $storeText -notmatch 'flushToDisk:\s*true') {
@@ -117,6 +125,21 @@ if ($storeText -notmatch '\.json\.bak' -or $storeText -notmatch 'flushToDisk:\s*
 }
 if ($storeText -match 'HttpClient|WebSocket|https?://') {
     throw 'Local-first board store must not contain a network dependency.'
+}
+
+$attachmentStoreText = Get-Content -LiteralPath $attachmentStore -Raw
+if ($attachmentStoreText -match 'HttpClient|WebSocket|https?://') {
+    throw 'Attachment store must remain local-only and contain no network dependency.'
+}
+if ($attachmentStoreText -notmatch 'IncrementalHash\.CreateHash\(HashAlgorithmName\.SHA256\)' -or
+    $attachmentStoreText -notmatch 'ReferencePrefix = "sha256:"' -or
+    $attachmentStoreText -notmatch 'flushToDisk:\s*true') {
+    throw 'Attachment store must remain content-addressed and durably flushed.'
+}
+if ($attachmentStoreText -notmatch 'Path\.GetFileName' -or
+    $attachmentStoreText -notmatch 'DefaultMaxAttachmentBytes' -or
+    $attachmentStoreText -notmatch 'RejectLinkOrReparsePoint') {
+    throw 'Attachment store must retain display-name isolation, bounded imports, and link/reparse protection.'
 }
 
 $harnessText = Get-Content -LiteralPath $harness -Raw
@@ -138,6 +161,12 @@ if ($flutterTestsText -notmatch 'find\.byType\(AppFlowyBoard\)') {
 $testProjectText = Get-Content -LiteralPath $testProject -Raw
 if ($testProjectText -notmatch 'CakeOS\.Apps\.Boards\.Contract\.csproj' -or $testProjectText -notmatch 'xunit') {
     throw 'Executable contract test project is not wired to the board contract.'
+}
+
+$contractTestsText = Get-Content -LiteralPath $contractTests -Raw
+if ($contractTestsText -notmatch 'Import_is_content_addressed_deduplicated_and_display_name_cannot_escape_storage' -or
+    $contractTestsText -notmatch 'Existing_deduplicated_blob_must_still_match_its_digest') {
+    throw 'Contract tests must cover content-addressing/path isolation and tamper detection.'
 }
 
 Write-Host 'Haven Boards AppFlowy foundation static checks passed.'
