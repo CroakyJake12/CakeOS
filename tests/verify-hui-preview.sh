@@ -21,8 +21,14 @@ for package in "${expected[@]}"; do
 done
 
 if [[ -d "$root/HUI/vendor/Haven.UI" ]]; then
-  if grep -RIl --include='*.cs' --include='*.csproj' 'Avalonia' "$root/HUI/vendor/Haven.UI" | grep -q .; then
-    echo "Staged HUI core unexpectedly references Avalonia" >&2
+  # Documentation and comments may name Avalonia while describing the boundary.
+  # Reject only compile-time dependencies/usages in the platform-neutral HUI core.
+  if grep -RInE --include='*.cs' '(^|[[:space:]])using[[:space:]]+Avalonia([.;]|$)|Avalonia\.' "$root/HUI/vendor/Haven.UI" | grep -q .; then
+    echo "Staged HUI core contains an Avalonia C# dependency" >&2
+    exit 1
+  fi
+  if grep -RInE --include='*.csproj' '<(PackageReference|ProjectReference|Reference)[^>]*Include="[^"]*Avalonia[^"]*"' "$root/HUI/vendor/Haven.UI" | grep -q .; then
+    echo "Staged HUI core contains an Avalonia project/package reference" >&2
     exit 1
   fi
 fi
