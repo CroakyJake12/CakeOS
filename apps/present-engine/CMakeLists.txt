@@ -77,6 +77,17 @@ add_executable(cakeos-present-engine-mixed-history-smoke
 target_link_libraries(cakeos-present-engine-mixed-history-smoke PRIVATE cakeos-present-engine)
 cakeos_enable_strict_warnings(cakeos-present-engine-mixed-history-smoke)
 
+add_executable(cakeos-present-structure-probe
+    tests/structure_probe.cpp
+)
+target_include_directories(cakeos-present-structure-probe PRIVATE ${LIBREOFFICEKIT_INCLUDE_DIR})
+target_compile_definitions(cakeos-present-structure-probe PRIVATE LOK_USE_UNSTABLE_API)
+target_link_libraries(cakeos-present-structure-probe PRIVATE
+    cakeos-present-engine
+    nlohmann_json::nlohmann_json
+)
+cakeos_enable_strict_warnings(cakeos-present-structure-probe)
+
 enable_testing()
 add_executable(cakeos-present-engine-contract-tests
     tests/contract_tests.cpp
