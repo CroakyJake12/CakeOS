@@ -175,6 +175,13 @@ jobs:
           grep -q '^mixed_history=passed$' /tmp/present-mixed-history.log
           grep -q '^mixed_history_redo_branch=truncated$' /tmp/present-mixed-history.log
 
+      - name: Probe semantic slide object inventory
+        run: |
+          build/present-engine/cakeos-present-structure-probe \
+            /tmp/cakeos-present-normalized/cakeos-present-reorder-source.odp | tee /tmp/present-structure.log
+          grep -q '^structure_inventory=passed$' /tmp/present-structure.log
+          grep -q '^structure_text=Alpha$' /tmp/present-structure.log
+
       - name: Prove framed HUI worker protocol
         run: |
           rm -f \
