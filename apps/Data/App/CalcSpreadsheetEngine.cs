@@ -6,6 +6,8 @@ public sealed class CalcSpreadsheetEngine : IDataSpreadsheetEngine
     private const int MaximumMaterializedColumns = 256;
     private const int MaximumStructuralMutationCount = 100;
     private const int MaximumNamedRangeNameLength = 64;
+    private const int MaximumValidationValues = 50;
+    private const int MaximumValidationValueLength = 64;
 
     private readonly JsonLineWorkerClient _worker;
 
@@ -36,7 +38,7 @@ public sealed class CalcSpreadsheetEngine : IDataSpreadsheetEngine
     public Task<DataRangeSnapshot> ReadRangeAsync(string workbookId, DataRangeRequest range, CancellationToken cancellationToken = default)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(workbookId);
-        ArgumentNullException.ThrowIfNull(range);
+        ValidateBoundedRange(range, "Read range");
         return _worker.CallAsync<DataRangeSnapshot>("readRange", new { workbookId, range }, cancellationToken);
     }
 
@@ -84,7 +86,7 @@ public sealed class CalcSpreadsheetEngine : IDataSpreadsheetEngine
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(workbookId);
         ValidateNamedRangeName(name);
-        ValidateNamedRangeRequest(range);
+        ValidateBoundedRange(range, "Named range");
         return _worker.CallAsync<DataNamedRangeSummary>(
             "createNamedRange",
             new { workbookId, name = name.Trim(), range },
@@ -99,6 +101,48 @@ public sealed class CalcSpreadsheetEngine : IDataSpreadsheetEngine
             "deleteNamedRange",
             new { workbookId, name = name.Trim() },
             cancellationToken).ConfigureAwait(false);
+    }
+
+    public Task<DataListValidationState> GetListValidationAsync(
+        string workbookId,
+        DataRangeRequest range,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(workbookId);
+        ValidateBoundedRange(range, "Validation range");
+        return _worker.CallAsync<DataListValidationState>(
+            "getListValidation",
+            new { workbookId, range },
+            cancellationToken);
+    }
+
+    public Task<DataListValidationState> ApplyListValidationAsync(
+        string workbookId,
+        DataRangeRequest range,
+        IReadOnlyList<string> values,
+        bool allowBlank = true,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(workbookId);
+        ValidateBoundedRange(range, "Validation range");
+        var validatedValues = ValidateValidationValues(values);
+        return _worker.CallAsync<DataListValidationState>(
+            "applyListValidation",
+            new { workbookId, range, values = validatedValues, allowBlank },
+            cancellationToken);
+    }
+
+    public Task<DataListValidationState> ClearValidationAsync(
+        string workbookId,
+        DataRangeRequest range,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(workbookId);
+        ValidateBoundedRange(range, "Validation range");
+        return _worker.CallAsync<DataListValidationState>(
+            "clearValidation",
+            new { workbookId, range },
+            cancellationToken);
     }
 
     public Task InsertRowsAsync(string workbookId, string sheet, int index, int count, CancellationToken cancellationToken = default) =>
@@ -155,16 +199,38 @@ public sealed class CalcSpreadsheetEngine : IDataSpreadsheetEngine
             cancellationToken).ConfigureAwait(false);
     }
 
-    private static void ValidateNamedRangeRequest(DataRangeRequest range)
+    private static string[] ValidateValidationValues(IReadOnlyList<string> values)
+    {
+        ArgumentNullException.ThrowIfNull(values);
+        if (values.Count is < 1 or > MaximumValidationValues)
+            throw new ArgumentOutOfRangeException(nameof(values), $"List validation requires 1-{MaximumValidationValues} literal values.");
+
+        var result = new string[values.Count];
+        var seen = new HashSet<string>(StringComparer.Ordinal);
+        for (var index = 0; index < values.Count; index++)
+        {
+            var value = values[index] ?? throw new ArgumentException("Validation values cannot be null.", nameof(values));
+            if (value.Length is < 1 or > MaximumValidationValueLength)
+                throw new ArgumentException($"Validation values must contain 1-{MaximumValidationValueLength} characters.", nameof(values));
+            if (value.Any(char.IsControl) || value.Contains(';') || value.Contains('"'))
+                throw new ArgumentException("First-slice validation values cannot contain control characters, semicolons or double quotes.", nameof(values));
+            if (!seen.Add(value))
+                throw new ArgumentException("Duplicate validation values are not allowed in the first slice.", nameof(values));
+            result[index] = value;
+        }
+        return result;
+    }
+
+    private static void ValidateBoundedRange(DataRangeRequest range, string label)
     {
         ArgumentNullException.ThrowIfNull(range);
         ArgumentException.ThrowIfNullOrWhiteSpace(range.Sheet);
         if (range.StartRow < 0 || range.StartColumn < 0)
-            throw new ArgumentOutOfRangeException(nameof(range), "Named range coordinates cannot be negative.");
+            throw new ArgumentOutOfRangeException(nameof(range), $"{label} coordinates cannot be negative.");
         if (range.RowCount is < 1 or > MaximumMaterializedRows)
-            throw new ArgumentOutOfRangeException(nameof(range), $"Named ranges can contain 1-{MaximumMaterializedRows} rows in this slice.");
+            throw new ArgumentOutOfRangeException(nameof(range), $"{label} can contain 1-{MaximumMaterializedRows} rows in this slice.");
         if (range.ColumnCount is < 1 or > MaximumMaterializedColumns)
-            throw new ArgumentOutOfRangeException(nameof(range), $"Named ranges can contain 1-{MaximumMaterializedColumns} columns in this slice.");
+            throw new ArgumentOutOfRangeException(nameof(range), $"{label} can contain 1-{MaximumMaterializedColumns} columns in this slice.");
     }
 
     private static void ValidateNamedRangeName(string name)
