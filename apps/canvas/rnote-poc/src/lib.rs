@@ -1,4 +1,4 @@
-//! Read-only-migration-approved proof of concept for a renderer-neutral Rnote core.
+//! Approved migration proof of concept for a renderer-neutral Rnote core.
 //!
 //! This crate deliberately depends on `rnote-engine` with default features disabled.
 //! It must not enable Rnote's `ui` feature or depend on GTK/Libadwaita.
@@ -42,6 +42,23 @@ impl CanvasPointerSample {
 
     fn rnote_element(self) -> Element {
         Element::new(Vector2::new(self.x, self.y), self.pressure)
+    }
+}
+
+/// Stroke tools proven at the CakeOS-to-Rnote boundary.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum CanvasStrokeTool {
+    #[default]
+    Pen,
+    Eraser,
+}
+
+impl CanvasStrokeTool {
+    fn rnote_pen_mode(self) -> PenMode {
+        match self {
+            Self::Pen => PenMode::Pen,
+            Self::Eraser => PenMode::Eraser,
+        }
     }
 }
 
@@ -99,6 +116,7 @@ impl CanvasRenderFrame {
 pub struct HeadlessCanvasEngine {
     engine: Engine,
     stroke_active: bool,
+    stroke_tool: CanvasStrokeTool,
 }
 
 impl Default for HeadlessCanvasEngine {
@@ -115,13 +133,30 @@ impl HeadlessCanvasEngine {
         Self {
             engine,
             stroke_active: false,
+            stroke_tool: CanvasStrokeTool::Pen,
         }
     }
 
     fn send_pen_event(&mut self, event: PenEvent) {
-        let _ = self
-            .engine
-            .handle_pen_event(event, Some(PenMode::Pen), Instant::now());
+        let _ = self.engine.handle_pen_event(
+            event,
+            Some(self.stroke_tool.rnote_pen_mode()),
+            Instant::now(),
+        );
+    }
+
+    pub fn stroke_tool(&self) -> CanvasStrokeTool {
+        self.stroke_tool
+    }
+
+    /// Change the tool used by subsequent stroke events. Tool changes are kept
+    /// outside an active stroke so one gesture cannot change interpretation midway.
+    pub fn set_stroke_tool(&mut self, tool: CanvasStrokeTool) -> Result<()> {
+        if self.stroke_active {
+            anyhow::bail!("cannot change Canvas stroke tool while a stroke is active");
+        }
+        self.stroke_tool = tool;
+        Ok(())
     }
 
     /// Begin a freehand stroke. Device arbitration (mouse/touch/stylus/palm
@@ -277,6 +312,7 @@ impl HeadlessCanvasEngine {
         Ok(Self {
             engine,
             stroke_active: false,
+            stroke_tool: CanvasStrokeTool::Pen,
         })
     }
 
@@ -324,6 +360,7 @@ mod tests {
         canvas.begin_stroke(samples[0]).unwrap();
         assert!(canvas.stroke_active());
         assert!(canvas.begin_stroke(samples[1]).is_err());
+        assert!(canvas.set_stroke_tool(CanvasStrokeTool::Eraser).is_err());
         assert!(canvas.undo().is_err());
         assert!(canvas.redo().is_err());
 
@@ -368,6 +405,29 @@ mod tests {
     }
 
     #[test]
+    fn eraser_changes_rendered_content_and_is_undoable() {
+        block_on(async {
+            let samples = sample_stroke();
+            let mut canvas = HeadlessCanvasEngine::new();
+            assert_eq!(canvas.stroke_tool(), CanvasStrokeTool::Pen);
+            canvas.draw_stroke(&samples).unwrap();
+            let before_erase = canvas.render_frame().await.unwrap().bytes;
+
+            canvas.set_stroke_tool(CanvasStrokeTool::Eraser).unwrap();
+            assert_eq!(canvas.stroke_tool(), CanvasStrokeTool::Eraser);
+            canvas.begin_stroke(samples[2]).unwrap();
+            canvas.end_stroke(samples[2]).unwrap();
+
+            let after_erase = canvas.render_frame().await.unwrap().bytes;
+            assert_ne!(before_erase, after_erase, "eraser did not change rendered content");
+
+            assert!(canvas.undo().unwrap());
+            let after_undo = canvas.render_frame().await.unwrap().bytes;
+            assert_eq!(before_erase, after_undo, "undo did not restore erased content");
+        });
+    }
+
+    #[test]
     fn headless_engine_draws_exports_saves_and_reloads() {
         block_on(async {
             let mut canvas = HeadlessCanvasEngine::new();
@@ -383,6 +443,7 @@ mod tests {
 
             let restored = HeadlessCanvasEngine::from_rnote(native).await.unwrap();
             assert!(!restored.stroke_active());
+            assert_eq!(restored.stroke_tool(), CanvasStrokeTool::Pen);
             let svg_after = restored.export_svg().await.unwrap();
             assert!(svg_after.len() > 200, "reloaded SVG unexpectedly empty");
 
