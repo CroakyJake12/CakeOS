@@ -8,6 +8,7 @@ $boards = Split-Path -Parent $PSScriptRoot
 $repositoryRoot = Split-Path -Parent (Split-Path -Parent $boards)
 $sharedHuiCandidate = Join-Path $repositoryRoot 'HUI/Haven.UI/Haven.UI.csproj'
 $testProject = Join-Path $boards 'hui-tests/CakeOS.Apps.Boards.Hui.Tests.csproj'
+$generativeGate = Join-Path $PSScriptRoot 'verify-generative-board.ps1'
 
 if ([string]::IsNullOrWhiteSpace($HavenUiProjectPath)) {
     if (Test-Path -LiteralPath $sharedHuiCandidate -PathType Leaf) {
@@ -35,6 +36,11 @@ if ($huiProjectText -notmatch '<Project\s+Sdk="Microsoft\.NET\.Sdk"' -or
 if (-not (Test-Path -LiteralPath $testProject -PathType Leaf)) {
     throw "HUI scene test project is missing: $testProject"
 }
+if (-not (Test-Path -LiteralPath $generativeGate -PathType Leaf)) {
+    throw "Generative Boards safety gate is missing: $generativeGate"
+}
+
+& $generativeGate
 
 Write-Host "Testing Haven Boards against real HUI project: $resolvedHuiProject"
 & dotnet test $testProject --configuration Debug "-p:HavenUiProjectPath=$resolvedHuiProject"
