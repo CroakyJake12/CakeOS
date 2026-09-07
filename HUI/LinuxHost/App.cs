@@ -1,6 +1,7 @@
 using Avalonia;
 using Avalonia.Controls.ApplicationLifetimes;
 using Avalonia.Threading;
+using CakeOS.HuiLinuxHost.Canvas;
 
 namespace CakeOS.HuiLinuxHost;
 
@@ -10,6 +11,9 @@ public sealed class App : Application
     {
         if (ApplicationLifetime is IClassicDesktopStyleApplicationLifetime desktop)
         {
+            if (Environment.GetEnvironmentVariable("CAKEOS_HUI_CANVAS_PREVIEW") == "1")
+                CanvasManagedBoundaryProof.Run();
+
             var window = new PreviewWindow();
             desktop.MainWindow = window;
 
