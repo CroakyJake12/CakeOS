@@ -27,14 +27,19 @@ jobs:
       - name: Validate host PowerShell syntax
         shell: pwsh
         run: |
-          $errors = $null
-          [System.Management.Automation.Language.Parser]::ParseFile(
-            (Resolve-Path 'tooling/hui-preview-gate4-host.ps1'),
-            [ref]$null,
-            [ref]$errors) | Out-Null
-          if ($errors.Count -ne 0) {
-            $errors | ForEach-Object { Write-Error $_.Message }
-            exit 1
+          foreach ($path in @(
+            'tooling/hui-preview-gate4-host.ps1',
+            'tooling/hui-preview-gate4-verify.ps1'
+          )) {
+            $errors = $null
+            [System.Management.Automation.Language.Parser]::ParseFile(
+              (Resolve-Path $path),
+              [ref]$null,
+              [ref]$errors) | Out-Null
+            if ($errors.Count -ne 0) {
+              $errors | ForEach-Object { Write-Error "$path: $($_.Message)" }
+              exit 1
+            }
           }
 
       - name: Validate immutable Gate 4 identifiers
@@ -45,3 +50,67 @@ jobs:
           grep -Fq '34157071097' tooling/hui-preview-gate4-host.ps1
           grep -Fq '104f8ff3929b8b0e1c90673804d7cfbe79a31ea5c2763dc040246a7ead53575a' tooling/hui-preview-gate4-host.ps1
           grep -Fq '104f8ff3929b8b0e1c90673804d7cfbe79a31ea5c2763dc040246a7ead53575a' tooling/hui-preview-gate4-guest.sh
+          grep -Fq '104f8ff3929b8b0e1c90673804d7cfbe79a31ea5c2763dc040246a7ead53575a' tooling/hui-preview-gate4-verify.ps1
+          grep -Fq 'runtime_self_test=passed' tooling/hui-preview-gate4-guest.sh
+          grep -Fq 'platform_invariant=passed' tooling/hui-preview-gate4-guest.sh
+
+      - name: Exercise evidence verifier with accepted fixture
+        shell: pwsh
+        run: |
+          $root = Join-Path $env:RUNNER_TEMP 'gate4-evidence'
+          $probe = Join-Path $root '20260907T201500Z-probe'
+          $install = Join-Path $root '20260907T201600Z-install'
+          New-Item -ItemType Directory -Force -Path $probe, $install | Out-Null
+
+          $sha = '104f8ff3929b8b0e1c90673804d7cfbe79a31ea5c2763dc040246a7ead53575a'
+          $version = '0.1.0+git2a578502c319'
+          $package = 'haven-hui-preview_0.1.0+git2a578502c319_amd64.deb'
+          $platform = "gnome-shell=50.1-0ubuntu1.2`nmutter=50.1-0ubuntu2.2`ngdm3=50.1-0ubuntu0.1`n"
+          $session = "Name=jacob`nState=active`nType=wayland`nClass=user`nRemote=no`nDesktop=ubuntu`n"
+
+          foreach ($entry in @(
+            @{ Path = $probe; Mode = 'probe' },
+            @{ Path = $install; Mode = 'install' }
+          )) {
+            $dir = $entry.Path
+            $mode = $entry.Mode
+            "$sha  /media/sf_havenos-transfer/$package" | Set-Content -NoNewline (Join-Path $dir 'package.sha256')
+            $version | Set-Content -NoNewline (Join-Path $dir 'expected-version.txt')
+            $session | Set-Content -NoNewline (Join-Path $dir 'session.txt')
+            $platform | Set-Content -NoNewline (Join-Path $dir 'platform-before.txt')
+            $platform | Set-Content -NoNewline (Join-Path $dir 'platform-after.txt')
+            '' | Set-Content -NoNewline (Join-Path $dir 'preview.log')
+            "/media/sf_havenos-transfer/cakeos-gate4-evidence/$([IO.Path]::GetFileName($dir))" |
+              Set-Content -NoNewline (Join-Path $dir 'export-path.txt')
+
+            $result = @(
+              "$mode=passed",
+              'runtime_self_test=passed',
+              'platform_invariant=passed',
+              "package_sha256=$sha"
+            )
+            if ($mode -eq 'install') { $result += "installed_version=$version" }
+            ($result -join "`n") | Set-Content -NoNewline (Join-Path $dir 'result.txt')
+          }
+
+          & ./tooling/hui-preview-gate4-verify.ps1 -EvidenceRoot $root -RequireInstall | Out-Null
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: Prove evidence verifier rejects greeter evidence
+        shell: pwsh
+        run: |
+          $root = Join-Path $env:RUNNER_TEMP 'gate4-evidence'
+          $install = Join-Path $root '20260907T201600Z-install'
+          (Get-Content -LiteralPath (Join-Path $install 'session.txt') -Raw).Replace('Class=user', 'Class=greeter') |
+            Set-Content -NoNewline (Join-Path $install 'session.txt')
+
+          $failedAsExpected = $false
+          try {
+            & ./tooling/hui-preview-gate4-verify.ps1 -EvidenceRoot $root -RequireInstall | Out-Null
+          }
+          catch {
+            $failedAsExpected = $true
+          }
+          if (-not $failedAsExpected) {
+            throw 'Evidence verifier accepted greeter evidence.'
+          }
