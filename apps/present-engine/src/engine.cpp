@@ -183,7 +183,7 @@ struct PresentEngine::Impl {
             return {};
         }
         std::string value(raw);
-        office->freeMemory(raw);
+        office->freeError(raw);
         return value;
     }
 
