@@ -87,6 +87,28 @@ try
     var formula = await grid.EditCellAsync(3, 1, string.Empty, "=SUM(B2:B3)");
     Assert(formula.Grid.Values[3][1] == "62", $"Calc formula recalculation through .NET returned '{formula.Grid.Values[3][1]}' instead of 62.");
 
+    var rowInserted = await grid.InsertRowsAsync(1);
+    Assert(rowInserted.Grid.Values[2][0] == "Ada" && rowInserted.Grid.Values[4][1] == "62",
+        "DataGridSession row insertion did not shift workbook cells/formula through Calc.");
+    var shiftedRowEdit = await grid.EditCellAsync(2, 1, "43");
+    Assert(shiftedRowEdit.Grid.Values[4][1] == "63", "Shifted formula did not continue tracking its row dependency after insertion.");
+    var rowDeleted = await grid.DeleteRowsAsync(1);
+    Assert(rowDeleted.Grid.Values[1][0] == "Ada" && rowDeleted.Grid.Values[3][1] == "63",
+        "DataGridSession row deletion did not restore the shifted data/formula positions.");
+    var restoredRowValue = await grid.EditCellAsync(1, 1, "42");
+    Assert(restoredRowValue.Grid.Values[3][1] == "62", "Formula relationship was lost after row insert/delete round trip.");
+
+    var columnInserted = await grid.InsertColumnsAsync(1);
+    Assert(columnInserted.Grid.Values[1][2] == "42" && columnInserted.Grid.Values[3][2] == "62",
+        "DataGridSession column insertion did not shift workbook cells/formula through Calc.");
+    var shiftedColumnEdit = await grid.EditCellAsync(1, 2, "44");
+    Assert(shiftedColumnEdit.Grid.Values[3][2] == "64", "Shifted formula did not continue tracking its column dependency after insertion.");
+    var columnDeleted = await grid.DeleteColumnsAsync(1);
+    Assert(columnDeleted.Grid.Values[1][1] == "44" && columnDeleted.Grid.Values[3][1] == "64",
+        "DataGridSession column deletion did not restore the shifted data/formula positions.");
+    var restoredColumnValue = await grid.EditCellAsync(1, 1, "42");
+    Assert(restoredColumnValue.Grid.Values[3][1] == "62", "Formula relationship was lost after column insert/delete round trip.");
+
     var querySnapshot = await queries.OpenAsync(databasePath);
     Assert(querySnapshot.DatabasePath == databasePath, "The .NET DuckDB adapter did not open the requested database.");
     var published = await queries.PublishRangeAsync(
@@ -132,7 +154,7 @@ try
     Assert(reopenedLiteral.Values[1][0] == "=1+1", "Saved ODS converted literal query output into a formula.");
     await grid.CloseAsync();
 
-    Console.WriteLine("Haven Data .NET-to-worker bidirectional runtime integration checks passed.");
+    Console.WriteLine("Haven Data .NET-to-worker structural and bidirectional runtime integration checks passed.");
 }
 finally
 {
