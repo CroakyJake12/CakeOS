@@ -31,6 +31,7 @@ MAX_STRUCTURAL_MUTATION_COUNT = 100
 MAX_NAMED_RANGE_NAME_LENGTH = 64
 MAX_VALIDATION_VALUES = 50
 MAX_VALIDATION_VALUE_LENGTH = 64
+MAX_FILTER_VALUE_LENGTH = 256
 PORTABLE_SHEET_FORBIDDEN = set("[]:*?/\\")
 
 
@@ -103,6 +104,16 @@ def parse_literal_validation_formula(formula: str) -> list[str] | None:
             return None
         values.append(value)
     return values if values else None
+
+
+def filter_text_value(supplied_value: object) -> str:
+    if not isinstance(supplied_value, str):
+        raise ValueError("Filter value must be a string.")
+    if not 1 <= len(supplied_value) <= MAX_FILTER_VALUE_LENGTH:
+        raise ValueError(f"First-slice filter values must contain 1-{MAX_FILTER_VALUE_LENGTH} characters.")
+    if any(ord(character) < 32 or ord(character) == 127 for character in supplied_value):
+        raise ValueError("First-slice filter values cannot contain control characters.")
+    return supplied_value
 
 
 class CalcRuntime:
@@ -442,20 +453,72 @@ class CalcRuntime:
         document.calculateAll()
         return self.read_range(workbook_id, normalized)
 
+    def filter_equals(self, workbook_id: str, request: dict, key_column_offset: object, supplied_value: object, contains_header: bool) -> dict:
+        document = self._doc(workbook_id)
+        if bool(document.isReadonly()):
+            raise PermissionError("Workbook was opened read-only.")
+        _sheet, cell_range, normalized = self._bounded_cell_range(document, request, "Filter range")
+        key = int(key_column_offset)
+        if key < 0 or key >= normalized["columnCount"]:
+            raise ValueError("Filter key must identify a column inside the requested range.")
+        if contains_header and normalized["rowCount"] < 2:
+            raise ValueError("A filter range marked as containing a header must include at least one data row.")
+        value = filter_text_value(supplied_value)
+
+        descriptor = cell_range.createFilterDescriptor(True)
+        field = uno.createUnoStruct("com.sun.star.sheet.TableFilterField")
+        field.Connection = uno.Enum("com.sun.star.sheet.FilterConnection", "AND")
+        field.Field = key
+        field.Operator = uno.Enum("com.sun.star.sheet.FilterOperator", "EQUAL")
+        field.IsNumeric = False
+        field.NumericValue = 0.0
+        field.StringValue = value
+        descriptor.setFilterFields((field,))
+        descriptor.setPropertyValue("ContainsHeader", bool(contains_header))
+        descriptor.setPropertyValue("IsCaseSensitive", False)
+        descriptor.setPropertyValue("UseRegularExpressions", False)
+        descriptor.setPropertyValue("Orientation", uno.Enum("com.sun.star.table.TableOrientation", "ROWS"))
+        descriptor.setPropertyValue("CopyOutputData", False)
+        cell_range.filter(descriptor)
+        return self.read_range(workbook_id, normalized)
+
+    def clear_filter(self, workbook_id: str, request: dict, contains_header: bool) -> dict:
+        document = self._doc(workbook_id)
+        if bool(document.isReadonly()):
+            raise PermissionError("Workbook was opened read-only.")
+        _sheet, cell_range, normalized = self._bounded_cell_range(document, request, "Filter range")
+        if contains_header and normalized["rowCount"] < 2:
+            raise ValueError("A filter range marked as containing a header must include at least one data row.")
+
+        descriptor = cell_range.createFilterDescriptor(True)
+        descriptor.setFilterFields(())
+        descriptor.setPropertyValue("ContainsHeader", bool(contains_header))
+        descriptor.setPropertyValue("IsCaseSensitive", False)
+        descriptor.setPropertyValue("UseRegularExpressions", False)
+        descriptor.setPropertyValue("Orientation", uno.Enum("com.sun.star.table.TableOrientation", "ROWS"))
+        descriptor.setPropertyValue("CopyOutputData", False)
+        cell_range.filter(descriptor)
+        return self.read_range(workbook_id, normalized)
+
     def read_range(self, workbook_id: str, request: dict) -> dict:
         document = self._doc(workbook_id)
-        _sheet, cell_range, normalized = self._bounded_cell_range(document, request, "Requested range")
+        sheet, cell_range, normalized = self._bounded_cell_range(document, request, "Requested range")
         values: list[list[str]] = []
+        row_visibility: list[bool] = []
+        rows = sheet.getRows()
         for row in range(normalized["rowCount"]):
             current: list[str] = []
             for column in range(normalized["columnCount"]):
                 current.append(cell_range.getCellByPosition(column, row).getString())
             values.append(current)
+            row_object = rows.getByIndex(normalized["startRow"] + row)
+            row_visibility.append(bool(row_object.getPropertyValue("IsVisible")))
         return {
             "sheet": normalized["sheet"],
             "startRow": normalized["startRow"],
             "startColumn": normalized["startColumn"],
             "values": values,
+            "rowVisibility": row_visibility,
         }
 
     def set_cell(self, workbook_id: str, address: dict, value: str, formula: str) -> dict:
@@ -685,6 +748,20 @@ def serve() -> int:
                         params["range"],
                         params["keyColumnOffset"],
                         bool(params.get("ascending", True)),
+                        bool(params.get("containsHeader", True)),
+                    )
+                elif method == "filterEquals":
+                    result = runtime.filter_equals(
+                        params["workbookId"],
+                        params["range"],
+                        params["keyColumnOffset"],
+                        params["value"],
+                        bool(params.get("containsHeader", True)),
+                    )
+                elif method == "clearFilter":
+                    result = runtime.clear_filter(
+                        params["workbookId"],
+                        params["range"],
                         bool(params.get("containsHeader", True)),
                     )
                 elif method == "readRange":

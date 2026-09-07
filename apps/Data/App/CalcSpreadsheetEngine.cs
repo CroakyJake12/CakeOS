@@ -8,6 +8,7 @@ public sealed class CalcSpreadsheetEngine : IDataSpreadsheetEngine
     private const int MaximumNamedRangeNameLength = 64;
     private const int MaximumValidationValues = 50;
     private const int MaximumValidationValueLength = 64;
+    private const int MaximumFilterValueLength = 256;
 
     private readonly JsonLineWorkerClient _worker;
 
@@ -167,6 +168,43 @@ public sealed class CalcSpreadsheetEngine : IDataSpreadsheetEngine
         return new DataSortResult(range, keyColumnOffset, ascending, containsHeader, snapshot);
     }
 
+    public Task<DataRangeSnapshot> FilterEqualsAsync(
+        string workbookId,
+        DataRangeRequest range,
+        int keyColumnOffset,
+        string value,
+        bool containsHeader = true,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(workbookId);
+        ValidateBoundedRange(range, "Filter range");
+        if (keyColumnOffset < 0 || keyColumnOffset >= range.ColumnCount)
+            throw new ArgumentOutOfRangeException(nameof(keyColumnOffset), "Filter key must identify a column inside the requested range.");
+        if (containsHeader && range.RowCount < 2)
+            throw new ArgumentException("A filter range marked as containing a header must include at least one data row.", nameof(range));
+        var validatedValue = ValidateFilterValue(value);
+        return _worker.CallAsync<DataRangeSnapshot>(
+            "filterEquals",
+            new { workbookId, range, keyColumnOffset, value = validatedValue, containsHeader },
+            cancellationToken);
+    }
+
+    public Task<DataRangeSnapshot> ClearFilterAsync(
+        string workbookId,
+        DataRangeRequest range,
+        bool containsHeader = true,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(workbookId);
+        ValidateBoundedRange(range, "Filter range");
+        if (containsHeader && range.RowCount < 2)
+            throw new ArgumentException("A filter range marked as containing a header must include at least one data row.", nameof(range));
+        return _worker.CallAsync<DataRangeSnapshot>(
+            "clearFilter",
+            new { workbookId, range, containsHeader },
+            cancellationToken);
+    }
+
     public Task InsertRowsAsync(string workbookId, string sheet, int index, int count, CancellationToken cancellationToken = default) =>
         MutateStructureAsync("insertRows", workbookId, sheet, index, count, cancellationToken);
 
@@ -241,6 +279,16 @@ public sealed class CalcSpreadsheetEngine : IDataSpreadsheetEngine
             result[index] = value;
         }
         return result;
+    }
+
+    private static string ValidateFilterValue(string value)
+    {
+        ArgumentNullException.ThrowIfNull(value);
+        if (value.Length is < 1 or > MaximumFilterValueLength)
+            throw new ArgumentException($"First-slice filter values must contain 1-{MaximumFilterValueLength} characters.", nameof(value));
+        if (value.Any(char.IsControl))
+            throw new ArgumentException("First-slice filter values cannot contain control characters.", nameof(value));
+        return value;
     }
 
     private static void ValidateBoundedRange(DataRangeRequest range, string label)
