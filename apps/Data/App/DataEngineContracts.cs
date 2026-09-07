@@ -6,6 +6,8 @@ public sealed record DataRangeRequest(string Sheet, int StartRow, int StartColum
 public sealed record DataRangeSnapshot(string Sheet, int StartRow, int StartColumn, IReadOnlyList<IReadOnlyList<string>> Values);
 public sealed record DataSheetSummary(string Name, int Index);
 public sealed record DataWorkbookHandle(string Id, string Path, bool ReadOnly);
+public sealed record DataTableSnapshot(string Name, IReadOnlyList<string> Columns, IReadOnlyList<IReadOnlyList<string>> Rows);
+public sealed record DataPublishedTable(string Name, IReadOnlyList<string> Columns, int RowCount, DataRangeRequest SourceRange);
 public sealed record DataQueryResult(IReadOnlyList<string> Columns, IReadOnlyList<IReadOnlyList<string>> Rows, bool Truncated);
 
 public interface IDataSpreadsheetEngine : IAsyncDisposable
@@ -22,6 +24,7 @@ public interface IDataSpreadsheetEngine : IAsyncDisposable
 public interface IDataDatabaseEngine : IAsyncDisposable
 {
     Task OpenAsync(string databasePath, CancellationToken cancellationToken = default);
+    Task ReplaceTableAsync(DataTableSnapshot table, CancellationToken cancellationToken = default);
     Task<DataQueryResult> ExecuteReadOnlyAsync(string sql, int maxRows = 200, CancellationToken cancellationToken = default);
     Task CloseAsync(CancellationToken cancellationToken = default);
 }
