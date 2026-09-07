@@ -168,6 +168,17 @@ std::string makeDocumentTransformArguments(std::string_view commandName, int val
         jsonStringLiteral(transform) + "}}";
 }
 
+std::string makeDocumentTransformArguments(
+    std::string_view commandName,
+    std::string_view value)
+{
+    const std::string transform =
+        "{\"Transforms\":{\"SlideCommands\":[{" + jsonStringLiteral(commandName) + ":" +
+        jsonStringLiteral(value) + "}]}}";
+    return "{\"DataJson\":{\"type\":\"string\",\"value\":" +
+        jsonStringLiteral(transform) + "}}";
+}
+
 int toLokKeyType(KeyEventType type)
 {
     switch (type) {
@@ -271,13 +282,18 @@ std::optional<int> parseObjectIndex(std::string_view key)
 struct PresentEngine::Impl {
     enum class HistoryKind {
         Native,
-        Move
+        Move,
+        Text
     };
 
     struct HistoryEntry {
         HistoryKind kind{HistoryKind::Native};
         int fromIndex{};
         int toIndex{};
+        int slideIndex{};
+        int objectIndex{};
+        std::string beforeText;
+        std::string afterText;
     };
 
     explicit Impl(EngineOptions value)
@@ -400,7 +416,7 @@ struct PresentEngine::Impl {
         if (historyCursor < history.size()) {
             history.erase(history.begin() + static_cast<std::ptrdiff_t>(historyCursor), history.end());
         }
-        history.push_back(entry);
+        history.push_back(std::move(entry));
         historyCursor = history.size();
     }
 
@@ -599,6 +615,22 @@ void PresentEngine::applySlideMove(int fromIndex, int toIndex)
     setCurrentSlide(toIndex);
 }
 
+void PresentEngine::applyElementText(
+    int slideIndex,
+    int objectIndex,
+    std::string_view text)
+{
+    impl_->requireSlideIndex(slideIndex);
+    if (objectIndex < 0) {
+        throw std::out_of_range("object index must not be negative");
+    }
+
+    setCurrentSlide(slideIndex);
+    const std::string transformCommand = "SetText." + std::to_string(objectIndex);
+    const std::string arguments = makeDocumentTransformArguments(transformCommand, text);
+    postUnoCommand(".uno:TransformDocumentStructure", arguments, true);
+}
+
 void PresentEngine::moveSlide(int fromIndex, int toIndex)
 {
     if (fromIndex == toIndex) {
@@ -606,12 +638,33 @@ void PresentEngine::moveSlide(int fromIndex, int toIndex)
         return;
     }
     applySlideMove(fromIndex, toIndex);
-    impl_->appendHistory(Impl::HistoryEntry{Impl::HistoryKind::Move, fromIndex, toIndex});
+    Impl::HistoryEntry entry;
+    entry.kind = Impl::HistoryKind::Move;
+    entry.fromIndex = fromIndex;
+    entry.toIndex = toIndex;
+    impl_->appendHistory(std::move(entry));
 }
 
 void PresentEngine::recordNativeMutation()
 {
-    impl_->appendHistory(Impl::HistoryEntry{Impl::HistoryKind::Native, 0, 0});
+    Impl::HistoryEntry entry;
+    entry.kind = Impl::HistoryKind::Native;
+    impl_->appendHistory(std::move(entry));
+}
+
+void PresentEngine::recordTextMutation(
+    int slideIndex,
+    int objectIndex,
+    std::string beforeText,
+    std::string afterText)
+{
+    Impl::HistoryEntry entry;
+    entry.kind = Impl::HistoryKind::Text;
+    entry.slideIndex = slideIndex;
+    entry.objectIndex = objectIndex;
+    entry.beforeText = std::move(beforeText);
+    entry.afterText = std::move(afterText);
+    impl_->appendHistory(std::move(entry));
 }
 
 void PresentEngine::undo()
@@ -627,6 +680,8 @@ void PresentEngine::undo()
     try {
         if (entry.kind == Impl::HistoryKind::Move) {
             applySlideMove(entry.toIndex, entry.fromIndex);
+        } else if (entry.kind == Impl::HistoryKind::Text) {
+            applyElementText(entry.slideIndex, entry.objectIndex, entry.beforeText);
         } else {
             postUnoCommand(".uno:Undo", {}, true);
         }
@@ -651,6 +706,8 @@ void PresentEngine::redo()
     try {
         if (entry.kind == Impl::HistoryKind::Move) {
             applySlideMove(entry.fromIndex, entry.toIndex);
+        } else if (entry.kind == Impl::HistoryKind::Text) {
+            applyElementText(entry.slideIndex, entry.objectIndex, entry.afterText);
         } else {
             postUnoCommand(".uno:Redo", {}, true);
         }
