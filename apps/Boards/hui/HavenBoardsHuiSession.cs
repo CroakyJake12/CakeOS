@@ -34,8 +34,7 @@ public sealed class HavenBoardsHuiSession : IAsyncDisposable
         FreeformScene.SetSnapshot(snapshot);
 
         var status = created ? "Created locally" : "Loaded locally";
-        Scene.SetStatus(status);
-        FreeformScene.SetStatus(status);
+        SetSceneStatus(status);
 
         Scene.CommandRequested += OnSceneCommandRequested;
         FreeformScene.CommandRequested += OnSceneCommandRequested;
@@ -72,33 +71,60 @@ public sealed class HavenBoardsHuiSession : IAsyncDisposable
         return new HavenBoardsHuiSession(store, boardId, snapshot, created);
     }
 
-    public async Task<HavenBoardSnapshot> ExecuteAsync(
+    public Task<HavenBoardSnapshot> ExecuteAsync(
         HavenBoardCommand command,
         CancellationToken cancellationToken = default)
     {
-        ThrowIfDisposed();
         ArgumentNullException.ThrowIfNull(command);
+        return ExecuteCoreAsync([command], expectedVersion: null, cancellationToken);
+    }
+
+    /// <summary>
+    /// Applies a command batch as one durable transaction. Every command is reduced in memory first;
+    /// no storage or visible HUI state changes unless the complete batch is valid and the expected
+    /// version still matches the open board.
+    /// </summary>
+    public Task<HavenBoardSnapshot> ExecuteBatchAsync(
+        IReadOnlyList<HavenBoardCommand> commands,
+        long expectedVersion,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(commands);
+        if (commands.Count == 0)
+            throw new ArgumentException("A board transaction must contain at least one command.", nameof(commands));
+
+        return ExecuteCoreAsync(commands, expectedVersion, cancellationToken);
+    }
+
+    /// <summary>
+    /// Restores a previously validated checkpoint without rewinding the durable version counter.
+    /// This is the explicit undo primitive for reviewed generative UI plans.
+    /// </summary>
+    public async Task<HavenBoardSnapshot> RestoreSnapshotAsync(
+        HavenBoardSnapshot checkpoint,
+        long expectedVersion,
+        CancellationToken cancellationToken = default)
+    {
+        ThrowIfDisposed();
+        ArgumentNullException.ThrowIfNull(checkpoint);
+        HavenBoardReducer.Validate(checkpoint);
+        if (!string.Equals(checkpoint.Id, _boardId, StringComparison.Ordinal))
+            throw new InvalidOperationException("Cannot restore a checkpoint for a different board.");
 
         await _mutationGate.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
-            var updated = HavenBoardReducer.Apply(Snapshot, command);
-            if (!string.Equals(updated.Id, _boardId, StringComparison.Ordinal))
-                throw new InvalidOperationException("The reducer changed the open board identity.");
+            RequireExpectedVersion(expectedVersion);
+            var restored = checkpoint with { Version = checked(Snapshot.Version + 1) };
+            HavenBoardReducer.Validate(restored);
 
-            // Persist first. If this fails, neither visible projection advances past the last durable state.
-            await _store.SaveAsync(updated, cancellationToken).ConfigureAwait(false);
-            Snapshot = updated;
-            Scene.SetSnapshot(updated);
-            FreeformScene.SetSnapshot(updated);
-            Scene.SetStatus("Saved locally");
-            FreeformScene.SetStatus("Saved locally");
-            return updated;
+            await _store.SaveAsync(restored, cancellationToken).ConfigureAwait(false);
+            PublishDurableSnapshot(restored, "Restored locally");
+            return restored;
         }
         catch
         {
-            Scene.SetStatus("Local save failed");
-            FreeformScene.SetStatus("Local save failed");
+            SetSceneStatus("Local restore failed");
             throw;
         }
         finally
@@ -116,6 +142,70 @@ public sealed class HavenBoardsHuiSession : IAsyncDisposable
             pending = _queuedSceneCommands;
 
         await pending.ConfigureAwait(false);
+    }
+
+    private async Task<HavenBoardSnapshot> ExecuteCoreAsync(
+        IReadOnlyList<HavenBoardCommand> commands,
+        long? expectedVersion,
+        CancellationToken cancellationToken)
+    {
+        ThrowIfDisposed();
+        ArgumentNullException.ThrowIfNull(commands);
+
+        await _mutationGate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            if (expectedVersion is not null)
+                RequireExpectedVersion(expectedVersion.Value);
+
+            var updated = Snapshot;
+            foreach (var command in commands)
+            {
+                ArgumentNullException.ThrowIfNull(command);
+                updated = HavenBoardReducer.Apply(updated, command);
+            }
+
+            if (!string.Equals(updated.Id, _boardId, StringComparison.Ordinal))
+                throw new InvalidOperationException("The reducer changed the open board identity.");
+
+            // Persist once, after the complete batch has reduced successfully. If this fails, neither
+            // visible projection advances past the last durable state.
+            await _store.SaveAsync(updated, cancellationToken).ConfigureAwait(false);
+            PublishDurableSnapshot(updated, "Saved locally");
+            return updated;
+        }
+        catch
+        {
+            SetSceneStatus("Local save failed");
+            throw;
+        }
+        finally
+        {
+            _mutationGate.Release();
+        }
+    }
+
+    private void RequireExpectedVersion(long expectedVersion)
+    {
+        if (Snapshot.Version != expectedVersion)
+        {
+            throw new InvalidOperationException(
+                $"Board version changed from expected {expectedVersion} to {Snapshot.Version}; re-create the plan before applying it.");
+        }
+    }
+
+    private void PublishDurableSnapshot(HavenBoardSnapshot snapshot, string status)
+    {
+        Snapshot = snapshot;
+        Scene.SetSnapshot(snapshot);
+        FreeformScene.SetSnapshot(snapshot);
+        SetSceneStatus(status);
+    }
+
+    private void SetSceneStatus(string status)
+    {
+        Scene.SetStatus(status);
+        FreeformScene.SetStatus(status);
     }
 
     private void OnSceneCommandRequested(object? sender, HavenBoardCommand command)
