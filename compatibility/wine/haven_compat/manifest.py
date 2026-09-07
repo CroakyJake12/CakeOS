@@ -13,6 +13,20 @@ _ALLOWED_BACKENDS = {"wine", "winboat"}
 _ALLOWED_NETWORK = {"none", "internet", "lan"}
 _ALLOWED_GPU = {"none", "render"}
 _ALLOWED_MOUNT_MODES = {"ro", "rw"}
+_ALLOWED_APP_FIELDS = {
+    "id",
+    "displayName",
+    "backend",
+    "runtime",
+    "entrypoint",
+    "network",
+    "clipboard",
+    "audioOutput",
+    "microphone",
+    "gpu",
+    "mounts",
+}
+_ALLOWED_MOUNT_FIELDS = {"source", "target", "mode"}
 _SHARE_ROOT = PurePosixPath("/mnt/haven-share")
 
 
@@ -20,6 +34,20 @@ def _is_safe_identifier(value: str) -> bool:
     return bool(value) and all(
         c in "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789._-" for c in value
     ) and value not in {".", ".."}
+
+
+def _optional_string(value: dict[str, Any], key: str, default: str) -> str:
+    raw = value.get(key, default)
+    if not isinstance(raw, str):
+        raise ManifestError(f"{key} must be a string")
+    return raw.strip()
+
+
+def _optional_bool(value: dict[str, Any], key: str, default: bool = False) -> bool:
+    raw = value.get(key, default)
+    if not isinstance(raw, bool):
+        raise ManifestError(f"{key} must be boolean")
+    return raw
 
 
 @dataclass(frozen=True)
@@ -32,9 +60,13 @@ class MountGrant:
     def from_dict(cls, value: dict[str, Any]) -> "MountGrant":
         if not isinstance(value, dict):
             raise ManifestError("each mount grant must be an object")
-        source = str(value.get("source", "")).strip()
-        target = str(value.get("target", "")).strip()
-        mode = str(value.get("mode", "ro")).lower()
+        unknown = set(value) - _ALLOWED_MOUNT_FIELDS
+        if unknown:
+            raise ManifestError(f"unexpected mount fields: {', '.join(sorted(unknown))}")
+
+        source = _optional_string(value, "source", "")
+        target = _optional_string(value, "target", "")
+        mode = _optional_string(value, "mode", "ro").lower()
         if "\x00" in source or "\x00" in target:
             raise ManifestError("mount paths must not contain NUL bytes")
         if not source.startswith("/"):
@@ -77,15 +109,28 @@ class AppManifest:
 
     @classmethod
     def from_dict(cls, value: dict[str, Any]) -> "AppManifest":
-        app_id = str(value.get("id", "")).strip()
-        backend = str(value.get("backend", "wine")).lower()
-        runtime = str(value.get("runtime", "")).strip()
-        entrypoint = str(value.get("entrypoint", "")).strip()
+        if not isinstance(value, dict):
+            raise ManifestError("manifest must be an object")
+        unknown = set(value) - _ALLOWED_APP_FIELDS
+        if unknown:
+            raise ManifestError(f"unexpected manifest fields: {', '.join(sorted(unknown))}")
+
+        app_id = _optional_string(value, "id", "")
+        backend = _optional_string(value, "backend", "wine").lower()
+        runtime = _optional_string(value, "runtime", "")
+        entrypoint = _optional_string(value, "entrypoint", "")
+
         display_name_raw = value.get("displayName")
-        display_name = str(display_name_raw).strip() if display_name_raw is not None else None
+        if display_name_raw is not None and not isinstance(display_name_raw, str):
+            raise ManifestError("displayName must be a string")
+        display_name = display_name_raw.strip() if isinstance(display_name_raw, str) else None
         display_name = display_name or None
-        network = str(value.get("network", "none")).lower()
-        gpu = str(value.get("gpu", "none")).lower()
+
+        network = _optional_string(value, "network", "none").lower()
+        gpu = _optional_string(value, "gpu", "none").lower()
+        clipboard = _optional_bool(value, "clipboard")
+        audio_output = _optional_bool(value, "audioOutput")
+        microphone = _optional_bool(value, "microphone")
 
         if not _is_safe_identifier(app_id):
             raise ManifestError("id must be a simple non-traversing identifier")
@@ -120,9 +165,9 @@ class AppManifest:
             entrypoint=entrypoint,
             display_name=display_name,
             network=network,
-            clipboard=bool(value.get("clipboard", False)),
-            audio_output=bool(value.get("audioOutput", False)),
-            microphone=bool(value.get("microphone", False)),
+            clipboard=clipboard,
+            audio_output=audio_output,
+            microphone=microphone,
             gpu=gpu,
             mounts=mounts,
         )
