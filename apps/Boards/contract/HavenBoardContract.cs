@@ -51,6 +51,8 @@ public sealed record CreateCardCommand(string GroupId, string CardId, string Tit
 public sealed record RenameGroupCommand(string GroupId, string Title) : HavenBoardCommand;
 public sealed record MoveGroupCommand(int FromIndex, int ToIndex) : HavenBoardCommand;
 public sealed record MoveCardCommand(string FromGroupId, int FromIndex, string ToGroupId, int ToIndex) : HavenBoardCommand;
+public sealed record AddAttachmentCommand(string CardId, HavenBoardAttachment Attachment) : HavenBoardCommand;
+public sealed record RemoveAttachmentCommand(string CardId, string AttachmentId) : HavenBoardCommand;
 
 public static class HavenBoardReducer
 {
@@ -102,6 +104,37 @@ public static class HavenBoardReducer
                 target.Cards.Insert(Math.Clamp(moveCard.ToIndex, 0, target.Cards.Count), card);
                 break;
             }
+            case AddAttachmentCommand addAttachment:
+            {
+                ArgumentNullException.ThrowIfNull(addAttachment.Attachment);
+                var located = FindCard(groups, addAttachment.CardId);
+                var attachments = (located.Card.Attachments ?? []).ToList();
+                if (attachments.Any(attachment => string.Equals(
+                        attachment.Id,
+                        addAttachment.Attachment.Id,
+                        StringComparison.Ordinal)))
+                    throw new InvalidOperationException(
+                        $"Attachment '{addAttachment.Attachment.Id}' already exists on card '{addAttachment.CardId}'.");
+
+                attachments.Add(addAttachment.Attachment);
+                located.Group.Cards[located.Index] = located.Card with { Attachments = attachments.ToArray() };
+                break;
+            }
+            case RemoveAttachmentCommand removeAttachment:
+            {
+                var located = FindCard(groups, removeAttachment.CardId);
+                var attachments = (located.Card.Attachments ?? []).ToList();
+                var removed = attachments.RemoveAll(attachment => string.Equals(
+                    attachment.Id,
+                    removeAttachment.AttachmentId,
+                    StringComparison.Ordinal));
+                if (removed == 0)
+                    throw new InvalidOperationException(
+                        $"Attachment '{removeAttachment.AttachmentId}' does not exist on card '{removeAttachment.CardId}'.");
+
+                located.Group.Cards[located.Index] = located.Card with { Attachments = attachments.ToArray() };
+                break;
+            }
             default:
                 throw new NotSupportedException($"Unsupported board command '{command.GetType().Name}'.");
         }
@@ -117,6 +150,18 @@ public static class HavenBoardReducer
         groups.FirstOrDefault(group => string.Equals(group.Id, id, StringComparison.Ordinal))
         ?? throw new InvalidOperationException($"Board group '{id}' does not exist.");
 
+    private static LocatedCard FindCard(IReadOnlyList<MutableGroup> groups, string cardId)
+    {
+        foreach (var group in groups)
+        {
+            var index = group.Cards.FindIndex(card => string.Equals(card.Id, cardId, StringComparison.Ordinal));
+            if (index >= 0)
+                return new LocatedCard(group, index, group.Cards[index]);
+        }
+
+        throw new InvalidOperationException($"Board card '{cardId}' does not exist.");
+    }
+
     private static void RequireIndex(int index, int count, string name)
     {
         if (index < 0 || index >= count)
@@ -131,6 +176,8 @@ public static class HavenBoardReducer
 
     private static string NormaliseTitle(string? value, string fallback) =>
         string.IsNullOrWhiteSpace(value) ? fallback : value.Trim();
+
+    private sealed record LocatedCard(MutableGroup Group, int Index, HavenBoardCard Card);
 
     private sealed class MutableGroup(string id, string title, List<HavenBoardCard> cards)
     {
