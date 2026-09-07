@@ -7,15 +7,9 @@ static void Assert(bool condition, string message)
 
 var address = new DataCellAddress("Sheet 1", 0, 1);
 var cellSnapshot = new DataCellSnapshot(address, "42", "=SUM(A1:A2)");
-Assert(cellSnapshot.Address.Sheet == "Sheet 1", "Cell address sheet was not retained.");
-Assert(cellSnapshot.Address.Row == 0 && cellSnapshot.Address.Column == 1, "Cell coordinates were not retained.");
-Assert(cellSnapshot.Formula == "=SUM(A1:A2)", "Formula was not retained.");
-
-var range = new DataRangeRequest("Sheet 1", 0, 0, 10, 8);
-Assert(range.RowCount == 10 && range.ColumnCount == 8, "P1 grid shape changed unexpectedly.");
-
-var queryResult = new DataQueryResult(["total"], [["42"]], false);
-Assert(queryResult.Columns.Count == 1 && queryResult.Rows.Count == 1, "Query result contract is invalid.");
+Assert(cellSnapshot.Address == address && cellSnapshot.Formula == "=SUM(A1:A2)", "Cell contract round trip failed.");
+Assert(new DataRangeRequest("Sheet 1", 0, 0, 10, 8) is { RowCount: 10, ColumnCount: 8 }, "P1 grid shape changed unexpectedly.");
+Assert(new DataQueryResult(["total"], [["42"]], false) is { Columns.Count: 1, Rows.Count: 1 }, "Query result contract is invalid.");
 
 var fake = new FakeSpreadsheetEngine();
 await using var fakeDatabase = new FakeDatabaseEngine();
@@ -28,12 +22,16 @@ await using (var session = new DataGridSession(fake))
     Assert(opened.ActiveSheet.Name == "Sheet 1", "Grid session did not select the first discovered sheet.");
 
     var edited = await session.EditCellAsync(0, 0, "5");
-    Assert(edited.Grid.Values[0][0] == "5", "Grid session did not refresh after a cell edit.");
-    Assert(fake.RecalculateCalls == 1, "Grid session did not request recalculation after edit.");
-
+    Assert(edited.Grid.Values[0][0] == "5" && fake.RecalculateCalls == 1, "Grid edit/recalculate/refresh failed.");
     var formula = await session.EditCellAsync(0, 1, string.Empty, "=A1*2");
-    Assert(formula.Grid.Values[0][1] == "10", "Grid session did not expose the recalculated formula result.");
-    Assert(fake.RecalculateCalls == 2, "Grid session did not recalculate the formula edit.");
+    Assert(formula.Grid.Values[0][1] == "10" && fake.RecalculateCalls == 2, "Formula edit/recalculate/refresh failed.");
+
+    var createdName = await session.CreateNamedRangeAsync("GridInput", 0, 0, 1, 2);
+    Assert(createdName.Name == "GridInput" && createdName.Range is { Sheet: "Sheet 1", RowCount: 1, ColumnCount: 2 }, "Grid session created the wrong named range.");
+    var names = await session.ListNamedRangesAsync();
+    Assert(names.Count == 1 && names[0].Name == "GridInput", "Grid session did not list the created range-backed name.");
+    var afterDeleteName = await session.DeleteNamedRangeAsync("gridinput");
+    Assert(afterDeleteName.Count == 0, "Grid session did not delete a range-backed name case-insensitively.");
 
     _ = await session.InsertRowsAsync(1);
     _ = await session.DeleteRowsAsync(1);
@@ -43,19 +41,13 @@ await using (var session = new DataGridSession(fake))
     Assert(fake.InsertColumnsCalls == 1 && fake.DeleteColumnsCalls == 1, "Grid session did not delegate column structural edits exactly once.");
 
     var bridge = new DataWorkbookDatabaseBridge(fake, fakeDatabase);
-    var published = await bridge.PublishRangeAsync(
-        opened.Workbook.Id,
-        new DataRangeRequest("Sheet 1", 0, 0, 1, 2),
-        "GridSnapshot");
-    Assert(published.Columns.SequenceEqual(["A", "B"]), "Database bridge did not generate stable spreadsheet column names.");
-    Assert(published.RowCount == 1, "Database bridge published the wrong row count.");
-    var publishedTable = fakeDatabase.LastTable
-        ?? throw new InvalidOperationException("Database bridge did not call the database engine.");
+    var published = await bridge.PublishRangeAsync(opened.Workbook.Id, new DataRangeRequest("Sheet 1", 0, 0, 1, 2), "GridSnapshot");
+    Assert(published.Columns.SequenceEqual(["A", "B"]) && published.RowCount == 1, "Database bridge published the wrong shape.");
+    var publishedTable = fakeDatabase.LastTable ?? throw new InvalidOperationException("Database bridge did not call the database engine.");
     Assert(publishedTable.Rows[0].SequenceEqual(["5", "10"]), "Database bridge did not publish displayed spreadsheet values.");
 
     var secondSheet = await session.SelectSheetAsync(1);
     Assert(secondSheet.ActiveSheet.Name == "Summary", "Grid session sheet selection failed.");
-
     await session.SaveAsAsync("saved.ods");
     Assert(fake.LastSavePath == "saved.ods", "Grid session did not delegate save-as.");
     await session.CloseAsync();
@@ -74,70 +66,53 @@ await querySpreadsheet.SetCellAsync(queryWorkbook.Id, new DataCellAddress("Sheet
 await using (var querySession = new DataQuerySession(querySpreadsheet, queryDatabase))
 {
     var openedQuery = await querySession.OpenAsync("query.duckdb");
-    Assert(openedQuery.DatabasePath == "query.duckdb", "Query session did not retain its database path.");
-    Assert(openedQuery.PublishedTables.Count == 0 && openedQuery.RecentQueries.Count == 0, "New query session was not empty.");
+    Assert(openedQuery.DatabasePath == "query.duckdb" && openedQuery.PublishedTables.Count == 0 && openedQuery.RecentQueries.Count == 0,
+        "New query session state is invalid.");
 
     var published = await querySession.PublishRangeAsync(
         queryWorkbook.Id,
         new DataRangeRequest("Sheet 1", 0, 0, 2, 2),
         "Scores",
         firstRowIsHeaders: true);
-    Assert(published.Name == "Scores", "Query session changed the published table name.");
-    Assert(published.Columns.SequenceEqual(["Name", "Score"]), "Query session did not preserve safe spreadsheet headers.");
-    Assert(published.RowCount == 1, "Query session published the header row as data.");
+    Assert(published.Columns.SequenceEqual(["Name", "Score"]) && published.RowCount == 1, "Query session publication failed.");
 
     for (var index = 0; index < 22; index++)
     {
-        var sql = $"SELECT {index} AS value";
-        var execution = await querySession.ExecuteAsync(sql, maxRows: 25);
-        Assert(execution.Sql == sql, "Query session did not retain normalized SQL text.");
-        Assert(execution.MaxRows == 25, "Query session changed the requested row cap.");
-        Assert(execution.Result.Rows.Count == 1, "Query session did not expose the database result.");
+        var execution = await querySession.ExecuteAsync($"SELECT {index} AS value", maxRows: 25);
+        Assert(execution.MaxRows == 25 && execution.Result.Rows.Count == 1, "Query session execution contract failed.");
     }
 
     var querySnapshot = querySession.Snapshot();
-    Assert(querySnapshot.PublishedTables.Count == 1, "Query session did not track published tables.");
-    Assert(querySnapshot.RecentQueries.Count == 20, "Query session did not cap recent query history at 20.");
-    Assert(querySnapshot.RecentQueries[0].Sql == "SELECT 21 AS value", "Query history is not newest-first.");
-    Assert(querySnapshot.RecentQueries[^1].Sql == "SELECT 2 AS value", "Query history did not discard the oldest entries.");
+    Assert(querySnapshot.PublishedTables.Count == 1 && querySnapshot.RecentQueries.Count == 20, "Query session did not retain bounded state.");
+    Assert(querySnapshot.RecentQueries[0].Sql == "SELECT 21 AS value" && querySnapshot.RecentQueries[^1].Sql == "SELECT 2 AS value",
+        "Query history is not newest-first or did not discard its oldest entries.");
     Assert(queryDatabase.QueryCalls == 22, "Query session did not delegate every query exactly once.");
 
-    var materialized = await querySession.MaterializeAsync(
-        queryWorkbook.Id,
-        querySnapshot.RecentQueries[0],
-        "Query Result");
-    Assert(materialized.Sheet == "Query Result", "Query materialisation changed the requested sheet name.");
-    Assert(materialized.DataRowCount == 1 && materialized.Range.RowCount == 2 && materialized.Range.ColumnCount == 1,
-        "Query materialisation exposed the wrong dimensions.");
+    var materialized = await querySession.MaterializeAsync(queryWorkbook.Id, querySnapshot.RecentQueries[0], "Query Result");
+    Assert(materialized.DataRowCount == 1 && materialized.Range is { RowCount: 2, ColumnCount: 1 }, "Query materialisation exposed the wrong dimensions.");
     var materializedValues = await querySpreadsheet.ReadRangeAsync(queryWorkbook.Id, materialized.Range);
-    Assert(materializedValues.Values[0][0] == "sql", "Query materialisation omitted the result header.");
-    Assert(materializedValues.Values[1][0] == "SELECT 21 AS value", "Query materialisation changed the result value.");
+    Assert(materializedValues.Values[0][0] == "sql" && materializedValues.Values[1][0] == "SELECT 21 AS value",
+        "Query materialisation changed the result.");
     Assert(querySpreadsheet.MaterializedSheetCalls == 1, "Query materialisation did not use the typed spreadsheet operation exactly once.");
 
     var truncated = await querySession.ExecuteAsync("TRUNCATED PREVIEW", maxRows: 25);
     var refusedTruncated = false;
-    try
-    {
-        _ = await querySession.MaterializeAsync(queryWorkbook.Id, truncated, "Incomplete");
-    }
-    catch (InvalidOperationException)
-    {
-        refusedTruncated = true;
-    }
+    try { _ = await querySession.MaterializeAsync(queryWorkbook.Id, truncated, "Incomplete"); }
+    catch (InvalidOperationException) { refusedTruncated = true; }
     Assert(refusedTruncated, "Query session allowed a truncated preview to be materialized silently.");
 
     await querySession.CloseAsync();
-    Assert(!querySession.IsOpen, "Query session remained open after a successful close.");
-    Assert(queryDatabase.CloseCalls == 1, "Query session did not close the database exactly once.");
+    Assert(!querySession.IsOpen && queryDatabase.CloseCalls == 1, "Query session close semantics failed.");
 }
 await querySpreadsheet.CloseAsync(queryWorkbook.Id);
 
-Console.WriteLine("Haven Data contract, grid-session, structural-edit, database-bridge, query-session and materialisation smoke checks passed.");
+Console.WriteLine("Haven Data contract, grid-session, named-range, structural-edit, database-bridge, query-session and materialisation smoke checks passed.");
 
 internal sealed class FakeSpreadsheetEngine : IDataSpreadsheetEngine
 {
     private readonly Dictionary<(string Sheet, int Row, int Column), string> _values = new();
     private readonly List<string> _sheets = ["Sheet 1", "Summary"];
+    private readonly Dictionary<string, DataNamedRangeSummary> _namedRanges = new(StringComparer.OrdinalIgnoreCase);
     private DataWorkbookHandle? _open;
 
     public int RecalculateCalls { get; private set; }
@@ -200,7 +175,6 @@ internal sealed class FakeSpreadsheetEngine : IDataSpreadsheetEngine
             throw new InvalidOperationException("Fake workbook already contains that sheet.");
         if (values.Count == 0 || values[0].Count == 0 || values.Any(row => row.Count != values[0].Count))
             throw new InvalidOperationException("Fake materialized values are not rectangular.");
-
         _sheets.Add(sheetName);
         MaterializedSheetCalls++;
         for (var row = 0; row < values.Count; row++)
@@ -209,68 +183,68 @@ internal sealed class FakeSpreadsheetEngine : IDataSpreadsheetEngine
         return Task.FromResult(new DataRangeSnapshot(sheetName, 0, 0, values.Select(row => (IReadOnlyList<string>)row.ToArray()).ToArray()));
     }
 
-    public Task InsertRowsAsync(string workbookId, string sheet, int index, int count, CancellationToken cancellationToken = default)
+    public Task<IReadOnlyList<DataNamedRangeSummary>> ListNamedRangesAsync(string workbookId, CancellationToken cancellationToken = default)
     {
         cancellationToken.ThrowIfCancellationRequested();
         EnsureOpen(workbookId);
-        InsertRowsCalls++;
+        IReadOnlyList<DataNamedRangeSummary> result = _namedRanges.Values.OrderBy(item => item.Name, StringComparer.OrdinalIgnoreCase).ToArray();
+        return Task.FromResult(result);
+    }
+
+    public Task<DataNamedRangeSummary> CreateNamedRangeAsync(string workbookId, string name, DataRangeRequest range, CancellationToken cancellationToken = default)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        EnsureOpen(workbookId);
+        if (_namedRanges.ContainsKey(name)) throw new InvalidOperationException("Fake named range already exists.");
+        var summary = new DataNamedRangeSummary(name, range);
+        _namedRanges.Add(name, summary);
+        return Task.FromResult(summary);
+    }
+
+    public Task DeleteNamedRangeAsync(string workbookId, string name, CancellationToken cancellationToken = default)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        EnsureOpen(workbookId);
+        if (!_namedRanges.Remove(name)) throw new InvalidOperationException("Fake named range does not exist.");
         return Task.CompletedTask;
+    }
+
+    public Task InsertRowsAsync(string workbookId, string sheet, int index, int count, CancellationToken cancellationToken = default)
+    {
+        cancellationToken.ThrowIfCancellationRequested(); EnsureOpen(workbookId); InsertRowsCalls++; return Task.CompletedTask;
     }
 
     public Task DeleteRowsAsync(string workbookId, string sheet, int index, int count, CancellationToken cancellationToken = default)
     {
-        cancellationToken.ThrowIfCancellationRequested();
-        EnsureOpen(workbookId);
-        DeleteRowsCalls++;
-        return Task.CompletedTask;
+        cancellationToken.ThrowIfCancellationRequested(); EnsureOpen(workbookId); DeleteRowsCalls++; return Task.CompletedTask;
     }
 
     public Task InsertColumnsAsync(string workbookId, string sheet, int index, int count, CancellationToken cancellationToken = default)
     {
-        cancellationToken.ThrowIfCancellationRequested();
-        EnsureOpen(workbookId);
-        InsertColumnsCalls++;
-        return Task.CompletedTask;
+        cancellationToken.ThrowIfCancellationRequested(); EnsureOpen(workbookId); InsertColumnsCalls++; return Task.CompletedTask;
     }
 
     public Task DeleteColumnsAsync(string workbookId, string sheet, int index, int count, CancellationToken cancellationToken = default)
     {
-        cancellationToken.ThrowIfCancellationRequested();
-        EnsureOpen(workbookId);
-        DeleteColumnsCalls++;
-        return Task.CompletedTask;
+        cancellationToken.ThrowIfCancellationRequested(); EnsureOpen(workbookId); DeleteColumnsCalls++; return Task.CompletedTask;
     }
 
     public Task RecalculateAsync(string workbookId, CancellationToken cancellationToken = default)
     {
-        cancellationToken.ThrowIfCancellationRequested();
-        EnsureOpen(workbookId);
-        RecalculateCalls++;
-        return Task.CompletedTask;
+        cancellationToken.ThrowIfCancellationRequested(); EnsureOpen(workbookId); RecalculateCalls++; return Task.CompletedTask;
     }
 
     public Task SaveAsync(string workbookId, string destinationPath, CancellationToken cancellationToken = default)
     {
-        cancellationToken.ThrowIfCancellationRequested();
-        EnsureOpen(workbookId);
-        LastSavePath = destinationPath;
-        return Task.CompletedTask;
+        cancellationToken.ThrowIfCancellationRequested(); EnsureOpen(workbookId); LastSavePath = destinationPath; return Task.CompletedTask;
     }
 
     public Task CloseAsync(string workbookId, CancellationToken cancellationToken = default)
     {
-        cancellationToken.ThrowIfCancellationRequested();
-        EnsureOpen(workbookId);
-        CloseCalls++;
-        _open = null;
-        return Task.CompletedTask;
+        cancellationToken.ThrowIfCancellationRequested(); EnsureOpen(workbookId); CloseCalls++; _open = null; return Task.CompletedTask;
     }
 
-    public ValueTask DisposeAsync()
-    {
-        _open = null;
-        return ValueTask.CompletedTask;
-    }
+    public ValueTask DisposeAsync() { _open = null; return ValueTask.CompletedTask; }
 
     private void EnsureOpen(string workbookId)
     {
@@ -282,32 +256,23 @@ internal sealed class FakeSpreadsheetEngine : IDataSpreadsheetEngine
 internal sealed class FakeDatabaseEngine : IDataDatabaseEngine
 {
     private bool _open;
-
     public DataTableSnapshot? LastTable { get; private set; }
     public int QueryCalls { get; private set; }
     public int CloseCalls { get; private set; }
 
     public Task OpenAsync(string databasePath, CancellationToken cancellationToken = default)
     {
-        cancellationToken.ThrowIfCancellationRequested();
-        ArgumentException.ThrowIfNullOrWhiteSpace(databasePath);
-        _open = true;
-        return Task.CompletedTask;
+        cancellationToken.ThrowIfCancellationRequested(); ArgumentException.ThrowIfNullOrWhiteSpace(databasePath); _open = true; return Task.CompletedTask;
     }
 
     public Task ReplaceTableAsync(DataTableSnapshot table, CancellationToken cancellationToken = default)
     {
-        cancellationToken.ThrowIfCancellationRequested();
-        EnsureOpen();
-        LastTable = table;
-        return Task.CompletedTask;
+        cancellationToken.ThrowIfCancellationRequested(); EnsureOpen(); LastTable = table; return Task.CompletedTask;
     }
 
     public Task<DataQueryResult> ExecuteReadOnlyAsync(string sql, int maxRows = 200, CancellationToken cancellationToken = default)
     {
-        cancellationToken.ThrowIfCancellationRequested();
-        EnsureOpen();
-        QueryCalls++;
+        cancellationToken.ThrowIfCancellationRequested(); EnsureOpen(); QueryCalls++;
         if (string.Equals(sql, "TRUNCATED PREVIEW", StringComparison.Ordinal))
             return Task.FromResult(new DataQueryResult(["value"], [["partial"]], true));
         return Task.FromResult(new DataQueryResult(["sql"], [[sql.Trim()]], false));
@@ -315,22 +280,13 @@ internal sealed class FakeDatabaseEngine : IDataDatabaseEngine
 
     public Task CloseAsync(CancellationToken cancellationToken = default)
     {
-        cancellationToken.ThrowIfCancellationRequested();
-        EnsureOpen();
-        CloseCalls++;
-        _open = false;
-        return Task.CompletedTask;
+        cancellationToken.ThrowIfCancellationRequested(); EnsureOpen(); CloseCalls++; _open = false; return Task.CompletedTask;
     }
 
-    public ValueTask DisposeAsync()
-    {
-        _open = false;
-        return ValueTask.CompletedTask;
-    }
+    public ValueTask DisposeAsync() { _open = false; return ValueTask.CompletedTask; }
 
     private void EnsureOpen()
     {
-        if (!_open)
-            throw new InvalidOperationException("Fake database is not open.");
+        if (!_open) throw new InvalidOperationException("Fake database is not open.");
     }
 }
