@@ -114,18 +114,47 @@ class WorkerClient:
             raise RuntimeError(f"worker exited with {code}: {stderr}")
 
 
+def slides(response: dict[str, Any]) -> list[dict[str, Any]]:
+    return response["result"]["slides"]
+
+
 def slide_count(response: dict[str, Any]) -> int:
-    return len(response["result"]["slides"])
+    return len(slides(response))
+
+
+def slide_names(response: dict[str, Any]) -> list[str]:
+    return [str(slide["name"]) for slide in slides(response)]
 
 
 def event_names(events: list[dict[str, Any]]) -> set[str]:
     return {str(event["event"]) for event in events}
 
 
+def require_semantic_mutation_events(events: list[dict[str, Any]], reason: str) -> None:
+    names = event_names(events)
+    if "documentChanged" not in names or "canvasInvalidated" not in names:
+        raise RuntimeError(f"missing {reason} mutation events: {sorted(names)}")
+
+    changed = [
+        event for event in events
+        if event["event"] == "documentChanged"
+        and event["data"].get("reason") == reason
+    ]
+    repaints = [
+        event for event in events
+        if event["event"] == "canvasInvalidated"
+        and event["data"].get("source") == "semantic"
+        and event["data"].get("reason") == reason
+        and event["data"].get("all") is True
+    ]
+    if not changed or not repaints:
+        raise RuntimeError(f"{reason} did not emit the stable semantic mutation contract")
+
+
 def main() -> int:
-    if len(sys.argv) != 4:
+    if len(sys.argv) != 5:
         print(
-            "usage: worker_protocol_smoke.py WORKER INPUT.odp OUTPUT.odp",
+            "usage: worker_protocol_smoke.py WORKER INPUT.odp OUTPUT.odp REORDER_INPUT.odp",
             file=sys.stderr,
         )
         return 2
@@ -133,7 +162,10 @@ def main() -> int:
     worker = Path(sys.argv[1]).resolve()
     source = Path(sys.argv[2]).resolve()
     output = Path(sys.argv[3]).resolve()
+    reorder_source = Path(sys.argv[4]).resolve()
+    reorder_output = output.with_name(f"{output.stem}-reordered.odp")
     output.unlink(missing_ok=True)
+    reorder_output.unlink(missing_ok=True)
 
     client = WorkerClient(worker)
     total_events = 0
@@ -150,6 +182,7 @@ def main() -> int:
             "addSlideAfter",
             "duplicateSlide",
             "deleteSlide",
+            "moveSlide",
             "undo",
             "redo",
             "saveAs",
@@ -193,7 +226,7 @@ def main() -> int:
         if rejected.get("ok") or rejected_payload:
             raise RuntimeError("worker did not reject an oversized render request")
 
-        # Clear any typed events emitted by open/render before testing the
+        # Clear typed events emitted by open/render before testing the
         # deterministic semantic-mutation contract.
         client.require_ok("listSlides")
         total_events += len(client.take_events())
@@ -209,17 +242,7 @@ def main() -> int:
             raise RuntimeError("worker listSlides changed state unexpectedly")
         mutation_events = client.take_events()
         total_events += len(mutation_events)
-        mutation_names = event_names(mutation_events)
-        if "documentChanged" not in mutation_names or "canvasInvalidated" not in mutation_names:
-            raise RuntimeError(f"missing mutation events: {sorted(mutation_names)}")
-        semantic_repaints = [
-            event for event in mutation_events
-            if event["event"] == "canvasInvalidated"
-            and event["data"].get("source") == "semantic"
-            and event["data"].get("all") is True
-        ]
-        if not semantic_repaints:
-            raise RuntimeError("semantic mutation did not emit a conservative full repaint event")
+        require_semantic_mutation_events(mutation_events, "addSlideAfter")
 
         undone, _ = client.require_ok("undo")
         if slide_count(undone) != 1:
@@ -246,6 +269,45 @@ def main() -> int:
         if slide_count(reopened) != 2:
             raise RuntimeError("worker output did not persist two slides")
 
+        # Switch to a three-slide fixture with stable names so worker-level
+        # reordering proves identity/order, not just the slide count.
+        client.require_ok("close")
+        reorder_opened, _ = client.require_ok("open", path=str(reorder_source))
+        if slide_names(reorder_opened) != ["Alpha", "Beta", "Gamma"]:
+            raise RuntimeError(f"unexpected reorder fixture: {slide_names(reorder_opened)}")
+
+        client.require_ok("listSlides")
+        total_events += len(client.take_events())
+
+        moved_down, _ = client.require_ok("moveSlide", fromIndex=0, toIndex=2)
+        if slide_names(moved_down) != ["Beta", "Gamma", "Alpha"]:
+            raise RuntimeError(f"worker downward reorder failed: {slide_names(moved_down)}")
+
+        # Pump moveSlide events and prove it uses the same typed mutation contract.
+        client.require_ok("listSlides")
+        move_events = client.take_events()
+        total_events += len(move_events)
+        require_semantic_mutation_events(move_events, "moveSlide")
+
+        moved_up, _ = client.require_ok("moveSlide", fromIndex=2, toIndex=0)
+        if slide_names(moved_up) != ["Alpha", "Beta", "Gamma"]:
+            raise RuntimeError(f"worker upward reorder failed: {slide_names(moved_up)}")
+
+        moved_final, _ = client.require_ok("moveSlide", fromIndex=0, toIndex=2)
+        if slide_names(moved_final) != ["Beta", "Gamma", "Alpha"]:
+            raise RuntimeError(f"worker final reorder failed: {slide_names(moved_final)}")
+
+        client.require_ok("saveAs", path=str(reorder_output), format="odp")
+        if not reorder_output.exists() or reorder_output.stat().st_size == 0:
+            raise RuntimeError("worker reorder save did not create an output presentation")
+
+        client.require_ok("close")
+        reorder_reopened, _ = client.require_ok("open", path=str(reorder_output))
+        if slide_names(reorder_reopened) != ["Beta", "Gamma", "Alpha"]:
+            raise RuntimeError(
+                f"worker reorder did not persist: {slide_names(reorder_reopened)}"
+            )
+
         # Pump any events left after the final open and confirm none escaped the
         # stable worker event vocabulary.
         client.require_ok("listSlides")
@@ -256,6 +318,8 @@ def main() -> int:
 
         print("worker_protocol=passed")
         print("worker_events=passed")
+        print("worker_slide_reorder=passed")
+        print("worker_slide_order=Beta,Gamma,Alpha")
         print(f"worker_event_count={total_events}")
         print(f"worker_extent_twips={width}x{height}")
         print(f"worker_render_bytes={len(pixels)}")
