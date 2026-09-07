@@ -35,7 +35,7 @@ jobs:
         run: dotnet build apps/Data/App/HavenOS.Data.App.csproj -c Release --nologo
 
       - name: Run Data contract smoke checks
-        run: dotnet run --project apps/Data/Tests/HavenOS.Data.Smoke.csproj -c Release --no-restore
+        run: dotnet run --project apps/Data/Tests/HavenOS.Data.Smoke.csproj -c Release
 
       - name: Install disposable Calc/UNO test runtime
         run: |
