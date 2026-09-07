@@ -60,6 +60,10 @@ def main() -> int:
                 [row[0] for row in ascending["values"][1:]] == ["Ada", "Cara", "Bob"],
                 f"Ascending numeric sort was wrong: {ascending}",
             )
+            require(
+                [row[1] for row in ascending["values"][1:]] == ["2", "5", "10"],
+                f"Ascending key values were not ordered numerically: {ascending}",
+            )
 
             descending = worker.call(
                 "sortRange",
@@ -74,6 +78,10 @@ def main() -> int:
             require(
                 [row[0] for row in descending["values"][1:]] == ["Bob", "Cara", "Ada"],
                 f"Descending numeric sort was wrong: {descending}",
+            )
+            require(
+                [row[1] for row in descending["values"][1:]] == ["10", "5", "2"],
+                f"Descending key values were not ordered numerically: {descending}",
             )
 
             invalid_key = worker.expect_error(
@@ -115,6 +123,10 @@ def main() -> int:
             require(
                 [row[0] for row in persisted["values"][1:]] == ["Bob", "Cara", "Ada"],
                 f"ODS reopen changed sorted row order: {persisted}",
+            )
+            require(
+                [row[1] for row in persisted["values"][1:]] == ["10", "5", "2"],
+                f"ODS reopen changed sorted key order: {persisted}",
             )
             read_only = worker.expect_error(
                 "sortRange",
