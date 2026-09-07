@@ -25,11 +25,29 @@ except Exception as exc:  # pragma: no cover - runtime dependency gate
     raise SystemExit(78)
 
 
+MAX_MATERIALIZED_ROWS = 1001
+MAX_MATERIALIZED_COLUMNS = 256
+PORTABLE_SHEET_FORBIDDEN = set("[]:*?/\\")
+
+
 def prop(name: str, value):
     item = PropertyValue()
     item.Name = name
     item.Value = value
     return item
+
+
+def portable_sheet_name(value: object) -> str:
+    text = str(value or "").strip()
+    if not text:
+        raise ValueError("sheetName is required.")
+    if len(text) > 31:
+        raise ValueError("Materialized sheet names must be at most 31 characters for ODS/XLSX portability.")
+    if any(ord(character) < 32 or ord(character) == 127 or character in PORTABLE_SHEET_FORBIDDEN for character in text):
+        raise ValueError("Materialized sheet name contains a character that is unsafe for ODS/XLSX portability.")
+    if text.startswith("'") or text.endswith("'"):
+        raise ValueError("Materialized sheet names cannot begin or end with an apostrophe.")
+    return text
 
 
 class CalcRuntime:
@@ -187,6 +205,57 @@ class CalcRuntime:
             "formula": cell_formula if cell_formula.startswith("=") else "",
         }
 
+    def create_sheet_with_values(self, workbook_id: str, sheet_name: object, supplied_values: object) -> dict:
+        document = self._doc(workbook_id)
+        if bool(document.isReadonly()):
+            raise PermissionError("Workbook was opened read-only.")
+        name = portable_sheet_name(sheet_name)
+        if not isinstance(supplied_values, list) or not 1 <= len(supplied_values) <= MAX_MATERIALIZED_ROWS:
+            raise ValueError(f"Materialized sheets must contain 1-{MAX_MATERIALIZED_ROWS} rows in this slice.")
+        first_row = supplied_values[0]
+        if not isinstance(first_row, list) or not 1 <= len(first_row) <= MAX_MATERIALIZED_COLUMNS:
+            raise ValueError(f"Materialized sheets must contain 1-{MAX_MATERIALIZED_COLUMNS} columns.")
+        column_count = len(first_row)
+
+        values: list[list[str]] = []
+        for supplied_row in supplied_values:
+            if not isinstance(supplied_row, list) or len(supplied_row) != column_count:
+                raise ValueError("Every materialized row must contain the same number of columns.")
+            values.append(["" if value is None else str(value) for value in supplied_row])
+
+        sheets = document.getSheets()
+        existing_names = [str(item) for item in sheets.getElementNames()]
+        if any(existing.casefold() == name.casefold() for existing in existing_names):
+            raise ValueError(f"Workbook already contains a sheet named '{name}'.")
+
+        inserted = False
+        try:
+            sheets.insertNewByName(name, sheets.getCount())
+            inserted = True
+            sheet = sheets.getByName(name)
+            for row_index, row_values in enumerate(values):
+                for column_index, value in enumerate(row_values):
+                    # Query/database output is always written as literal text. A value such
+                    # as '=1+1' must remain '=1+1' and never become a Calc formula.
+                    sheet.getCellByPosition(column_index, row_index).setString(value)
+            return self.read_range(
+                workbook_id,
+                {
+                    "sheet": name,
+                    "startRow": 0,
+                    "startColumn": 0,
+                    "rowCount": len(values),
+                    "columnCount": column_count,
+                },
+            )
+        except Exception:
+            if inserted:
+                try:
+                    sheets.removeByName(name)
+                except Exception:
+                    pass
+            raise
+
     def recalculate(self, workbook_id: str) -> dict:
         document = self._doc(workbook_id)
         document.calculateAll()
@@ -287,6 +356,8 @@ def serve() -> int:
                     result = runtime.read_range(params["workbookId"], params["range"])
                 elif method == "setCell":
                     result = runtime.set_cell(params["workbookId"], params["address"], params.get("value", ""), params.get("formula", ""))
+                elif method == "createSheetWithValues":
+                    result = runtime.create_sheet_with_values(params["workbookId"], params["sheetName"], params["values"])
                 elif method == "recalculate":
                     result = runtime.recalculate(params["workbookId"])
                 elif method == "save":
