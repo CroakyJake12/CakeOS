@@ -1,5 +1,3 @@
-import 'dart:io';
-
 import 'package:appflowy_board/appflowy_board.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -43,38 +41,29 @@ void main() {
   });
 
   testWidgets('every card exposes non-drag movement controls', (tester) async {
-    final originalDirectory = Directory.current;
-    final tempDirectory = await Directory.systemTemp.createTemp('haven-boards-appflowy-test-');
-    Directory.current = tempDirectory.path;
+    // Filesystem persistence has independent .NET contract/store coverage. Disable it
+    // here so this test covers AppFlowy rendering and accessibility controls only.
+    await tester.pumpWidget(const HavenBoardsPocApp(enablePersistence: false));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 150));
 
-    try {
-      await tester.pumpWidget(const HavenBoardsPocApp());
-      // AppFlowy Board may keep scroll/animation machinery active, so use bounded
-      // pumps rather than pumpAndSettle (which can wait indefinitely for quiescence).
-      await tester.pump();
-      await tester.pump(const Duration(milliseconds: 150));
+    expect(find.byType(AppFlowyBoard), findsOneWidget);
+    expect(find.byTooltip('Move card up'), findsWidgets);
+    expect(find.byTooltip('Move card down'), findsWidgets);
+    expect(find.byTooltip('Move card to previous group'), findsWidgets);
+    expect(find.byTooltip('Move card to next group'), findsWidgets);
 
-      expect(find.byTooltip('Move card up'), findsWidgets);
-      expect(find.byTooltip('Move card down'), findsWidgets);
-      expect(find.byTooltip('Move card to previous group'), findsWidgets);
-      expect(find.byTooltip('Move card to next group'), findsWidgets);
+    final firstCard = find.ancestor(
+      of: find.text('First task'),
+      matching: find.byType(Card),
+    );
+    expect(firstCard, findsOneWidget);
+    expect(
+      find.descendant(of: firstCard, matching: find.byType(Semantics)),
+      findsWidgets,
+    );
 
-      final firstCard = find.ancestor(
-        of: find.text('First task'),
-        matching: find.byType(Card),
-      );
-      expect(firstCard, findsOneWidget);
-      expect(
-        find.descendant(of: firstCard, matching: find.byType(Semantics)),
-        findsWidgets,
-      );
-    } finally {
-      await tester.pumpWidget(const SizedBox.shrink());
-      await tester.pump();
-      Directory.current = originalDirectory.path;
-      if (await tempDirectory.exists()) {
-        await tempDirectory.delete(recursive: true);
-      }
-    }
+    await tester.pumpWidget(const SizedBox.shrink());
+    await tester.pump();
   });
 }
