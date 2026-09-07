@@ -314,13 +314,21 @@ struct PresentEngine::Impl {
         }
     }
 
-    static void callbackThunk(int type, const char* payload, void* data)
+    static void callbackThunk(int type, const char* payload, void* data) noexcept
     {
         auto* self = static_cast<Impl*>(data);
         if (self == nullptr || !self->eventCallback) {
             return;
         }
-        self->eventCallback(EngineEvent{type, payload == nullptr ? std::string{} : std::string(payload)});
+        try {
+            self->eventCallback(EngineEvent{
+                type,
+                payload == nullptr ? std::string{} : std::string(payload)
+            });
+        } catch (...) {
+            // Never allow CakeOS callback exceptions to unwind through the
+            // LibreOfficeKit C callback boundary.
+        }
     }
 
     [[nodiscard]] std::runtime_error lastError(std::string_view prefix) const
