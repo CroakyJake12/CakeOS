@@ -2,6 +2,7 @@ using CakeOS.Apps.Boards.Contract;
 using CakeOS.Apps.Boards.Hui;
 using Haven.UI;
 using Haven.UI.Components;
+using Xunit;
 using HavenButton = Haven.UI.Components.Button;
 
 namespace CakeOS.Apps.Boards.Hui.Tests;
