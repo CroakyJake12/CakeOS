@@ -50,7 +50,14 @@ public sealed class HavenBoardsHuiSession : IAsyncDisposable
         if (snapshot is null)
         {
             snapshot = HavenBoardSnapshot.CreateDefault() with { Id = boardId };
+            HavenBoardReducer.Validate(snapshot);
             await store.SaveAsync(snapshot, cancellationToken).ConfigureAwait(false);
+        }
+        else
+        {
+            // Persisted snapshots are untrusted input at the application boundary. Reject malformed
+            // parent references, duplicate card IDs, and cycles before any of them reach HUI.
+            HavenBoardReducer.Validate(snapshot);
         }
 
         return new HavenBoardsHuiSession(store, boardId, snapshot, created);
