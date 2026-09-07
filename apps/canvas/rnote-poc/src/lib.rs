@@ -170,6 +170,42 @@ impl HeadlessCanvasEngine {
         self.stroke_active
     }
 
+    pub fn can_undo(&self) -> bool {
+        self.engine.can_undo()
+    }
+
+    pub fn can_redo(&self) -> bool {
+        self.engine.can_redo()
+    }
+
+    /// Undo one completed Canvas operation. History changes are rejected while a
+    /// stroke is active so HUI cannot create an ambiguous partial-stroke state.
+    pub fn undo(&mut self) -> Result<bool> {
+        if self.stroke_active {
+            anyhow::bail!("cannot undo while a Canvas stroke is active");
+        }
+        if !self.engine.can_undo() {
+            return Ok(false);
+        }
+
+        let _ = self.engine.undo(Instant::now());
+        Ok(true)
+    }
+
+    /// Redo one completed Canvas operation. History changes are rejected while a
+    /// stroke is active for the same lifecycle reason as `undo`.
+    pub fn redo(&mut self) -> Result<bool> {
+        if self.stroke_active {
+            anyhow::bail!("cannot redo while a Canvas stroke is active");
+        }
+        if !self.engine.can_redo() {
+            return Ok(false);
+        }
+
+        let _ = self.engine.redo(Instant::now());
+        Ok(true)
+    }
+
     /// Convenience helper for tests/importers that already have a complete stroke.
     pub fn draw_stroke(&mut self, samples: &[CanvasPointerSample]) -> Result<()> {
         if samples.len() < 2 {
@@ -288,11 +324,30 @@ mod tests {
         canvas.begin_stroke(samples[0]).unwrap();
         assert!(canvas.stroke_active());
         assert!(canvas.begin_stroke(samples[1]).is_err());
+        assert!(canvas.undo().is_err());
+        assert!(canvas.redo().is_err());
 
         canvas.update_stroke(samples[1]).unwrap();
         canvas.update_stroke(samples[2]).unwrap();
         canvas.end_stroke(samples[3]).unwrap();
         assert!(!canvas.stroke_active());
+    }
+
+    #[test]
+    fn completed_stroke_participates_in_undo_redo_history() {
+        let mut canvas = HeadlessCanvasEngine::new();
+        assert!(!canvas.can_undo());
+        assert!(!canvas.undo().unwrap());
+
+        canvas.draw_stroke(&sample_stroke()).unwrap();
+        assert!(canvas.can_undo());
+
+        assert!(canvas.undo().unwrap());
+        assert!(canvas.can_redo());
+
+        assert!(canvas.redo().unwrap());
+        assert!(!canvas.can_redo());
+        assert!(canvas.can_undo());
     }
 
     #[test]
