@@ -168,6 +168,13 @@ jobs:
           grep -q '^slide_reorder_directions=down,up$' /tmp/present-reorder.log
           grep -q '^slide_order=Beta,Gamma,Alpha$' /tmp/present-reorder.log
 
+      - name: Prove mixed native and structural history
+        run: |
+          build/present-engine/cakeos-present-engine-mixed-history-smoke \
+            /tmp/cakeos-present-normalized/cakeos-present-reorder-source.odp | tee /tmp/present-mixed-history.log
+          grep -q '^mixed_history=passed$' /tmp/present-mixed-history.log
+          grep -q '^mixed_history_redo_branch=truncated$' /tmp/present-mixed-history.log
+
       - name: Prove framed HUI worker protocol
         run: |
           rm -f \
