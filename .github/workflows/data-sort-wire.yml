@@ -1,0 +1,289 @@
+name: One-shot Haven Data sort wiring
+
+on:
+  push:
+    branches:
+      - data-calc-duckdb-first-slice
+    paths:
+      - '.github/workflows/data-sort-wire.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  wire:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: data-calc-duckdb-first-slice
+          fetch-depth: 0
+
+      - name: Wire typed sort session and regressions
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          def replace_once(path_text: str, old: str, new: str) -> None:
+              path = Path(path_text)
+              text = path.read_text(encoding='utf-8')
+              if old not in text:
+                  raise SystemExit(f'anchor not found in {path_text}: {old[:80]!r}')
+              path.write_text(text.replace(old, new, 1), encoding='utf-8')
+
+          # Harden Calc sort descriptor handling for both legacy and v2 published UNO shapes.
+          worker = Path('apps/Data/workers/calc_worker.py')
+          text = worker.read_text(encoding='utf-8')
+          old_method = '''    def sort_range(self, workbook_id: str, request: dict, key_column_offset: object, ascending: bool, contains_header: bool) -> dict:\n        document = self._doc(workbook_id)\n        if bool(document.isReadonly()):\n            raise PermissionError("Workbook was opened read-only.")\n        _sheet, cell_range, normalized = self._bounded_cell_range(document, request, "Sort range")\n        key = int(key_column_offset)\n        if key < 0 or key >= normalized["columnCount"]:\n            raise ValueError("Sort key must identify a column inside the requested range.")\n        if contains_header and normalized["rowCount"] < 2:\n            raise ValueError("A sort range marked as containing a header must include at least one data row.")\n\n        descriptor = list(cell_range.createSortDescriptor())\n        sort_field = uno.createUnoStruct("com.sun.star.util.SortField")\n        sort_field.Field = key\n        sort_field.SortAscending = bool(ascending)\n\n        seen: set[str] = set()\n        for item in descriptor:\n            if item.Name == "SortFields":\n                item.Value = (sort_field,)\n                seen.add(item.Name)\n            elif item.Name == "ContainsHeader":\n                item.Value = bool(contains_header)\n                seen.add(item.Name)\n            elif item.Name == "SortColumns":\n                item.Value = False\n                seen.add(item.Name)\n            elif item.Name == "IsCaseSensitive":\n                item.Value = False\n            elif item.Name == "BindFormatsToContent":\n                item.Value = True\n            elif item.Name == "CopyOutputData":\n                item.Value = False\n            elif item.Name == "IsUserListEnabled":\n                item.Value = False\n\n        required = {"SortFields", "ContainsHeader", "SortColumns"}\n        missing = required.difference(seen)\n        if missing:\n            raise RuntimeError(f"LibreOffice sort descriptor is missing required properties: {sorted(missing)}")\n\n        cell_range.sort(tuple(descriptor))\n        document.calculateAll()\n        return self.read_range(workbook_id, normalized)\n\n'''
+          new_method = '''    def sort_range(self, workbook_id: str, request: dict, key_column_offset: object, ascending: bool, contains_header: bool) -> dict:\n        document = self._doc(workbook_id)\n        if bool(document.isReadonly()):\n            raise PermissionError("Workbook was opened read-only.")\n        _sheet, cell_range, normalized = self._bounded_cell_range(document, request, "Sort range")\n        key = int(key_column_offset)\n        if key < 0 or key >= normalized["columnCount"]:\n            raise ValueError("Sort key must identify a column inside the requested range.")\n        if contains_header and normalized["rowCount"] < 2:\n            raise ValueError("A sort range marked as containing a header must include at least one data row.")\n\n        descriptor = list(cell_range.createSortDescriptor())\n        property_names = {str(item.Name) for item in descriptor}\n        uses_v2 = "IsSortColumns" in property_names\n        if uses_v2:\n            sort_field = uno.createUnoStruct("com.sun.star.table.TableSortField")\n            sort_field.Field = key\n            sort_field.IsAscending = bool(ascending)\n            sort_field.IsCaseSensitive = False\n            sort_field.FieldType = uno.Enum("com.sun.star.table.TableSortFieldType", "AUTOMATIC")\n            direction_property = "IsSortColumns"\n        else:\n            sort_field = uno.createUnoStruct("com.sun.star.util.SortField")\n            sort_field.Field = key\n            sort_field.SortAscending = bool(ascending)\n            direction_property = "SortColumns"\n\n        seen: set[str] = set()\n        for item in descriptor:\n            if item.Name == "SortFields":\n                item.Value = (sort_field,)\n                seen.add(item.Name)\n            elif item.Name == "ContainsHeader":\n                item.Value = bool(contains_header)\n                seen.add(item.Name)\n            elif item.Name == direction_property:\n                item.Value = False\n                seen.add(item.Name)\n            elif item.Name == "IsCaseSensitive":\n                item.Value = False\n            elif item.Name == "BindFormatsToContent":\n                item.Value = True\n            elif item.Name == "CopyOutputData":\n                item.Value = False\n            elif item.Name == "IsUserListEnabled":\n                item.Value = False\n\n        required = {"SortFields", "ContainsHeader", direction_property}\n        missing = required.difference(seen)\n        if missing:\n            raise RuntimeError(f"LibreOffice sort descriptor is missing required properties: {sorted(missing)}")\n\n        cell_range.sort(tuple(descriptor))\n        document.calculateAll()\n        return self.read_range(workbook_id, normalized)\n\n'''
+          if old_method not in text:
+              raise SystemExit('existing sort method not found')
+          worker.write_text(text.replace(old_method, new_method, 1), encoding='utf-8')
+
+          # HUI-facing grid session: expose only a visible-range, single-key sort command.
+          session_method = '''    public async Task<DataGridSessionSnapshot> SortRangeAsync(\n        int startRow,\n        int startColumn,\n        int rowCount,\n        int columnCount,\n        int keyColumnOffset,\n        bool ascending = true,\n        bool containsHeader = true,\n        CancellationToken cancellationToken = default)\n    {\n        ThrowIfDisposed();\n        var workbook = EnsureEditable();\n        var range = VisibleRange(startRow, startColumn, rowCount, columnCount);\n        if (keyColumnOffset < 0 || keyColumnOffset >= columnCount)\n            throw new ArgumentOutOfRangeException(nameof(keyColumnOffset), "Sort key must identify a column inside the requested visible range.");\n        if (containsHeader && rowCount < 2)\n            throw new ArgumentException("A sort range marked as containing a header must include at least one data row.", nameof(rowCount));\n\n        _ = await _spreadsheet.SortRangeAsync(\n            workbook.Id, range, keyColumnOffset, ascending, containsHeader, cancellationToken).ConfigureAwait(false);\n        return await RefreshAsync(cancellationToken).ConfigureAwait(false);\n    }\n\n'''
+          replace_once(
+              'apps/Data/App/DataGridSession.cs',
+              '    public Task<DataGridSessionSnapshot> InsertRowsAsync(int index, int count = 1, CancellationToken cancellationToken = default) =>\n',
+              session_method + '    public Task<DataGridSessionSnapshot> InsertRowsAsync(int index, int count = 1, CancellationToken cancellationToken = default) =>\n'
+          )
+
+          # Smoke fake: implement and exercise the expanded spreadsheet contract.
+          replace_once(
+              'apps/Data/Tests/Program.cs',
+              '    Assert(!clearedValidation.Enabled && clearedValidation.Values.Count == 0, "Grid session did not clear list validation.");\n\n    _ = await session.InsertRowsAsync(1);\n',
+              '    Assert(!clearedValidation.Enabled && clearedValidation.Values.Count == 0, "Grid session did not clear list validation.");\n\n    var sorted = await session.SortRangeAsync(0, 0, 3, 2, 0, ascending: true, containsHeader: false);\n    Assert(fake.SortCalls == 1 && sorted.Grid.Values.Count == DataGridSession.VisibleRows, "Grid session did not delegate single-key sort and refresh exactly once.");\n\n    _ = await session.InsertRowsAsync(1);\n'
+          )
+          replace_once(
+              'apps/Data/Tests/Program.cs',
+              '    public int DeleteColumnsCalls { get; private set; }\n    public string? LastSavePath { get; private set; }\n',
+              '    public int DeleteColumnsCalls { get; private set; }\n    public int SortCalls { get; private set; }\n    public string? LastSavePath { get; private set; }\n'
+          )
+          fake_sort = '''    public async Task<DataSortResult> SortRangeAsync(\n        string workbookId,\n        DataRangeRequest range,\n        int keyColumnOffset,\n        bool ascending = true,\n        bool containsHeader = true,\n        CancellationToken cancellationToken = default)\n    {\n        cancellationToken.ThrowIfCancellationRequested();\n        EnsureOpen(workbookId);\n        SortCalls++;\n        var snapshot = await ReadRangeAsync(workbookId, range, cancellationToken);\n        return new DataSortResult(range, keyColumnOffset, ascending, containsHeader, snapshot);\n    }\n\n'''
+          replace_once(
+              'apps/Data/Tests/Program.cs',
+              '    public Task InsertRowsAsync(string workbookId, string sheet, int index, int count, CancellationToken cancellationToken = default)\n',
+              fake_sort + '    public Task InsertRowsAsync(string workbookId, string sheet, int index, int count, CancellationToken cancellationToken = default)\n'
+          )
+          replace_once(
+              'apps/Data/Tests/Program.cs',
+              'Console.WriteLine("Haven Data contract, grid-session, named-range, list-validation, structural-edit, database-bridge, query-session and materialisation smoke checks passed.");',
+              'Console.WriteLine("Haven Data contract, grid-session, named-range, list-validation, single-key-sort, structural-edit, database-bridge, query-session and materialisation smoke checks passed.");'
+          )
+
+          sort_test = r'''#!/usr/bin/env python3
+"""Live single-key sort regression for Haven Data Calc."""
+
+from __future__ import annotations
+
+import tempfile
+from pathlib import Path
+
+from test_workers import CALC_WORKER, Worker, make_fixture_ods, require
+
+
+def main() -> int:
+    with tempfile.TemporaryDirectory(prefix="haven-data-calc-sort-") as directory_text:
+        directory = Path(directory_text)
+        source = make_fixture_ods(directory)
+        saved = directory / "sorted.ods"
+
+        with Worker(CALC_WORKER) as worker:
+            opened = worker.call("open", {"path": str(source), "readOnly": False})
+            workbook_id = opened["id"]
+            sheet = worker.call("listSheets", {"workbookId": workbook_id})[0]["name"]
+
+            cells = [
+                (0, 0, "Name"), (0, 1, "Score"),
+                (1, 0, "Ada"), (1, 1, "2"),
+                (2, 0, "Bob"), (2, 1, "10"),
+                (3, 0, "Cara"), (3, 1, "5"),
+            ]
+            for row, column, value in cells:
+                worker.call("setCell", {"workbookId": workbook_id, "address": {"sheet": sheet, "row": row, "column": column}, "value": value, "formula": ""})
+
+            request = {"sheet": sheet, "startRow": 0, "startColumn": 0, "rowCount": 4, "columnCount": 2}
+            ascending = worker.call("sortRange", {"workbookId": workbook_id, "range": request, "keyColumnOffset": 1, "ascending": True, "containsHeader": True})
+            require(ascending["values"][0] == ["Name", "Score"], f"Header moved during ascending sort: {ascending}")
+            require([row[0] for row in ascending["values"][1:]] == ["Ada", "Cara", "Bob"], f"Ascending numeric sort was wrong: {ascending}")
+
+            descending = worker.call("sortRange", {"workbookId": workbook_id, "range": request, "keyColumnOffset": 1, "ascending": False, "containsHeader": True})
+            require([row[0] for row in descending["values"][1:]] == ["Bob", "Cara", "Ada"], f"Descending numeric sort was wrong: {descending}")
+
+            invalid_key = worker.expect_error("sortRange", {"workbookId": workbook_id, "range": request, "keyColumnOffset": 2, "ascending": True, "containsHeader": True})
+            require("sort key" in invalid_key.lower(), "Worker accepted a sort key outside the requested range.")
+
+            worker.call("save", {"workbookId": workbook_id, "destinationPath": str(saved)})
+            worker.call("close", {"workbookId": workbook_id})
+
+            reopened = worker.call("open", {"path": str(saved), "readOnly": True})
+            workbook_id = reopened["id"]
+            persisted = worker.call("readRange", {"workbookId": workbook_id, "range": request})
+            require([row[0] for row in persisted["values"][1:]] == ["Bob", "Cara", "Ada"], f"ODS reopen changed sorted row order: {persisted}")
+            read_only = worker.expect_error("sortRange", {"workbookId": workbook_id, "range": request, "keyColumnOffset": 1, "ascending": True, "containsHeader": True})
+            require("read-only" in read_only.lower(), "Read-only sort guard was not enforced.")
+            worker.call("close", {"workbookId": workbook_id})
+
+        require(saved.exists() and saved.stat().st_size > 0, "Sorted ODS fixture was not saved.")
+
+    print("Calc single-key sort regression passed.")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
+'''
+          Path('apps/Data/Tests/test_calc_sort.py').write_text(sort_test, encoding='utf-8')
+
+          sort_runtime = r'''using System.Diagnostics;
+using HavenOS.Apps.Data;
+
+static void Assert(bool condition, string message)
+{
+    if (!condition) throw new InvalidOperationException(message);
+}
+
+static string FindRepositoryRoot()
+{
+    var current = new DirectoryInfo(Directory.GetCurrentDirectory());
+    while (current is not null)
+    {
+        if (File.Exists(Path.Combine(current.FullName, "apps", "Data", "workers", "calc_worker.py")))
+            return current.FullName;
+        current = current.Parent;
+    }
+    throw new DirectoryNotFoundException("Could not locate the CakeOS repository root.");
+}
+
+static async Task ConvertCsvToOdsAsync(string csvPath, string outputDirectory)
+{
+    var soffice = Environment.GetEnvironmentVariable("HAVEN_DATA_SOFFICE") ?? "soffice";
+    var startInfo = new ProcessStartInfo
+    {
+        FileName = soffice,
+        RedirectStandardOutput = true,
+        RedirectStandardError = true,
+        UseShellExecute = false,
+        CreateNoWindow = true,
+    };
+    startInfo.ArgumentList.Add("--headless");
+    startInfo.ArgumentList.Add("--convert-to");
+    startInfo.ArgumentList.Add("ods");
+    startInfo.ArgumentList.Add("--outdir");
+    startInfo.ArgumentList.Add(outputDirectory);
+    startInfo.ArgumentList.Add(csvPath);
+
+    using var process = Process.Start(startInfo)
+        ?? throw new InvalidOperationException("Could not start LibreOffice to create the sort fixture.");
+    using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(60));
+    try { await process.WaitForExitAsync(timeout.Token); }
+    catch (OperationCanceledException)
+    {
+        try { process.Kill(entireProcessTree: true); } catch { }
+        throw new TimeoutException("LibreOffice timed out while creating the sort fixture.");
+    }
+    var stdout = await process.StandardOutput.ReadToEndAsync();
+    var stderr = await process.StandardError.ReadToEndAsync();
+    if (process.ExitCode != 0)
+        throw new InvalidOperationException($"LibreOffice sort fixture conversion failed ({process.ExitCode}). stdout: {stdout} stderr: {stderr}");
+}
+
+var root = FindRepositoryRoot();
+var python = Environment.GetEnvironmentVariable("HAVEN_DATA_PYTHON") ?? "python3";
+var calcWorker = Path.Combine(root, "apps", "Data", "workers", "calc_worker.py");
+var temporaryRoot = Path.Combine(Path.GetTempPath(), $"haven-data-sort-runtime-{Guid.NewGuid():N}");
+Directory.CreateDirectory(temporaryRoot);
+
+try
+{
+    var csvPath = Path.Combine(temporaryRoot, "fixture.csv");
+    var sourceOds = Path.Combine(temporaryRoot, "fixture.ods");
+    var savedOds = Path.Combine(temporaryRoot, "sorted.ods");
+    await File.WriteAllTextAsync(csvPath, "Name,Score\nAda,2\nBob,10\nCara,5\n");
+    await ConvertCsvToOdsAsync(csvPath, temporaryRoot);
+    Assert(File.Exists(sourceOds) && new FileInfo(sourceOds).Length > 0, "LibreOffice did not create the sort ODS fixture.");
+
+    await using var spreadsheet = new CalcSpreadsheetEngine(calcWorker, python);
+    await using var grid = new DataGridSession(spreadsheet);
+    _ = await grid.OpenAsync(sourceOds);
+
+    var descending = await grid.SortRangeAsync(0, 0, 4, 2, 1, ascending: false, containsHeader: true);
+    Assert(descending.Grid.Values[0][0] == "Name", "DataGridSession moved the sort header row.");
+    Assert(descending.Grid.Values[1][0] == "Bob" && descending.Grid.Values[2][0] == "Cara" && descending.Grid.Values[3][0] == "Ada",
+        "DataGridSession did not expose Calc descending numeric sort order.");
+
+    var ascending = await grid.SortRangeAsync(0, 0, 4, 2, 1, ascending: true, containsHeader: true);
+    Assert(ascending.Grid.Values[1][0] == "Ada" && ascending.Grid.Values[2][0] == "Cara" && ascending.Grid.Values[3][0] == "Bob",
+        "DataGridSession did not expose Calc ascending numeric sort order.");
+
+    await grid.SaveAsAsync(savedOds);
+    await grid.CloseAsync();
+
+    _ = await grid.OpenAsync(savedOds, readOnly: true);
+    var persisted = await grid.RefreshAsync();
+    Assert(persisted.Grid.Values[1][0] == "Ada" && persisted.Grid.Values[3][0] == "Bob", "ODS save/reopen changed sorted row order.");
+    var readOnlyBlocked = false;
+    try { _ = await grid.SortRangeAsync(0, 0, 4, 2, 1); }
+    catch (InvalidOperationException) { readOnlyBlocked = true; }
+    Assert(readOnlyBlocked, "DataGridSession did not block sort mutation on a read-only workbook.");
+    await grid.CloseAsync();
+
+    Console.WriteLine("Haven Data .NET-to-Calc single-key sort runtime integration checks passed.");
+}
+finally
+{
+    try { Directory.Delete(temporaryRoot, recursive: true); } catch { }
+}
+'''
+          Path('apps/Data/Tests/SortRuntimeProgram.cs').write_text(sort_runtime, encoding='utf-8')
+
+          sort_csproj = r'''<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+    <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
+  </PropertyGroup>
+  <ItemGroup>
+    <Compile Include="SortRuntimeProgram.cs" />
+    <ProjectReference Include="../App/HavenOS.Data.App.csproj" />
+  </ItemGroup>
+</Project>
+'''
+          Path('apps/Data/Tests/HavenOS.Data.Sort.Runtime.csproj').write_text(sort_csproj, encoding='utf-8')
+
+          # Extend the existing distro matrix with worker-level and full .NET sort proof.
+          workflow = Path('.github/workflows/data-first-slice.yml')
+          wf = workflow.read_text(encoding='utf-8')
+          wf = wf.replace(
+              '          .data-venv/bin/python -m py_compile apps/Data/Tests/test_calc_validation.py\n',
+              '          .data-venv/bin/python -m py_compile apps/Data/Tests/test_calc_validation.py\n          .data-venv/bin/python -m py_compile apps/Data/Tests/test_calc_sort.py\n',
+              1,
+          )
+          wf = wf.replace(
+              '          .data-venv/bin/python apps/Data/Tests/test_calc_validation.py\n',
+              '          .data-venv/bin/python apps/Data/Tests/test_calc_validation.py\n          .data-venv/bin/python apps/Data/Tests/test_calc_sort.py\n',
+              1,
+          )
+          wf = wf.replace(
+              '          dotnet run --project apps/Data/Tests/HavenOS.Data.Validation.Runtime.csproj -c Release\n',
+              '          dotnet run --project apps/Data/Tests/HavenOS.Data.Validation.Runtime.csproj -c Release\n          dotnet run --project apps/Data/Tests/HavenOS.Data.Sort.Runtime.csproj -c Release\n',
+              1,
+          )
+          workflow.write_text(wf, encoding='utf-8')
+          PY
+
+      - name: Commit wiring and remove one-shot workflow
+        shell: bash
+        run: |
+          rm .github/workflows/data-sort-wire.yml
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add apps/Data .github/workflows/data-first-slice.yml .github/workflows/data-sort-wire.yml
+          git diff --cached --check
+          git commit -m 'Wire Haven Data single-key sort through session and CI'
+          git push origin HEAD:data-calc-duckdb-first-slice
