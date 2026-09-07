@@ -109,13 +109,7 @@ public sealed class DataGridSession : IAsyncDisposable
     {
         ThrowIfDisposed();
         var workbook = EnsureEditable();
-        ValidateVisibleRange(startRow, startColumn, rowCount, columnCount);
-        var range = new DataRangeRequest(
-            _sheets[_activeSheetIndex].Name,
-            startRow,
-            startColumn,
-            rowCount,
-            columnCount);
+        var range = VisibleRange(startRow, startColumn, rowCount, columnCount);
         return _spreadsheet.CreateNamedRangeAsync(workbook.Id, name, range, cancellationToken);
     }
 
@@ -127,6 +121,47 @@ public sealed class DataGridSession : IAsyncDisposable
         var workbook = EnsureEditable();
         await _spreadsheet.DeleteNamedRangeAsync(workbook.Id, name, cancellationToken).ConfigureAwait(false);
         return await _spreadsheet.ListNamedRangesAsync(workbook.Id, cancellationToken).ConfigureAwait(false);
+    }
+
+    public Task<DataListValidationState> GetListValidationAsync(
+        int startRow,
+        int startColumn,
+        int rowCount,
+        int columnCount,
+        CancellationToken cancellationToken = default)
+    {
+        ThrowIfDisposed();
+        var workbook = EnsureOpen();
+        var range = VisibleRange(startRow, startColumn, rowCount, columnCount);
+        return _spreadsheet.GetListValidationAsync(workbook.Id, range, cancellationToken);
+    }
+
+    public Task<DataListValidationState> ApplyListValidationAsync(
+        int startRow,
+        int startColumn,
+        int rowCount,
+        int columnCount,
+        IReadOnlyList<string> values,
+        bool allowBlank = true,
+        CancellationToken cancellationToken = default)
+    {
+        ThrowIfDisposed();
+        var workbook = EnsureEditable();
+        var range = VisibleRange(startRow, startColumn, rowCount, columnCount);
+        return _spreadsheet.ApplyListValidationAsync(workbook.Id, range, values, allowBlank, cancellationToken);
+    }
+
+    public Task<DataListValidationState> ClearValidationAsync(
+        int startRow,
+        int startColumn,
+        int rowCount,
+        int columnCount,
+        CancellationToken cancellationToken = default)
+    {
+        ThrowIfDisposed();
+        var workbook = EnsureEditable();
+        var range = VisibleRange(startRow, startColumn, rowCount, columnCount);
+        return _spreadsheet.ClearValidationAsync(workbook.Id, range, cancellationToken);
     }
 
     public Task<DataGridSessionSnapshot> InsertRowsAsync(int index, int count = 1, CancellationToken cancellationToken = default) =>
@@ -240,6 +275,12 @@ public sealed class DataGridSession : IAsyncDisposable
         return workbook;
     }
 
+    private DataRangeRequest VisibleRange(int startRow, int startColumn, int rowCount, int columnCount)
+    {
+        ValidateVisibleRange(startRow, startColumn, rowCount, columnCount);
+        return new DataRangeRequest(_sheets[_activeSheetIndex].Name, startRow, startColumn, rowCount, columnCount);
+    }
+
     private static void ValidateVisibleCell(int row, int column)
     {
         if (row < 0 || row >= VisibleRows)
@@ -252,7 +293,7 @@ public sealed class DataGridSession : IAsyncDisposable
     {
         if (startRow < 0 || startColumn < 0 || rowCount < 1 || columnCount < 1 ||
             startRow + rowCount > VisibleRows || startColumn + columnCount > VisibleColumns)
-            throw new ArgumentOutOfRangeException(nameof(rowCount), $"Named ranges created through the first-slice grid must fit wholly inside its {VisibleRows} x {VisibleColumns} viewport.");
+            throw new ArgumentOutOfRangeException(nameof(rowCount), $"First-slice range operations must fit wholly inside the {VisibleRows} x {VisibleColumns} viewport.");
     }
 
     private void ThrowIfDisposed()
