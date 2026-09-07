@@ -30,9 +30,11 @@ public sealed class HuiPreviewSurface : Control, IHavenMeasureContext, IDisposab
     private readonly bool _canvasMode;
     private readonly CanvasNativeSession? _canvasSession;
     private readonly HuiImage? _canvasElement;
+    private readonly CanvasToolStrip? _canvasTools;
     private SvgSource? _canvasSvgSource;
     private SvgImage? _canvasSvgImage;
     private CanvasDocumentBounds? _canvasDocumentBounds;
+    private CanvasStrokeTool _canvasStrokeTool = CanvasStrokeTool.Pen;
     private bool _canvasStrokeActive;
     private bool _canvasPanActive;
     private IPointer? _canvasPanPointer;
@@ -56,7 +58,9 @@ public sealed class HuiPreviewSurface : Control, IHavenMeasureContext, IDisposab
             _action = scene.Action;
             _status = scene.Status;
             _canvasElement = scene.Canvas;
+            _canvasTools = scene.Tools;
             _canvasSession = new CanvasNativeSession();
+            WireCanvasTools(_canvasTools, _canvasSession);
             InitializeCanvasFrame(_canvasSession);
         }
         else
@@ -287,8 +291,11 @@ public sealed class HuiPreviewSurface : Control, IHavenMeasureContext, IDisposab
         if (!_input.KeyDown(HavenKey.Enter) || !_input.KeyUp(HavenKey.Enter) || _action.Accessibility.Selected != true)
             throw new InvalidOperationException("HUI keyboard activation self-test failed.");
 
+        if (_canvasMode)
+            RunCanvasToolSelfTest();
+
         _status.Content = _canvasMode
-            ? $"Rnote through HUI; input passed; viewport {_canvasZoom:0.##}x"
+            ? $"Rnote through HUI; input + tools passed; viewport {_canvasZoom:0.##}x"
             : "HUI pointer + keyboard input passed";
         InvalidateMeasure();
         InvalidateVisual();
@@ -300,7 +307,7 @@ public sealed class HuiPreviewSurface : Control, IHavenMeasureContext, IDisposab
         {
             HuiText text => MeasureText(text, available),
             HuiButton button => new HavenSize(Math.Min(available.Width, Math.Max(160, button.Content.Length * 9 + 40)), Math.Min(available.Height, 46)),
-            HuiImage => new HavenSize(Math.Min(available.Width, 820), Math.Min(available.Height, 360)),
+            HuiImage => new HavenSize(Math.Min(available.Width, 820), Math.Min(available.Height, 310)),
             _ => new HavenSize(Math.Min(available.Width, 48), Math.Min(available.Height, 48)),
         };
     }
@@ -316,9 +323,95 @@ public sealed class HuiPreviewSurface : Control, IHavenMeasureContext, IDisposab
         GC.SuppressFinalize(this);
     }
 
+    private void WireCanvasTools(CanvasToolStrip tools, CanvasNativeSession session)
+    {
+        tools.ToolRequested += tool => SetCanvasTool(session, tool);
+        tools.UndoRequested += (_, _) => CanvasUndo(session);
+        tools.RedoRequested += (_, _) => CanvasRedo(session);
+    }
+
+    private void SetCanvasTool(CanvasNativeSession session, CanvasStrokeTool tool)
+    {
+        if (_canvasStrokeActive || _canvasPanActive)
+        {
+            _status.Content = "Finish the active Canvas gesture before changing tools.";
+            return;
+        }
+
+        session.SetTool(tool);
+        _canvasStrokeTool = tool;
+        _canvasTools?.SetTool(tool);
+        _status.Content = $"{tool} selected";
+        Console.WriteLine($"CANVAS_RNOTE_TOOL_SELECTED tool={tool}");
+        InvalidateVisual();
+    }
+
+    private void CanvasUndo(CanvasNativeSession session)
+    {
+        if (_canvasStrokeActive || _canvasPanActive) return;
+        var changed = session.Undo();
+        if (changed)
+            RefreshCanvasFrame(session);
+        RefreshCanvasHistory(session);
+        _status.Content = changed ? "Canvas undo" : "Nothing to undo";
+        Console.WriteLine($"CANVAS_RNOTE_HISTORY action=undo changed={(changed ? 1 : 0)}");
+        InvalidateMeasure();
+        InvalidateVisual();
+    }
+
+    private void CanvasRedo(CanvasNativeSession session)
+    {
+        if (_canvasStrokeActive || _canvasPanActive) return;
+        var changed = session.Redo();
+        if (changed)
+            RefreshCanvasFrame(session);
+        RefreshCanvasHistory(session);
+        _status.Content = changed ? "Canvas redo" : "Nothing to redo";
+        Console.WriteLine($"CANVAS_RNOTE_HISTORY action=redo changed={(changed ? 1 : 0)}");
+        InvalidateMeasure();
+        InvalidateVisual();
+    }
+
+    private void RefreshCanvasHistory(CanvasNativeSession session) =>
+        _canvasTools?.SetHistory(session.CanUndo, session.CanRedo);
+
+    private void RunCanvasToolSelfTest()
+    {
+        if (_canvasTools is null || _canvasSession is null)
+            throw new InvalidOperationException("Canvas HUI tool self-test requires a tool strip and native session.");
+
+        InvokeHuiButton(_canvasTools.EraserButton);
+        if (_canvasStrokeTool != CanvasStrokeTool.Eraser)
+            throw new InvalidOperationException("HUI Eraser button did not select the native eraser tool.");
+
+        InvokeHuiButton(_canvasTools.PenButton);
+        if (_canvasStrokeTool != CanvasStrokeTool.Pen)
+            throw new InvalidOperationException("HUI Pen button did not restore the native pen tool.");
+
+        if (!_canvasSession.CanUndo)
+            throw new InvalidOperationException("Canvas HUI tool self-test expected an undoable seeded stroke.");
+        InvokeHuiButton(_canvasTools.UndoButton);
+        if (!_canvasSession.CanRedo)
+            throw new InvalidOperationException("HUI Undo button did not expose redo history.");
+        InvokeHuiButton(_canvasTools.RedoButton);
+        if (!_canvasSession.CanUndo)
+            throw new InvalidOperationException("HUI Redo button did not restore undo history.");
+
+        Console.WriteLine("CANVAS_RNOTE_HUI_TOOLBAR_READY pen=1 eraser=1 undo=1 redo=1");
+    }
+
+    private void InvokeHuiButton(HuiButton button)
+    {
+        var center = new HavenPoint(button.Bounds.X + button.Bounds.Width / 2d, button.Bounds.Y + button.Bounds.Height / 2d);
+        _input.PointerPressed(center);
+        if (!_input.PointerReleased(center))
+            throw new InvalidOperationException($"HUI button self-test did not invoke '{button.Name}'.");
+    }
+
     private void InitializeCanvasFrame(CanvasNativeSession session)
     {
         session.SetTool(CanvasStrokeTool.Pen);
+        _canvasStrokeTool = CanvasStrokeTool.Pen;
         session.BeginStroke(120, 120, 0.18, 12, -5);
         session.UpdateStroke(160, 145, 0.35, 10, -4);
         session.UpdateStroke(210, 165, 0.62, 8, -3);
@@ -328,6 +421,8 @@ public sealed class HuiPreviewSurface : Control, IHavenMeasureContext, IDisposab
         if (!session.CanUndo || !session.Undo() || !session.CanRedo || !session.Redo())
             throw new InvalidOperationException("Canvas managed/native undo-redo proof failed.");
 
+        _canvasTools?.SetTool(CanvasStrokeTool.Pen);
+        RefreshCanvasHistory(session);
         var frame = RefreshCanvasFrame(session);
         _status.Content = $"Rnote ABI 1 / SVG / document {frame.Bounds.Width:0} x {frame.Bounds.Height:0} / viewport {_canvasZoom:0.##}x";
         Console.WriteLine(
@@ -382,7 +477,6 @@ public sealed class HuiPreviewSurface : Control, IHavenMeasureContext, IDisposab
             return false;
 
         var pressure = PointerPressure(e.Pointer.Type, properties.Pressure);
-        _canvasSession.SetTool(CanvasStrokeTool.Pen);
         _canvasSession.BeginStroke(documentPoint.X, documentPoint.Y, pressure, properties.XTilt, properties.YTilt);
         _canvasStrokeActive = true;
         return true;
@@ -411,9 +505,10 @@ public sealed class HuiPreviewSurface : Control, IHavenMeasureContext, IDisposab
         _canvasSession.EndStroke(documentPoint.X, documentPoint.Y, pressure, properties.XTilt, properties.YTilt);
         _canvasStrokeActive = false;
         var frame = RefreshCanvasFrame(_canvasSession);
-        _status.Content = $"Pointer ink committed through HUI to Rnote; viewport {_canvasZoom:0.##}x; undo available";
+        RefreshCanvasHistory(_canvasSession);
+        _status.Content = $"Pointer {_canvasStrokeTool} committed through HUI to Rnote; viewport {_canvasZoom:0.##}x";
         Console.WriteLine(
-            $"CANVAS_RNOTE_POINTER_STROKE_COMMITTED pointer={e.Pointer.Type} pressure={pressure:0.###} width={frame.Bounds.Width:0.###} height={frame.Bounds.Height:0.###} zoom={_canvasZoom:0.###}");
+            $"CANVAS_RNOTE_POINTER_STROKE_COMMITTED pointer={e.Pointer.Type} tool={_canvasStrokeTool} pressure={pressure:0.###} width={frame.Bounds.Width:0.###} height={frame.Bounds.Height:0.###} zoom={_canvasZoom:0.###}");
     }
 
     private bool TryBeginCanvasPan(PointerPressedEventArgs e, Point surfacePoint)
@@ -625,7 +720,7 @@ public sealed class HuiPreviewSurface : Control, IHavenMeasureContext, IDisposab
         return (root, action, status);
     }
 
-    private static (HuiPage Root, HuiButton Action, HuiText Status, HuiImage Canvas) BuildCanvasScene()
+    private static (HuiPage Root, HuiButton Action, HuiText Status, HuiImage Canvas, CanvasToolStrip Tools) BuildCanvasScene()
     {
         var root = new HuiPage { Name = "CanvasPreviewRoot", Layout = HavenLayout.Vertical };
         root.SetValue(HavenProperties.Width, HavenLength.Percent(100));
@@ -643,14 +738,16 @@ public sealed class HuiPreviewSurface : Control, IHavenMeasureContext, IDisposab
 
         var body = new HuiText
         {
-            Content = "HUI owns ink and viewport state. Wheel zoom is cursor-anchored; touch or middle/right drag pans; left mouse and pen contact map into Rnote document coordinates."
+            Content = "HUI owns tools, ink and viewport state. Wheel zoom is cursor-anchored; touch or middle/right drag pans; primary mouse and pen contact use the selected Rnote tool."
         };
         body.SetValue(HavenProperties.FontSize, 14d);
         body.SetValue(HavenProperties.Foreground, "TextSecondary");
 
+        var tools = new CanvasToolStrip();
+
         var canvas = new HuiImage { Name = "CanvasFrame", Source = CanvasFrameSource, Fit = HavenImageFit.Contain };
         canvas.SetValue(HavenProperties.Width, HavenLength.Percent(100));
-        canvas.SetValue(HavenProperties.Height, HavenLength.Px(360));
+        canvas.SetValue(HavenProperties.Height, HavenLength.Px(310));
 
         var action = new HuiButton { Name = "Action", Content = "Test HUI input" };
         action.SetValue(HavenProperties.Width, HavenLength.Px(190));
@@ -664,10 +761,11 @@ public sealed class HuiPreviewSurface : Control, IHavenMeasureContext, IDisposab
         root.Add(eyebrow);
         root.Add(title);
         root.Add(body);
+        root.Add(tools);
         root.Add(canvas);
         root.Add(action);
         root.Add(status);
-        return (root, action, status, canvas);
+        return (root, action, status, canvas, tools);
     }
 
     private static HavenSize MeasureText(HuiText text, HavenSize available)
