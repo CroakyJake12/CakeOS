@@ -35,5 +35,20 @@ jobs:
       - name: Validate acceptance harness help path
         run: bash compatibility/wine/acceptance.sh --help
 
+      - name: Verify rendered user service
+        shell: bash
+        run: |
+          set -euo pipefail
+          source_root="$PWD"
+          python_path="$(command -v python)"
+          rendered="$RUNNER_TEMP/haven-compatd.service"
+          sed \
+            -e "s|@PYTHON@|$python_path|g" \
+            -e "s|@SOURCE_ROOT@|$source_root|g" \
+            -e "s|@DOC_ROOT@|$source_root|g" \
+            compatibility/wine/systemd/haven-compatd.service.in > "$rendered"
+          ! grep -Eq '@(PYTHON|SOURCE_ROOT|DOC_ROOT)@' "$rendered"
+          systemd-analyze --user verify "$rendered"
+
       - name: Run compatibility tests
         run: python -m unittest discover -s tests -p 'test_haven_compat*.py' -v
