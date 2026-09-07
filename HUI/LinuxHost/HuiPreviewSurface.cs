@@ -3,28 +3,50 @@ using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Input;
 using Avalonia.Media;
+using Avalonia.Svg.Skia;
+using CakeOS.HuiLinuxHost.Canvas;
 using Haven.UI;
 using Haven.UI.Components;
 using HuiButton = Haven.UI.Components.Button;
+using HuiImage = Haven.UI.Components.Image;
 using HuiPage = Haven.UI.Components.Page;
 using HuiText = Haven.UI.Components.Text;
 
 namespace CakeOS.HuiLinuxHost;
 
-public sealed class HuiPreviewSurface : Control, IHavenMeasureContext
+public sealed class HuiPreviewSurface : Control, IHavenMeasureContext, IDisposable
 {
+    private const string CanvasFrameSource = "cake-canvas://rnote-frame";
+
     private readonly HuiPage _root;
     private readonly HuiButton _action;
     private readonly HuiText _status;
     private readonly HavenLayoutEngine _layout = new();
     private readonly HavenSceneRenderer _renderer = new();
     private readonly HavenInputRouter _input;
+    private readonly bool _canvasMode;
+    private readonly CanvasNativeSession? _canvasSession;
+    private SvgSource? _canvasSvgSource;
+    private SvgImage? _canvasSvgImage;
+    private bool _disposed;
 
     public HuiPreviewSurface()
     {
         Focusable = true;
         ClipToBounds = true;
-        (_root, _action, _status) = BuildScene();
+        _canvasMode = Environment.GetEnvironmentVariable("CAKEOS_HUI_CANVAS_PREVIEW") == "1";
+
+        if (_canvasMode)
+        {
+            (_root, _action, _status) = BuildCanvasScene();
+            _canvasSession = new CanvasNativeSession();
+            InitializeCanvasFrame(_canvasSession);
+        }
+        else
+        {
+            (_root, _action, _status) = BuildScene();
+        }
+
         _input = new HavenInputRouter(_root);
     }
 
@@ -91,6 +113,9 @@ public sealed class HuiPreviewSurface : Control, IHavenMeasureContext
                         break;
                     case HavenEllipseCommand ellipse:
                         context.DrawEllipse(Brush(ellipse.Brush, ellipse.Opacity), ellipse.Pen is null ? null : Pen(ellipse.Pen, ellipse.Opacity), Rect(ellipse.Rect));
+                        break;
+                    case HavenImageCommand image:
+                        DrawImage(context, image);
                         break;
                     case HavenShadowCommand shadow:
                         DrawEffect(context, shadow.Rect, shadow.Radius, shadow.Shadow.Brush, shadow.Shadow.OffsetX, shadow.Shadow.OffsetY, shadow.Shadow.Blur, shadow.Shadow.Spread, shadow.Opacity);
@@ -192,7 +217,9 @@ public sealed class HuiPreviewSurface : Control, IHavenMeasureContext
         if (!_input.KeyDown(HavenKey.Enter) || !_input.KeyUp(HavenKey.Enter) || _action.Accessibility.Selected != true)
             throw new InvalidOperationException("HUI keyboard activation self-test failed.");
 
-        _status.Content = "HUI pointer + keyboard input passed";
+        _status.Content = _canvasMode
+            ? "Rnote frame rendered through HUI; HUI pointer + keyboard input passed"
+            : "HUI pointer + keyboard input passed";
         InvalidateMeasure();
         InvalidateVisual();
     }
@@ -203,8 +230,89 @@ public sealed class HuiPreviewSurface : Control, IHavenMeasureContext
         {
             HuiText text => MeasureText(text, available),
             HuiButton button => new HavenSize(Math.Min(available.Width, Math.Max(160, button.Content.Length * 9 + 40)), Math.Min(available.Height, 46)),
+            HuiImage => new HavenSize(Math.Min(available.Width, 820), Math.Min(available.Height, 360)),
             _ => new HavenSize(Math.Min(available.Width, 48), Math.Min(available.Height, 48)),
         };
+    }
+
+    public void Dispose()
+    {
+        if (_disposed) return;
+        _disposed = true;
+        _canvasSvgImage = null;
+        _canvasSvgSource?.Dispose();
+        _canvasSvgSource = null;
+        _canvasSession?.Dispose();
+        GC.SuppressFinalize(this);
+    }
+
+    private void InitializeCanvasFrame(CanvasNativeSession session)
+    {
+        session.SetTool(CanvasStrokeTool.Pen);
+        session.BeginStroke(120, 120, 0.18, 12, -5);
+        session.UpdateStroke(160, 145, 0.35, 10, -4);
+        session.UpdateStroke(210, 165, 0.62, 8, -3);
+        session.UpdateStroke(260, 205, 0.88, 6, -2);
+        session.EndStroke(315, 235, 0.56, 4, -1);
+
+        if (!session.CanUndo || !session.Undo() || !session.CanRedo || !session.Redo())
+            throw new InvalidOperationException("Canvas managed/native undo-redo proof failed.");
+
+        var frame = session.RenderSvg();
+        if (frame.Bounds.Width <= 0 || frame.Bounds.Height <= 0)
+            throw new InvalidOperationException("Canvas native frame returned invalid document bounds.");
+
+        var source = SvgSource.LoadFromSvg(frame.Svg);
+        if (source.Picture is null)
+        {
+            source.Dispose();
+            throw new InvalidOperationException("Canvas SVG decoder produced no renderable picture.");
+        }
+
+        var image = new SvgImage { Source = source };
+        if (image.Size.Width <= 0 || image.Size.Height <= 0)
+        {
+            source.Dispose();
+            throw new InvalidOperationException("Canvas SVG decoder produced invalid image dimensions.");
+        }
+
+        _canvasSvgSource = source;
+        _canvasSvgImage = image;
+        _status.Content = $"Rnote ABI 1 / SVG / document {frame.Bounds.Width:0} x {frame.Bounds.Height:0}";
+        Console.WriteLine(
+            $"CANVAS_RNOTE_HUI_RENDER_READY abi=1 format=svg coordinate=document width={frame.Bounds.Width:0.###} height={frame.Bounds.Height:0.###}");
+    }
+
+    private void DrawImage(DrawingContext context, HavenImageCommand command)
+    {
+        if (!_canvasMode || command.Image.Source != CanvasFrameSource || _canvasSvgImage is null)
+            throw new NotSupportedException($"Graphical preview cannot resolve HUI image source '{command.Image.Source}'.");
+
+        var target = Rect(command.Rect);
+        var destination = ImageDestination(target, _canvasSvgImage.Size, command.Layout);
+        using var opacity = context.PushOpacity(Math.Clamp(command.Opacity, 0d, 1d));
+        if (command.Layout is HavenImageLayout.Cover or HavenImageLayout.None)
+        {
+            using var clip = context.PushClip(target);
+            context.DrawImage(_canvasSvgImage, destination);
+            return;
+        }
+
+        context.DrawImage(_canvasSvgImage, destination);
+    }
+
+    private static Rect ImageDestination(Rect target, Size source, HavenImageLayout layout)
+    {
+        if (layout == HavenImageLayout.Fill || source.Width <= 0 || source.Height <= 0) return target;
+        if (layout == HavenImageLayout.None)
+            return new Rect(target.X + (target.Width - source.Width) / 2d, target.Y + (target.Height - source.Height) / 2d, source.Width, source.Height);
+
+        var scale = layout == HavenImageLayout.Cover
+            ? Math.Max(target.Width / source.Width, target.Height / source.Height)
+            : Math.Min(target.Width / source.Width, target.Height / source.Height);
+        var width = source.Width * scale;
+        var height = source.Height * scale;
+        return new Rect(target.X + (target.Width - width) / 2d, target.Y + (target.Height - height) / 2d, width, height);
     }
 
     private static (HuiPage Root, HuiButton Action, HuiText Status) BuildScene()
@@ -239,6 +347,51 @@ public sealed class HuiPreviewSurface : Control, IHavenMeasureContext
         root.Add(eyebrow);
         root.Add(title);
         root.Add(body);
+        root.Add(action);
+        root.Add(status);
+        return (root, action, status);
+    }
+
+    private static (HuiPage Root, HuiButton Action, HuiText Status) BuildCanvasScene()
+    {
+        var root = new HuiPage { Name = "CanvasPreviewRoot", Layout = HavenLayout.Vertical };
+        root.SetValue(HavenProperties.Width, HavenLength.Percent(100));
+        root.SetValue(HavenProperties.Height, HavenLength.Percent(100));
+        root.SetValue(HavenProperties.Padding, HavenThickness.Parse("24px"));
+        root.SetValue(HavenProperties.Gap, HavenLength.Px(10));
+
+        var eyebrow = new HuiText { Content = "CAKEOS / HUI CANVAS / RNOTE ENGINE" };
+        eyebrow.SetValue(HavenProperties.FontSize, 12d);
+        eyebrow.SetValue(HavenProperties.Foreground, "TextSecondary");
+
+        var title = new HuiText { Content = "Canvas is rendering through HUI." };
+        title.SetValue(HavenProperties.FontSize, 28d);
+        title.SetValue(HavenProperties.Foreground, "TextPrimary");
+
+        var body = new HuiText
+        {
+            Content = "HUI owns the scene and viewport. A managed ABI adapter asks headless Rnote for document-space SVG; the Linux HUI backend decodes that frame without GTK or Libadwaita."
+        };
+        body.SetValue(HavenProperties.FontSize, 14d);
+        body.SetValue(HavenProperties.Foreground, "TextSecondary");
+
+        var canvas = new HuiImage { Name = "CanvasFrame", Source = CanvasFrameSource, Fit = HavenImageFit.Contain };
+        canvas.SetValue(HavenProperties.Width, HavenLength.Percent(100));
+        canvas.SetValue(HavenProperties.Height, HavenLength.Px(360));
+
+        var action = new HuiButton { Name = "Action", Content = "Test HUI input" };
+        action.SetValue(HavenProperties.Width, HavenLength.Px(190));
+        action.SetValue(HavenProperties.Height, HavenLength.Px(42));
+        action.ClickActions.Add(HavenAction.Parse("Name.Action -> Selected=True"));
+
+        var status = new HuiText { Name = "Status", Content = "Starting Rnote bridge..." };
+        status.SetValue(HavenProperties.FontSize, 13d);
+        status.SetValue(HavenProperties.Foreground, "TextSecondary");
+
+        root.Add(eyebrow);
+        root.Add(title);
+        root.Add(body);
+        root.Add(canvas);
         root.Add(action);
         root.Add(status);
         return (root, action, status);
