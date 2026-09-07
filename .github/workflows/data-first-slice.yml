@@ -53,9 +53,12 @@ jobs:
           .data-venv/bin/python -m py_compile apps/Data/workers/calc_worker.py
           .data-venv/bin/python -m py_compile apps/Data/workers/duckdb_worker.py
           .data-venv/bin/python -m py_compile apps/Data/Tests/test_workers.py
+          .data-venv/bin/python -m py_compile apps/Data/Tests/test_duckdb_publish.py
 
       - name: Run worker integration checks
         env:
           HAVEN_DATA_DUCKDB_MEMORY_LIMIT: 512MB
           HAVEN_DATA_DUCKDB_THREADS: '2'
-        run: .data-venv/bin/python apps/Data/Tests/test_workers.py
+        run: |
+          .data-venv/bin/python apps/Data/Tests/test_workers.py
+          .data-venv/bin/python apps/Data/Tests/test_duckdb_publish.py
