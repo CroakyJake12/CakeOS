@@ -50,13 +50,76 @@ jobs:
             /tmp/cakeos-present-selection-source.odp
           test -s /tmp/cakeos-present-selection-normalized/cakeos-present-selection-source.odp
 
-      - name: Prove snapshot-ref live selection geometry
+      - name: Run selection diagnostic
         run: |
-          python3 apps/present-engine/tests/worker_selection_smoke.py \
+          set +e
+          PYTHONUNBUFFERED=1 python3 apps/present-engine/tests/worker_selection_smoke.py \
             build/present-engine/cakeos-present-worker \
             /tmp/cakeos-present-selection-normalized/cakeos-present-selection-source.odp \
-            /tmp/cakeos-present-selection-output.odp | tee /tmp/present-selection.log
+            /tmp/cakeos-present-selection-output.odp \
+            > /tmp/present-selection.log 2>&1
+          echo "$?" > /tmp/present-selection.status
+          cat /tmp/present-selection.log
+          exit 0
+
+      - name: Checkpoint hello
+        if: always()
+        run: grep -q '^selection_checkpoint=hello$' /tmp/present-selection.log
+
+      - name: Checkpoint fixture open
+        if: always()
+        run: grep -q '^selection_checkpoint=fixture_open$' /tmp/present-selection.log
+
+      - name: Checkpoint inventory
+        if: always()
+        run: grep -q '^selection_checkpoint=inventory$' /tmp/present-selection.log
+
+      - name: Checkpoint select response
+        if: always()
+        run: grep -q '^selection_checkpoint=select_response$' /tmp/present-selection.log
+
+      - name: Checkpoint selection geometry
+        if: always()
+        run: grep -q '^selection_checkpoint=selection_geometry$' /tmp/present-selection.log
+
+      - name: Checkpoint explicit clear
+        if: always()
+        run: grep -q '^selection_checkpoint=explicit_clear$' /tmp/present-selection.log
+
+      - name: Checkpoint reselection geometry
+        if: always()
+        run: grep -q '^selection_checkpoint=reselection_geometry$' /tmp/present-selection.log
+
+      - name: Checkpoint move
+        if: always()
+        run: grep -q '^selection_checkpoint=move$' /tmp/present-selection.log
+
+      - name: Checkpoint stale rejection
+        if: always()
+        run: grep -q '^selection_checkpoint=stale_rejected$' /tmp/present-selection.log
+
+      - name: Checkpoint mutation events
+        if: always()
+        run: grep -q '^selection_checkpoint=mutation_events$' /tmp/present-selection.log
+
+      - name: Checkpoint save
+        if: always()
+        run: grep -q '^selection_checkpoint=save$' /tmp/present-selection.log
+
+      - name: Checkpoint refreshed inventory
+        if: always()
+        run: grep -q '^selection_checkpoint=refreshed_inventory$' /tmp/present-selection.log
+
+      - name: Checkpoint refreshed geometry
+        if: always()
+        run: grep -q '^selection_checkpoint=refreshed_geometry$' /tmp/present-selection.log
+
+      - name: Prove complete selection contract
+        if: always()
+        run: |
+          test "$(cat /tmp/present-selection.status)" = "0"
           test -s /tmp/cakeos-present-selection-output.odp
+          grep -q '^selection_checkpoint=complete$' /tmp/present-selection.log
           grep -q '^worker_element_selection=passed$' /tmp/present-selection.log
           grep -q '^worker_element_geometry=passed$' /tmp/present-selection.log
           grep -q '^worker_selection_staleness=passed$' /tmp/present-selection.log
