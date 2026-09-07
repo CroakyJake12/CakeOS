@@ -10,6 +10,7 @@ import unittest
 from unittest import mock
 
 RUNTIME = pathlib.Path(__file__).resolve().parents[1]
+REPOSITORY = RUNTIME.parents[1]
 sys.path.insert(0, str(RUNTIME))
 
 import broker  # noqa: E402
@@ -80,6 +81,33 @@ class ManifestTests(unittest.TestCase):
             with mock.patch.object(broker, "MANIFEST_ROOT", root):
                 with self.assertRaises(broker.BrokerError):
                     broker.load_manifests()
+
+
+class BoundaryTests(unittest.TestCase):
+    def test_broker_can_bind_unix_socket_with_private_mode(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            socket_path = pathlib.Path(tmp) / "broker.sock"
+            server = broker.ThreadingUnixServer(str(socket_path), broker.Handler)
+            try:
+                self.assertTrue(socket_path.exists())
+                self.assertEqual(0o600, socket_path.stat().st_mode & 0o777)
+            finally:
+                server.server_close()
+                socket_path.unlink(missing_ok=True)
+
+    def test_systemd_unit_keeps_network_and_privilege_boundary(self) -> None:
+        unit = (REPOSITORY / "packaging/systemd/user/haven-inference-broker.service").read_text(encoding="utf-8")
+        required = (
+            "RuntimeDirectory=haven",
+            "RuntimeDirectoryMode=0700",
+            "NoNewPrivileges=yes",
+            "ProtectSystem=strict",
+            "RestrictAddressFamilies=AF_UNIX",
+            "ReadOnlyPaths=-%h/.local/share/haven/models",
+            "ReadWritePaths=%t/haven",
+        )
+        for line in required:
+            self.assertIn(line, unit)
 
 
 if __name__ == "__main__":
