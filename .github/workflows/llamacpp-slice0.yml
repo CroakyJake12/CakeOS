@@ -59,6 +59,8 @@ jobs:
         run: sh -n packaging/bin/haven-modelctl
       - name: Validate Debian package builder syntax
         run: sh -n packaging/llamacpp/build-deb.sh
+      - name: Validate installable Debian verifier syntax
+        run: sh -n packaging/llamacpp/verify-installable-deb.sh
 
   build-pinned-llamacpp-cpu:
     runs-on: ubuntu-latest
@@ -181,6 +183,7 @@ jobs:
         run: |
           deb=$(find package-out -maxdepth 1 -type f -name '*.deb' -print -quit)
           test -n "$deb"
+          sh cakeos/packaging/llamacpp/verify-installable-deb.sh "$deb"
           test "$(dpkg-deb --field "$deb" Package)" = 'haven-llamacpp-runtime'
           test "$(dpkg-deb --field "$deb" Architecture)" = 'amd64'
           dpkg-deb --contents "$deb" | tee package-out/contents.txt
@@ -338,6 +341,7 @@ jobs:
           SHA_FILE="$DEB.sha256"
           test -f "$SHA_FILE"
           (cd "$(dirname "$DEB")" && sha256sum -c "$(basename "$SHA_FILE")")
+          sh cakeos/packaging/llamacpp/verify-installable-deb.sh "$DEB"
           test "$(dpkg-deb --field "$DEB" Package)" = 'haven-llamacpp-runtime'
           test "$(dpkg-deb --field "$DEB" Architecture)" = 'amd64'
           sudo dpkg -i "$DEB"
