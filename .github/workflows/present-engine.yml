@@ -165,17 +165,25 @@ jobs:
             /tmp/cakeos-present-reordered.odp | tee /tmp/present-reorder.log
           test -s /tmp/cakeos-present-reordered.odp
           grep -q '^slide_reorder=passed$' /tmp/present-reorder.log
+          grep -q '^slide_reorder_directions=down,up$' /tmp/present-reorder.log
           grep -q '^slide_order=Beta,Gamma,Alpha$' /tmp/present-reorder.log
 
       - name: Prove framed HUI worker protocol
         run: |
-          rm -f /tmp/cakeos-present-worker-output.odp
+          rm -f \
+            /tmp/cakeos-present-worker-output.odp \
+            /tmp/cakeos-present-worker-output-reordered.odp
           python3 apps/present-engine/tests/worker_protocol_smoke.py \
             build/present-engine/cakeos-present-worker \
             /tmp/cakeos-present-normalized/cakeos-present-source.odp \
-            /tmp/cakeos-present-worker-output.odp | tee /tmp/present-worker.log
+            /tmp/cakeos-present-worker-output.odp \
+            /tmp/cakeos-present-normalized/cakeos-present-reorder-source.odp | tee /tmp/present-worker.log
           test -s /tmp/cakeos-present-worker-output.odp
+          test -s /tmp/cakeos-present-worker-output-reordered.odp
           grep -q '^worker_protocol=passed$' /tmp/present-worker.log
+          grep -q '^worker_events=passed$' /tmp/present-worker.log
+          grep -q '^worker_slide_reorder=passed$' /tmp/present-worker.log
+          grep -q '^worker_slide_order=Beta,Gamma,Alpha$' /tmp/present-worker.log
           grep -q '^worker_saved_slides=2$' /tmp/present-worker.log
 
       - name: Record runtime versions
