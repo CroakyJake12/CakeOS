@@ -26,8 +26,11 @@ public sealed class HuiPreviewSurface : Control, IHavenMeasureContext, IDisposab
     private readonly HavenInputRouter _input;
     private readonly bool _canvasMode;
     private readonly CanvasNativeSession? _canvasSession;
+    private readonly HuiImage? _canvasElement;
     private SvgSource? _canvasSvgSource;
     private SvgImage? _canvasSvgImage;
+    private CanvasDocumentBounds? _canvasDocumentBounds;
+    private bool _canvasStrokeActive;
     private bool _disposed;
 
     public HuiPreviewSurface()
@@ -38,7 +41,11 @@ public sealed class HuiPreviewSurface : Control, IHavenMeasureContext, IDisposab
 
         if (_canvasMode)
         {
-            (_root, _action, _status) = BuildCanvasScene();
+            var scene = BuildCanvasScene();
+            _root = scene.Root;
+            _action = scene.Action;
+            _status = scene.Status;
+            _canvasElement = scene.Canvas;
             _canvasSession = new CanvasNativeSession();
             InitializeCanvasFrame(_canvasSession);
         }
@@ -142,6 +149,10 @@ public sealed class HuiPreviewSurface : Control, IHavenMeasureContext, IDisposab
         base.OnPointerMoved(e);
         var p = e.GetPosition(this);
         _input.PointerMoved(new HavenPoint(p.X, p.Y), PointerKind(e.Pointer.Type));
+
+        if (_canvasStrokeActive)
+            UpdateCanvasStroke(e, p);
+
         InvalidateVisual();
     }
 
@@ -150,6 +161,7 @@ public sealed class HuiPreviewSurface : Control, IHavenMeasureContext, IDisposab
         base.OnPointerPressed(e);
         var p = e.GetPosition(this);
         _input.PointerPressed(new HavenPoint(p.X, p.Y), PointerKind(e.Pointer.Type), HavenPointerButton.Primary);
+        TryBeginCanvasStroke(e, p);
         Focus();
         e.Pointer.Capture(this);
         e.Handled = true;
@@ -161,6 +173,10 @@ public sealed class HuiPreviewSurface : Control, IHavenMeasureContext, IDisposab
         base.OnPointerReleased(e);
         var p = e.GetPosition(this);
         _input.PointerReleased(new HavenPoint(p.X, p.Y));
+
+        if (_canvasStrokeActive)
+            EndCanvasStroke(e, p);
+
         e.Pointer.Capture(null);
         e.Handled = true;
         InvalidateMeasure();
@@ -258,6 +274,14 @@ public sealed class HuiPreviewSurface : Control, IHavenMeasureContext, IDisposab
         if (!session.CanUndo || !session.Undo() || !session.CanRedo || !session.Redo())
             throw new InvalidOperationException("Canvas managed/native undo-redo proof failed.");
 
+        var frame = RefreshCanvasFrame(session);
+        _status.Content = $"Rnote ABI 1 / SVG / document {frame.Bounds.Width:0} x {frame.Bounds.Height:0}";
+        Console.WriteLine(
+            $"CANVAS_RNOTE_HUI_RENDER_READY abi=1 format=svg coordinate=document width={frame.Bounds.Width:0.###} height={frame.Bounds.Height:0.###}");
+    }
+
+    private CanvasSvgFrame RefreshCanvasFrame(CanvasNativeSession session)
+    {
         var frame = session.RenderSvg();
         if (frame.Bounds.Width <= 0 || frame.Bounds.Height <= 0)
             throw new InvalidOperationException("Canvas native frame returned invalid document bounds.");
@@ -276,12 +300,76 @@ public sealed class HuiPreviewSurface : Control, IHavenMeasureContext, IDisposab
             throw new InvalidOperationException("Canvas SVG decoder produced invalid image dimensions.");
         }
 
+        var previous = _canvasSvgSource;
         _canvasSvgSource = source;
         _canvasSvgImage = image;
-        _status.Content = $"Rnote ABI 1 / SVG / document {frame.Bounds.Width:0} x {frame.Bounds.Height:0}";
-        Console.WriteLine(
-            $"CANVAS_RNOTE_HUI_RENDER_READY abi=1 format=svg coordinate=document width={frame.Bounds.Width:0.###} height={frame.Bounds.Height:0.###}");
+        _canvasDocumentBounds = frame.Bounds;
+        previous?.Dispose();
+        return frame;
     }
+
+    private bool TryBeginCanvasStroke(PointerPressedEventArgs e, Point surfacePoint)
+    {
+        if (!_canvasMode || _canvasSession is null || _canvasElement is null || _canvasStrokeActive)
+            return false;
+        if (e.Pointer.Type == PointerType.Touch)
+            return false;
+        if (!TrySurfaceToDocument(surfacePoint, requireInside: true, out var documentPoint))
+            return false;
+
+        var properties = e.GetCurrentPoint(this).Properties;
+        var pressure = PointerPressure(e.Pointer.Type, properties.Pressure);
+        _canvasSession.SetTool(CanvasStrokeTool.Pen);
+        _canvasSession.BeginStroke(documentPoint.X, documentPoint.Y, pressure, properties.XTilt, properties.YTilt);
+        _canvasStrokeActive = true;
+        return true;
+    }
+
+    private void UpdateCanvasStroke(PointerEventArgs e, Point surfacePoint)
+    {
+        if (_canvasSession is null || !TrySurfaceToDocument(surfacePoint, requireInside: false, out var documentPoint))
+            return;
+
+        var properties = e.GetCurrentPoint(this).Properties;
+        var pressure = PointerPressure(e.Pointer.Type, properties.Pressure);
+        _canvasSession.UpdateStroke(documentPoint.X, documentPoint.Y, pressure, properties.XTilt, properties.YTilt);
+    }
+
+    private void EndCanvasStroke(PointerReleasedEventArgs e, Point surfacePoint)
+    {
+        if (_canvasSession is null || !TrySurfaceToDocument(surfacePoint, requireInside: false, out var documentPoint))
+            return;
+
+        var properties = e.GetCurrentPoint(this).Properties;
+        var pressure = PointerPressure(e.Pointer.Type, properties.Pressure);
+        _canvasSession.EndStroke(documentPoint.X, documentPoint.Y, pressure, properties.XTilt, properties.YTilt);
+        _canvasStrokeActive = false;
+        var frame = RefreshCanvasFrame(_canvasSession);
+        _status.Content = "Pointer ink committed through HUI to Rnote; undo is available";
+        Console.WriteLine(
+            $"CANVAS_RNOTE_POINTER_STROKE_COMMITTED pointer={e.Pointer.Type} pressure={pressure:0.###} width={frame.Bounds.Width:0.###} height={frame.Bounds.Height:0.###}");
+    }
+
+    private bool TrySurfaceToDocument(Point surfacePoint, bool requireInside, out (double X, double Y) documentPoint)
+    {
+        documentPoint = default;
+        if (_canvasElement is null || _canvasSvgImage is null || _canvasDocumentBounds is not { } bounds)
+            return false;
+
+        var destination = ImageDestination(Rect(_canvasElement.Bounds), _canvasSvgImage.Size, HavenImageLayout.Contain);
+        if (destination.Width <= 0 || destination.Height <= 0)
+            return false;
+        if (requireInside && !destination.Contains(surfacePoint))
+            return false;
+
+        var x = (surfacePoint.X - destination.X) / destination.Width;
+        var y = (surfacePoint.Y - destination.Y) / destination.Height;
+        documentPoint = (bounds.X + x * bounds.Width, bounds.Y + y * bounds.Height);
+        return true;
+    }
+
+    private static double PointerPressure(PointerType pointerType, float pressure) =>
+        pointerType == PointerType.Mouse || pressure <= 0 ? 0.5d : Math.Clamp(pressure, 0f, 1f);
 
     private void DrawImage(DrawingContext context, HavenImageCommand command)
     {
@@ -352,7 +440,7 @@ public sealed class HuiPreviewSurface : Control, IHavenMeasureContext, IDisposab
         return (root, action, status);
     }
 
-    private static (HuiPage Root, HuiButton Action, HuiText Status) BuildCanvasScene()
+    private static (HuiPage Root, HuiButton Action, HuiText Status, HuiImage Canvas) BuildCanvasScene()
     {
         var root = new HuiPage { Name = "CanvasPreviewRoot", Layout = HavenLayout.Vertical };
         root.SetValue(HavenProperties.Width, HavenLength.Percent(100));
@@ -370,7 +458,7 @@ public sealed class HuiPreviewSurface : Control, IHavenMeasureContext, IDisposab
 
         var body = new HuiText
         {
-            Content = "HUI owns the scene and viewport. A managed ABI adapter asks headless Rnote for document-space SVG; the Linux HUI backend decodes that frame without GTK or Libadwaita."
+            Content = "HUI owns input and document mapping. Mouse and pen strokes are transformed into Rnote document coordinates; touch remains reserved for the future pan/zoom gesture layer."
         };
         body.SetValue(HavenProperties.FontSize, 14d);
         body.SetValue(HavenProperties.Foreground, "TextSecondary");
@@ -394,7 +482,7 @@ public sealed class HuiPreviewSurface : Control, IHavenMeasureContext, IDisposab
         root.Add(canvas);
         root.Add(action);
         root.Add(status);
-        return (root, action, status);
+        return (root, action, status, canvas);
     }
 
     private static HavenSize MeasureText(HuiText text, HavenSize available)
