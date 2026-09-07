@@ -71,6 +71,19 @@ def main() -> int:
             raise RuntimeError("listElements unexpectedly returned binary data")
         ref = element_ref_with_text(inventory, "Alpha")
 
+        multiline, multiline_payload = client.request(
+            "replaceElementText",
+            ref=ref,
+            text="Alpha\nBeta",
+        )
+        if multiline.get("ok") or multiline_payload:
+            raise RuntimeError("worker accepted multiline text in the single-line semantic write slice")
+        multiline_message = str(multiline.get("error", {}).get("message", ""))
+        if "single-line" not in multiline_message:
+            raise RuntimeError(f"worker did not explain multiline rejection: {multiline}")
+        still_fresh, _ = client.require_ok("listElements", slideIndex=0)
+        require_text(still_fresh, "Alpha")
+
         replaced, payload = client.require_ok(
             "replaceElementText",
             ref=ref,
@@ -165,6 +178,7 @@ def main() -> int:
         print("worker_text_replace=passed")
         print("worker_text_history=passed")
         print("worker_text_persistence=passed")
+        print("worker_text_constraints=passed")
         print("worker_mixed_text_native_history=passed")
         print(f"worker_text_ref={ref}")
         return 0
