@@ -3,11 +3,12 @@ from __future__ import annotations
 import json
 import os
 import shutil
-import subprocess
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Iterable
+from typing import Any, Iterable
 
+from .audit import audit_environment
+from .lifecycle import LifecycleError, UnitStatus, UserSystemdSupervisor, unit_name
 from .manifest import AppManifest
 
 
@@ -26,10 +27,49 @@ class LaunchPlan:
 class CompatibilityBroker:
     """Policy-enforcing broker for optional Windows compatibility backends."""
 
-    def __init__(self, state_root: Path | None = None, runtime_root: Path | None = None):
+    def __init__(
+        self,
+        state_root: Path | None = None,
+        runtime_root: Path | None = None,
+        supervisor: UserSystemdSupervisor | None = None,
+    ):
         data_home = Path(os.environ.get("XDG_DATA_HOME", Path.home() / ".local" / "share"))
         self.state_root = state_root or data_home / "haven" / "compat" / "wine" / "apps"
         self.runtime_root = runtime_root or data_home / "haven" / "compat" / "wine" / "runtimes"
+        self.supervisor = supervisor or UserSystemdSupervisor()
+
+    def capabilities(self) -> dict[str, Any]:
+        return {
+            "schemaVersion": 1,
+            "providers": {
+                "wine": {
+                    "enabled": True,
+                    "slice": 1,
+                    "network": ["none"],
+                    "display": ["wayland"],
+                    "filesystem": ["none", "explicit-ro", "explicit-rw"],
+                    "gpu": ["none", "render"],
+                    "clipboard": False,
+                    "audioOutput": False,
+                    "microphone": False,
+                    "lifecycle": ["launch", "status", "stop", "logs", "reset"],
+                },
+                "winboat": {
+                    "enabled": False,
+                    "reason": "VM/container provider remains deferred until its isolation boundary is runtime-proven",
+                },
+            },
+        }
+
+    def health(self) -> dict[str, Any]:
+        return {
+            "schemaVersion": 1,
+            "audit": audit_environment(self.runtime_root),
+            "supervisor": {
+                "type": "systemd-user",
+                "available": self.supervisor.available,
+            },
+        }
 
     def plan(self, manifest: AppManifest) -> LaunchPlan:
         if manifest.backend == "winboat":
@@ -122,16 +162,47 @@ class CompatibilityBroker:
             prefix_path=str(prefix),
         )
 
-    def launch(self, manifest: AppManifest) -> subprocess.Popen[bytes]:
+    def launch(self, manifest: AppManifest) -> UnitStatus:
         plan = self.plan(manifest)
-        return subprocess.Popen(plan.argv, env=plan.env, start_new_session=True)
+        try:
+            return self.supervisor.start(manifest.app_id, plan.argv, plan.env)
+        except LifecycleError as exc:
+            raise CompatibilityError(str(exc)) from exc
+
+    def status(self, manifest: AppManifest) -> UnitStatus:
+        try:
+            return self.supervisor.status(manifest.app_id)
+        except LifecycleError as exc:
+            raise CompatibilityError(str(exc)) from exc
+
+    def stop(self, manifest: AppManifest) -> UnitStatus:
+        try:
+            return self.supervisor.stop(manifest.app_id)
+        except LifecycleError as exc:
+            raise CompatibilityError(str(exc)) from exc
+
+    def logs(self, manifest: AppManifest, lines: int = 200) -> str:
+        try:
+            return self.supervisor.logs(manifest.app_id, lines)
+        except LifecycleError as exc:
+            raise CompatibilityError(str(exc)) from exc
 
     def reset(self, manifest: AppManifest) -> None:
+        try:
+            current = self.supervisor.status(manifest.app_id)
+        except LifecycleError as exc:
+            raise CompatibilityError(f"cannot verify lifecycle state before reset: {exc}") from exc
+        if current.running:
+            raise CompatibilityError("refusing to reset a running compatibility application; stop it first")
+
         app_root = (self.state_root / manifest.app_id).resolve()
         if self.state_root.resolve() not in app_root.parents:
             raise CompatibilityError("refusing to reset outside compatibility state root")
         if app_root.exists():
             shutil.rmtree(app_root)
+
+    def lifecycle_unit(self, manifest: AppManifest) -> str:
+        return unit_name(manifest.app_id)
 
     def _validated_mount_source(self, source: Path) -> Path:
         try:
