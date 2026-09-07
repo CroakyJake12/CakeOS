@@ -105,6 +105,9 @@ public:
     [[nodiscard]] static std::string pathToFileUrl(std::string_view pathOrUrl);
 
 private:
+    void applySlideMove(int fromIndex, int toIndex);
+    void recordNativeMutation();
+
     struct Impl;
     std::unique_ptr<Impl> impl_;
 };
