@@ -164,6 +164,34 @@ public sealed class DataGridSession : IAsyncDisposable
         return _spreadsheet.ClearValidationAsync(workbook.Id, range, cancellationToken);
     }
 
+    public async Task<DataGridSessionSnapshot> SortRangeAsync(
+        int startRow,
+        int startColumn,
+        int rowCount,
+        int columnCount,
+        int keyColumnOffset,
+        bool ascending = true,
+        bool containsHeader = true,
+        CancellationToken cancellationToken = default)
+    {
+        ThrowIfDisposed();
+        var workbook = EnsureEditable();
+        var range = VisibleRange(startRow, startColumn, rowCount, columnCount);
+        if (keyColumnOffset < 0 || keyColumnOffset >= columnCount)
+            throw new ArgumentOutOfRangeException(nameof(keyColumnOffset), "Sort key must identify a column inside the requested visible range.");
+        if (containsHeader && rowCount < 2)
+            throw new ArgumentException("A sort range marked as containing a header must include at least one data row.", nameof(rowCount));
+
+        _ = await _spreadsheet.SortRangeAsync(
+            workbook.Id,
+            range,
+            keyColumnOffset,
+            ascending,
+            containsHeader,
+            cancellationToken).ConfigureAwait(false);
+        return await RefreshAsync(cancellationToken).ConfigureAwait(false);
+    }
+
     public Task<DataGridSessionSnapshot> InsertRowsAsync(int index, int count = 1, CancellationToken cancellationToken = default) =>
         MutateStructureAsync(rows: true, insert: true, index, count, cancellationToken);
 
