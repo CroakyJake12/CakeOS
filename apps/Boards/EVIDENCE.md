@@ -24,7 +24,9 @@ This file records what has actually been executed for the `boards-appflowy-found
 - Composed HUI application session (`HavenBoardsHuiSession`) binding scene commands to durable store writes: **IMPLEMENTED, BUILT, TESTED**.
 - Flutter/AppFlowy bounded proof harness: **IMPLEMENTED, ANALYZED, TESTED**.
 - Explicit non-drag group/card movement controls: **IMPLEMENTED, TESTED IN FLUTTER; HUI KEYBOARD COMMAND PATH TESTED**.
-- Hierarchy metadata in the neutral card schema: **IMPLEMENTED IN SCHEMA / PERSISTENCE**; hierarchy mutation invariants are the next gap.
+- Typed hierarchy parent/unparent command plus global snapshot validation: **IMPLEMENTED, BUILT, TESTED**.
+- Hierarchy validation rejects duplicate card IDs, missing parents, self-parenting, existing cycles, and proposed cycles before publication/rendering: **IMPLEMENTED, TESTED**.
+- Cross-lane hierarchy and nested-card HUI presentation survive card moves and durable reopen: **IMPLEMENTED, TESTED AGAINST REAL PINNED HUI DONOR API**.
 - Content-addressed local attachment blob store plus typed attachment metadata commands: **IMPLEMENTED, BUILT, TESTED**.
 - Attachment deduplication, bounded imports, display-name path isolation, malformed-reference rejection, reparse/link rejection, and existing-blob digest verification: **IMPLEMENTED, TESTED**.
 - Attachment blob + board metadata + HUI attachment-count + reopen/readback composition: **IMPLEMENTED, TESTED AGAINST REAL PINNED HUI DONOR API**.
@@ -50,9 +52,9 @@ It was detached at commit `7c021082565b3e0ef9110bc4a1287ca3cc2c1fbb` and sparse-
 
 Executed positive evidence:
 
-1. Strengthened `apps/Boards/tests/verify-boards-foundation.ps1` through Windows PowerShell on the current tested head: **PASSED, exit 0**.
+1. Strengthened `apps/Boards/tests/verify-boards-foundation.ps1` through Windows PowerShell on the current hierarchy-hardened head: **PASSED, exit 0**.
 2. `dotnet build apps/Boards/contract/CakeOS.Apps.Boards.Contract.csproj --configuration Debug`: **PASSED, exit 0**.
-3. Neutral reducer/store regression `dotnet test apps/Boards/tests/CakeOS.Apps.Boards.Tests.csproj --configuration Debug`: **PASSED, exit 0** after adding the attachment reducer/store tests.
+3. Neutral reducer/store regression `dotnet test apps/Boards/tests/CakeOS.Apps.Boards.Tests.csproj --configuration Debug`: **PASSED, exit 0** after attachment and hierarchy invariant tests were added.
 4. A portable Flutter SDK was cloned under the Development root; no system-wide Flutter installation was made.
 5. `flutter pub get` in `apps/Boards/appflowy_poc`: **PASSED, exit 0**. The exact pinned AppFlowy Board dependency resolved successfully.
 6. Latest `flutter analyze` after the deterministic persistence/test refactor: **PASSED, exit 0, no diagnostics**.
@@ -62,9 +64,11 @@ Executed positive evidence:
 10. `apps/Boards/tests/verify-hui-compatibility.ps1` against the real pinned donor `src/Haven.UI/Haven.UI.csproj`: **PASSED, exit 0**. This compiled the CakeOS Boards HUI project against the actual donor HUI project and ran the HUI scene tests.
 11. Composed local-first HUI lifecycle tests: **PASSED, exit 0**. They cover direct command/save/dispose/reopen and a keyboard-originated HUI move command followed by queue flush, disposal, fresh store/session reopen, and verification of the moved card state.
 12. Content-addressed attachment contract/store tests: **PASSED, exit 0**. They cover deduplication, display-name path escape attempts, oversize cleanup, unsafe IDs/malformed references, byte readback, and tampered existing-blob rejection.
-13. Real-HUI compatibility was rerun after the attachment integration test was added: **PASSED, exit 0**. The composed test imports real bytes, attaches returned metadata to a card, observes `1 attachment` in HUI, disposes/reopens the board, observes the same HUI metadata again, and reopens identical bytes from the blob store.
-14. The strengthened static gate checks the composed session’s persist-before-publish ordering, absence of network primitives, content-addressing, bounded attachment imports, display-name isolation, link/reparse protection, and the matching executable tests: **PASSED, exit 0**.
-15. Repository hygiene inspection after Flutter testing identified only generated Flutter state. `.dart_tool` is explicitly ignored and `pubspec.lock` is committed for proof-harness reproducibility; the resulting local dependency-pin commit reported **no remaining changes** before push.
+13. Real-HUI compatibility after attachment integration: **PASSED, exit 0**. The composed test imports real bytes, attaches returned metadata to a card, observes `1 attachment` in HUI, disposes/reopens the board, observes the same HUI metadata again, and reopens identical bytes from the blob store.
+14. Hierarchy neutral tests: **PASSED, exit 0**. They cover set/clear parent, cross-lane parents, missing/self-parent rejection, multi-card cycle rejection, parent preservation across lane moves, and malformed snapshot rejection.
+15. Real-HUI compatibility after hierarchy integration: **PASSED, exit 0**. The composed test parents `card-3` to `card-1`, moves the nested card across lanes, verifies the `Nested card` HUI marker, disposes/reopens, and verifies the parent/link/marker again. A separate test persists a missing-parent graph and proves session open rejects it before render.
+16. The strengthened static gate checks persist-before-publish ordering, absence of network primitives, attachment safety invariants, hierarchy validation, nested HUI presentation, and matching executable tests: **PASSED, exit 0**.
+17. Repository hygiene inspection after Flutter testing identified only generated Flutter state. `.dart_tool` is explicitly ignored and `pubspec.lock` is committed for proof-harness reproducibility; the resulting local dependency-pin commit reported **no remaining changes** before push.
 
 ## Negative evidence retained
 
@@ -85,7 +89,6 @@ The following must not be described as proven yet:
 - pointer drag interoperability in final HUI rendering;
 - assistive-technology runtime accessibility with a screen reader or other AT;
 - content-blob deletion/reference counting and GC policy;
-- hierarchy mutation/cycle-prevention behavior beyond persisted `ParentCardId` metadata;
 - freeform board runtime;
 - realtime collaboration/sync.
 
