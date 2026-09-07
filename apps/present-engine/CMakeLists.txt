@@ -71,6 +71,12 @@ add_executable(cakeos-present-engine-reorder-smoke
 target_link_libraries(cakeos-present-engine-reorder-smoke PRIVATE cakeos-present-engine)
 cakeos_enable_strict_warnings(cakeos-present-engine-reorder-smoke)
 
+add_executable(cakeos-present-engine-mixed-history-smoke
+    tests/mixed_history_smoke.cpp
+)
+target_link_libraries(cakeos-present-engine-mixed-history-smoke PRIVATE cakeos-present-engine)
+cakeos_enable_strict_warnings(cakeos-present-engine-mixed-history-smoke)
+
 enable_testing()
 add_executable(cakeos-present-engine-contract-tests
     tests/contract_tests.cpp
