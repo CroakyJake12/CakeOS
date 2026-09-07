@@ -30,7 +30,8 @@ jobs:
           sudo apt-get update
           sudo apt-get install --no-install-recommends -y \
             libreofficekit-dev \
-            libreoffice-impress-nogui
+            libreoffice-impress-nogui \
+            nlohmann-json3-dev
 
       - name: Configure
         run: cmake -S apps/present-engine -B build/present-engine -DCMAKE_BUILD_TYPE=Release
@@ -44,7 +45,7 @@ jobs:
       - name: Record compatibility versions
         if: always()
         run: |
-          dpkg-query -W -f='${Package} ${Version}\n' libreofficekit-dev libreoffice-impress-nogui libreoffice-core-nogui || true
+          dpkg-query -W -f='${Package} ${Version}\n' libreofficekit-dev libreoffice-impress-nogui libreoffice-core-nogui nlohmann-json3-dev || true
           /usr/lib/libreoffice/program/soffice --version || true
 
   runtime-26-04:
@@ -61,7 +62,8 @@ jobs:
           sudo apt-get update
           sudo apt-get install --no-install-recommends -y \
             libreofficekit-dev \
-            libreoffice-impress-nogui
+            libreoffice-impress-nogui \
+            nlohmann-json3-dev
 
       - name: Configure
         run: cmake -S apps/present-engine -B build/present-engine -DCMAKE_BUILD_TYPE=Release
@@ -147,8 +149,19 @@ jobs:
           print(f'pptx_unique_rgb_values={len(pixels)}')
           PY
 
+      - name: Prove framed HUI worker protocol
+        run: |
+          rm -f /tmp/cakeos-present-worker-output.odp
+          python3 apps/present-engine/tests/worker_protocol_smoke.py \
+            build/present-engine/cakeos-present-worker \
+            /tmp/cakeos-present-normalized/cakeos-present-source.odp \
+            /tmp/cakeos-present-worker-output.odp | tee /tmp/present-worker.log
+          test -s /tmp/cakeos-present-worker-output.odp
+          grep -q '^worker_protocol=passed$' /tmp/present-worker.log
+          grep -q '^worker_saved_slides=2$' /tmp/present-worker.log
+
       - name: Record runtime versions
         if: always()
         run: |
-          dpkg-query -W -f='${Package} ${Version}\n' libreofficekit-dev libreoffice-impress-nogui libreoffice-core-nogui || true
+          dpkg-query -W -f='${Package} ${Version}\n' libreofficekit-dev libreoffice-impress-nogui libreoffice-core-nogui nlohmann-json3-dev || true
           /usr/lib/libreoffice/program/soffice --version || true
