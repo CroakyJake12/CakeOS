@@ -39,6 +39,7 @@ jobs:
               '-DLLAMA_BUILD_UI=OFF',
               '-DLLAMA_USE_PREBUILT_UI=OFF',
               '-DLLAMA_OPENSSL=OFF',
+              '-DLLAMA_SUBPROCESS=OFF',
               '-DGGML_NATIVE=OFF',
               '-DGGML_RPC=OFF',
               '-DGGML_CUDA=OFF',

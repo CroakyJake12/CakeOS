@@ -1,12 +1,16 @@
 [Unit]
 Description=Haven local inference broker
 After=default.target
+StartLimitIntervalSec=30s
+StartLimitBurst=3
 
 [Service]
 Type=simple
 ExecStart=/usr/bin/python3 /usr/lib/haven/inference/broker.py
 Restart=on-failure
 RestartSec=2s
+TimeoutStopSec=10s
+OOMPolicy=stop
 UMask=0077
 RuntimeDirectory=haven
 RuntimeDirectoryMode=0700
@@ -30,6 +34,7 @@ ReadWritePaths=%t/haven
 Environment=HAVEN_INFERENCE_SOCKET=%t/haven/inference.sock
 Environment=HAVEN_LLAMA_WORKER_SOCKET=%t/haven/llamacpp-worker.sock
 Environment=HAVEN_LLAMA_SERVER=/usr/lib/haven/llama.cpp/llama-server
+Environment=HAVEN_LLAMA_CONTEXT_LIMIT=8192
 
 [Install]
 WantedBy=default.target

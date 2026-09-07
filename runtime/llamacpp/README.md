@@ -4,19 +4,22 @@ This directory implements the first production boundary for local GGUF inference
 
 ## Evidence state
 
+Evidence is attached to the exact commit that produced it; one stage never inherits another stage's label.
+
 - Upstream `ggml-org/llama.cpp` v0.4.0 provenance: **inspected and pinned**.
-- Haven broker/model admission code: **implemented**.
-- Repository unit tests: **implemented; CI result must be checked before calling tested**.
+- Haven broker/model admission code: **implemented and CI-gated**.
+- Pinned CPU `llama-server`: **built/smoke-tested only when the current-head `build-pinned-llamacpp-cpu` CI job succeeds**.
 - Pinned llama.cpp source: **not copied into this repository**.
-- llama.cpp CPU binary: **not built by this branch yet**.
-- Model inference: **not runtime-proven**.
-- Approved Ubuntu VM: **unchanged**.
+- Model inference: **not runtime-proven until an approved GGUF is actually loaded and prompted**.
+- Approved Ubuntu VM: **unchanged until a separately recorded staging/runtime gate**.
 - GPU backends: **not built, tested, benchmarked, or runtime-proven**.
+
+A successful binary build is not evidence that a model loaded, generated tokens, met a latency target, or ran inside the approved VM.
 
 ## Boundary
 
 ```text
-HUI
+HUI / provider registry
   |
   | Haven API over $XDG_RUNTIME_DIR/haven/inference.sock (0600)
   v
@@ -24,24 +27,35 @@ broker.py
   |
   | private Unix socket
   v
-llama-server (single model, --no-ui, --parallel 1)
+llama-server (single model, no UI/logs/slots, parallel 1)
   |
   v
 verified content-addressed GGUF
 ```
 
-The systemd user service restricts the broker and its worker to `AF_UNIX`, denies network access, makes the home directory read-only, gives write access only to the runtime directory, and grants read-only access to the Haven model store. This means Slice 0 deliberately does not proxy Ollama; the existing Ollama client can continue to operate as a separate provider until a later Haven provider broker is introduced.
+The systemd user service restricts the broker and its worker to `AF_UNIX`, denies network sockets, makes the home directory read-only, gives write access only to the runtime directory, and grants read-only access to the Haven model store. Model-store mutation therefore belongs to a separate explicit user-action manager, not the inference daemon.
 
 ## HUI-facing API
 
 - `GET /health`
+- `GET /v1/provider`
 - `GET /v1/models`
 - `POST /v1/models/{id}/load`
 - `POST /v1/models/{id}/unload`
-- `POST /v1/chat/completions` (streaming; requires `request_id`)
+- `POST /v1/chat/completions` (streaming; requires a safe `request_id`)
 - `POST /v1/requests/{request_id}/cancel`
 
-The API is Haven-owned. Upstream llama-server endpoints are an internal implementation detail.
+The API is Haven-owned. Upstream llama-server endpoints are an internal implementation detail. `provider-contract.json` is the machine-readable coexistence contract for HUI/provider work.
+
+## Ollama coexistence and migration
+
+CakeAI's existing provider router already treats provider-qualified keys as first-class and preserves unqualified names as Ollama compatibility names. Haven therefore uses:
+
+- existing legacy name: `<model>` → Ollama;
+- explicit existing key: `ollama:<model>` → Ollama;
+- new local key: `llamacpp:<model-id>` → this provider.
+
+The llama.cpp broker never proxies or manages Ollama. Retiring Ollama remains deferred until feature compatibility and performance evidence justify it.
 
 ## Model store
 
@@ -49,25 +63,44 @@ Default root: `$XDG_DATA_HOME/haven/models` (or `~/.local/share/haven/models`).
 
 ```text
 models/
-  blobs/sha256/<prefix>/<digest>.gguf
-  manifests/<catalogue-id>.json
+  blobs/sha256/<first-two-digest-chars>/<full-sha256>.gguf
+  manifests/<model-id>.json
 ```
 
 Before a model is started, Slice 0 checks:
 
-1. the manifest cannot escape the content-addressed blob root;
-2. the blob exists and has the declared byte size;
-3. its header has GGUF magic;
-4. its GGUF version is 2 or 3 and is allowed by the manifest;
-5. its SHA-256 matches the manifest.
+1. the manifest ID and filename are safe and identical;
+2. the blob path exactly matches its SHA-256 content address;
+3. the blob exists and has the declared byte size;
+4. its header has GGUF magic;
+5. its GGUF version is 2 or 3 and is allowed by the manifest;
+6. its SHA-256 matches the manifest.
 
-A future catalogue/downloader must stage downloads elsewhere and atomically adopt them only after these checks plus model-license review. GGUF compatibility is never treated as redistribution permission.
+A future catalogue/downloader must stage bytes elsewhere and atomically adopt them only after these checks plus model-license review. GGUF compatibility is never treated as redistribution permission.
+
+## Runtime policy
+
+Slice 0 is intentionally conservative:
+
+- one loaded model and one parallel generation slot;
+- default context limit 8192 tokens, bounded to 512–131072 by the broker;
+- server Web UI and slots endpoint disabled;
+- upstream runtime logging disabled to avoid retaining prompts and to remove stderr-pipe backpressure;
+- server-side cache-RAM pool disabled for the first slice;
+- worker environment strips llama.cpp argument overrides, GGML overrides, proxy/token variables, and dynamic-loader injection variables;
+- cancellation actively shuts down the private worker connection so a blocked read cannot ignore a HUI cancel request.
+
+These defaults are safety/resource baselines, not benchmark-derived optimal settings.
 
 ## Upstream build
 
-`upstream.lock.json` pins v0.4.0 to commit `5266f24da75dc449bd56cbed7addb9c8e4a6a73e`. `build-cpu.sh` refuses any other checkout and configures the Slice 0 CPU build with RPC, CUDA, HIP, Vulkan, SYCL, OpenCL, and OpenVINO disabled.
+`upstream.lock.json` pins v0.4.0 to commit `5266f24da75dc449bd56cbed7addb9c8e4a6a73e`. `build-cpu.sh` refuses any other checkout and builds only `llama-server` with llama.cpp/ggml shared-library output disabled, native-host tuning disabled for reproducibility, subprocess/HTTPS support disabled, and RPC/CUDA/HIP/Vulkan/SYCL/OpenCL/OpenVINO disabled.
 
-The build script intentionally performs no clone or package installation. Set `LLAMA_SOURCE` to an already approved checkout and `LLAMA_BUILD_DIR` to an out-of-tree directory before running it.
+The resulting Linux executable still dynamically depends on normal system runtime libraries such as libc/libstdc++/libgomp; `BUILD_SHARED_LIBS=OFF` does not mean a fully static Linux binary.
+
+The build script performs no clone or package installation. Set `LLAMA_SOURCE` to an already approved checkout and `LLAMA_BUILD_DIR` to an out-of-tree directory before running it.
+
+llama.cpp is MIT licensed. Distribution must preserve the upstream copyright and permission notice; model licences are separate and must be reviewed per model.
 
 ## Packaging target
 
@@ -82,14 +115,10 @@ Expected installed files:
 
 The model store remains user-owned and outside the OS image.
 
-## Ollama migration
-
-Slice 0 does not remove or mutate Ollama. The stable long-term HUI concept is a provider-qualified model ID (for example `ollama:qwen...` versus `llamacpp:<catalogue-id>`). During migration, HUI can retain its existing Ollama path while opting individual validated models into this llama.cpp broker. Ollama retirement is not part of this slice.
-
 ## Next acceptance gates
 
-1. CI passes for this branch.
-2. Build pinned v0.4.0 CPU source in an isolated Linux builder and record compiler/CMake versions, build logs, test results, binary SHA-256, dynamic dependencies, and licence notices.
-3. Only with a separately approved permissively licensed GGUF, run the model admission and inference smoke tests.
-4. Only after that, stage the package into the preserved approved Ubuntu VM and gather runtime evidence.
+1. Current-head Haven tests and pinned CPU build CI pass.
+2. Add a separate, explicit model-manager path for verified local import/update/deletion; keep inference read-only.
+3. With a separately approved model licence and GGUF, run model admission and inference smoke tests and record time-to-first-token, generation throughput, peak RSS, and failure behavior.
+4. Only after that, stage the package into the preserved approved Ubuntu VM and gather service/runtime evidence.
 5. Add accelerator backends independently; no backend inherits a `runtime-proven` label from CPU.
