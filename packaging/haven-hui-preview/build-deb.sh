@@ -46,7 +46,7 @@ Version: $version
 Section: utils
 Priority: optional
 Architecture: amd64
-Depends: libc6, libgcc-s1, libstdc++6, zlib1g
+Depends: libc6, libgcc-s1, libstdc++6, liblttng-ust1t64, zlib1g
 Maintainer: CakeOS Platform <noreply@cakeos.local>
 Description: CakeOS HUI graphical Linux preview
  Self-contained graphical preview package for validating the pinned HUI core on Linux.
