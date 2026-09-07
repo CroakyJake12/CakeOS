@@ -1,8 +1,46 @@
 #include "cakeos/present/engine.hpp"
 
+#include <algorithm>
 #include <stdexcept>
+#include <string>
 
 namespace cakeos::present {
+
+void PresentEngine::replaceElementText(
+    std::string_view snapshotPathOrUrl,
+    int slideIndex,
+    int objectIndex,
+    std::string_view text)
+{
+    if (!supportsElementSnapshots()) {
+        throw std::runtime_error(
+            "this LibreOfficeKit runtime does not support semantic element snapshots");
+    }
+    if (objectIndex < 0) {
+        throw std::out_of_range("object index must not be negative");
+    }
+
+    const auto elements = elementSnapshot(snapshotPathOrUrl, slideIndex);
+    const auto match = std::find_if(elements.begin(), elements.end(), [objectIndex](const ElementSnapshot& element) {
+        return element.objectIndex == objectIndex;
+    });
+    if (match == elements.end()) {
+        throw std::out_of_range("element reference does not exist in the saved presentation snapshot");
+    }
+    if (match->text.size() != 1U) {
+        throw std::logic_error(
+            "whole-object text replacement currently requires exactly one text value; rich or multi-part text is not supported");
+    }
+
+    const std::string beforeText = match->text.front();
+    const std::string afterText(text);
+    if (beforeText == afterText) {
+        return;
+    }
+
+    applyElementText(slideIndex, objectIndex, afterText);
+    recordTextMutation(slideIndex, objectIndex, beforeText, afterText);
+}
 
 void PresentEngine::addSlideAfter(int slideIndex)
 {
