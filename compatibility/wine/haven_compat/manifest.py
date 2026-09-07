@@ -35,6 +35,8 @@ class MountGrant:
         source = str(value.get("source", "")).strip()
         target = str(value.get("target", "")).strip()
         mode = str(value.get("mode", "ro")).lower()
+        if "\x00" in source or "\x00" in target:
+            raise ManifestError("mount paths must not contain NUL bytes")
         if not source.startswith("/"):
             raise ManifestError("mount source must be an absolute host path")
         if not target.startswith("/"):
@@ -51,6 +53,13 @@ class MountGrant:
             raise ManifestError("mount targets must be beneath /mnt/haven-share/<name>")
         return cls(source=source, target=target, mode=mode)
 
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "source": self.source,
+            "target": self.target,
+            "mode": self.mode,
+        }
+
 
 @dataclass(frozen=True)
 class AppManifest:
@@ -58,6 +67,7 @@ class AppManifest:
     backend: str
     runtime: str
     entrypoint: str
+    display_name: str | None = None
     network: str = "none"
     clipboard: bool = False
     audio_output: bool = False
@@ -71,6 +81,9 @@ class AppManifest:
         backend = str(value.get("backend", "wine")).lower()
         runtime = str(value.get("runtime", "")).strip()
         entrypoint = str(value.get("entrypoint", "")).strip()
+        display_name_raw = value.get("displayName")
+        display_name = str(display_name_raw).strip() if display_name_raw is not None else None
+        display_name = display_name or None
         network = str(value.get("network", "none")).lower()
         gpu = str(value.get("gpu", "none")).lower()
 
@@ -82,6 +95,11 @@ class AppManifest:
             raise ManifestError("runtime must be a simple non-traversing identifier")
         if not entrypoint:
             raise ManifestError("entrypoint is required")
+        if "\x00" in entrypoint:
+            raise ManifestError("entrypoint must not contain NUL bytes")
+        if display_name is not None:
+            if len(display_name) > 120 or any(ord(character) < 32 for character in display_name):
+                raise ManifestError("displayName must be at most 120 printable characters")
         if network not in _ALLOWED_NETWORK:
             raise ManifestError(f"unsupported network policy: {network}")
         if gpu not in _ALLOWED_GPU:
@@ -100,6 +118,7 @@ class AppManifest:
             backend=backend,
             runtime=runtime,
             entrypoint=entrypoint,
+            display_name=display_name,
             network=network,
             clipboard=bool(value.get("clipboard", False)),
             audio_output=bool(value.get("audioOutput", False)),
@@ -107,3 +126,20 @@ class AppManifest:
             gpu=gpu,
             mounts=mounts,
         )
+
+    def to_dict(self) -> dict[str, Any]:
+        value: dict[str, Any] = {
+            "id": self.app_id,
+            "backend": self.backend,
+            "runtime": self.runtime,
+            "entrypoint": self.entrypoint,
+            "network": self.network,
+            "clipboard": self.clipboard,
+            "audioOutput": self.audio_output,
+            "microphone": self.microphone,
+            "gpu": self.gpu,
+            "mounts": [mount.to_dict() for mount in self.mounts],
+        }
+        if self.display_name is not None:
+            value["displayName"] = self.display_name
+        return value
