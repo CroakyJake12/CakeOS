@@ -17,6 +17,9 @@ namespace CakeOS.HuiLinuxHost;
 public sealed class HuiPreviewSurface : Control, IHavenMeasureContext, IDisposable
 {
     private const string CanvasFrameSource = "cake-canvas://rnote-frame";
+    private const double CanvasMinZoom = 1d;
+    private const double CanvasMaxZoom = 32d;
+    private const double CanvasInitialZoom = 4d;
 
     private readonly HuiPage _root;
     private readonly HuiButton _action;
@@ -31,6 +34,13 @@ public sealed class HuiPreviewSurface : Control, IHavenMeasureContext, IDisposab
     private SvgImage? _canvasSvgImage;
     private CanvasDocumentBounds? _canvasDocumentBounds;
     private bool _canvasStrokeActive;
+    private bool _canvasPanActive;
+    private IPointer? _canvasPanPointer;
+    private Point _canvasPanLastSurfacePoint;
+    private double _canvasZoom = CanvasInitialZoom;
+    private double _canvasViewportCenterX;
+    private double _canvasViewportCenterY;
+    private bool _canvasViewportInitialized;
     private bool _disposed;
 
     public HuiPreviewSurface()
@@ -148,6 +158,15 @@ public sealed class HuiPreviewSurface : Control, IHavenMeasureContext, IDisposab
     {
         base.OnPointerMoved(e);
         var p = e.GetPosition(this);
+
+        if (_canvasPanActive && ReferenceEquals(_canvasPanPointer, e.Pointer))
+        {
+            UpdateCanvasPan(p);
+            e.Handled = true;
+            InvalidateVisual();
+            return;
+        }
+
         _input.PointerMoved(new HavenPoint(p.X, p.Y), PointerKind(e.Pointer.Type));
 
         if (_canvasStrokeActive)
@@ -160,6 +179,16 @@ public sealed class HuiPreviewSurface : Control, IHavenMeasureContext, IDisposab
     {
         base.OnPointerPressed(e);
         var p = e.GetPosition(this);
+
+        if (TryBeginCanvasPan(e, p))
+        {
+            Focus();
+            e.Pointer.Capture(this);
+            e.Handled = true;
+            InvalidateVisual();
+            return;
+        }
+
         _input.PointerPressed(new HavenPoint(p.X, p.Y), PointerKind(e.Pointer.Type), HavenPointerButton.Primary);
         TryBeginCanvasStroke(e, p);
         Focus();
@@ -172,6 +201,16 @@ public sealed class HuiPreviewSurface : Control, IHavenMeasureContext, IDisposab
     {
         base.OnPointerReleased(e);
         var p = e.GetPosition(this);
+
+        if (_canvasPanActive && ReferenceEquals(_canvasPanPointer, e.Pointer))
+        {
+            EndCanvasPan(p);
+            e.Pointer.Capture(null);
+            e.Handled = true;
+            InvalidateVisual();
+            return;
+        }
+
         _input.PointerReleased(new HavenPoint(p.X, p.Y));
 
         if (_canvasStrokeActive)
@@ -180,6 +219,21 @@ public sealed class HuiPreviewSurface : Control, IHavenMeasureContext, IDisposab
         e.Pointer.Capture(null);
         e.Handled = true;
         InvalidateMeasure();
+        InvalidateVisual();
+    }
+
+    protected override void OnPointerWheelChanged(PointerWheelEventArgs e)
+    {
+        base.OnPointerWheelChanged(e);
+        if (!_canvasMode || _canvasStrokeActive || _canvasPanActive || _canvasElement is null || Math.Abs(e.Delta.Y) < 0.0001d)
+            return;
+
+        var point = e.GetPosition(this);
+        if (!Rect(_canvasElement.Bounds).Contains(point))
+            return;
+
+        ZoomCanvasViewport(point, e.Delta.Y);
+        e.Handled = true;
         InvalidateVisual();
     }
 
@@ -234,7 +288,7 @@ public sealed class HuiPreviewSurface : Control, IHavenMeasureContext, IDisposab
             throw new InvalidOperationException("HUI keyboard activation self-test failed.");
 
         _status.Content = _canvasMode
-            ? "Rnote frame rendered through HUI; HUI pointer + keyboard input passed"
+            ? $"Rnote through HUI; input passed; viewport {_canvasZoom:0.##}x"
             : "HUI pointer + keyboard input passed";
         InvalidateMeasure();
         InvalidateVisual();
@@ -275,7 +329,7 @@ public sealed class HuiPreviewSurface : Control, IHavenMeasureContext, IDisposab
             throw new InvalidOperationException("Canvas managed/native undo-redo proof failed.");
 
         var frame = RefreshCanvasFrame(session);
-        _status.Content = $"Rnote ABI 1 / SVG / document {frame.Bounds.Width:0} x {frame.Bounds.Height:0}";
+        _status.Content = $"Rnote ABI 1 / SVG / document {frame.Bounds.Width:0} x {frame.Bounds.Height:0} / viewport {_canvasZoom:0.##}x";
         Console.WriteLine(
             $"CANVAS_RNOTE_HUI_RENDER_READY abi=1 format=svg coordinate=document width={frame.Bounds.Width:0.###} height={frame.Bounds.Height:0.###}");
     }
@@ -304,20 +358,29 @@ public sealed class HuiPreviewSurface : Control, IHavenMeasureContext, IDisposab
         _canvasSvgSource = source;
         _canvasSvgImage = image;
         _canvasDocumentBounds = frame.Bounds;
+        if (!_canvasViewportInitialized)
+        {
+            _canvasViewportCenterX = frame.Bounds.X;
+            _canvasViewportCenterY = frame.Bounds.Y;
+            _canvasViewportInitialized = true;
+        }
         previous?.Dispose();
         return frame;
     }
 
     private bool TryBeginCanvasStroke(PointerPressedEventArgs e, Point surfacePoint)
     {
-        if (!_canvasMode || _canvasSession is null || _canvasElement is null || _canvasStrokeActive)
+        if (!_canvasMode || _canvasSession is null || _canvasElement is null || _canvasStrokeActive || _canvasPanActive)
             return false;
         if (e.Pointer.Type == PointerType.Touch)
+            return false;
+
+        var properties = e.GetCurrentPoint(this).Properties;
+        if (e.Pointer.Type == PointerType.Mouse && !properties.IsLeftButtonPressed)
             return false;
         if (!TrySurfaceToDocument(surfacePoint, requireInside: true, out var documentPoint))
             return false;
 
-        var properties = e.GetCurrentPoint(this).Properties;
         var pressure = PointerPressure(e.Pointer.Type, properties.Pressure);
         _canvasSession.SetTool(CanvasStrokeTool.Pen);
         _canvasSession.BeginStroke(documentPoint.X, documentPoint.Y, pressure, properties.XTilt, properties.YTilt);
@@ -338,34 +401,168 @@ public sealed class HuiPreviewSurface : Control, IHavenMeasureContext, IDisposab
     private void EndCanvasStroke(PointerReleasedEventArgs e, Point surfacePoint)
     {
         if (_canvasSession is null || !TrySurfaceToDocument(surfacePoint, requireInside: false, out var documentPoint))
+        {
+            _canvasStrokeActive = false;
             return;
+        }
 
         var properties = e.GetCurrentPoint(this).Properties;
         var pressure = PointerPressure(e.Pointer.Type, properties.Pressure);
         _canvasSession.EndStroke(documentPoint.X, documentPoint.Y, pressure, properties.XTilt, properties.YTilt);
         _canvasStrokeActive = false;
         var frame = RefreshCanvasFrame(_canvasSession);
-        _status.Content = "Pointer ink committed through HUI to Rnote; undo is available";
+        _status.Content = $"Pointer ink committed through HUI to Rnote; viewport {_canvasZoom:0.##}x; undo available";
         Console.WriteLine(
-            $"CANVAS_RNOTE_POINTER_STROKE_COMMITTED pointer={e.Pointer.Type} pressure={pressure:0.###} width={frame.Bounds.Width:0.###} height={frame.Bounds.Height:0.###}");
+            $"CANVAS_RNOTE_POINTER_STROKE_COMMITTED pointer={e.Pointer.Type} pressure={pressure:0.###} width={frame.Bounds.Width:0.###} height={frame.Bounds.Height:0.###} zoom={_canvasZoom:0.###}");
+    }
+
+    private bool TryBeginCanvasPan(PointerPressedEventArgs e, Point surfacePoint)
+    {
+        if (!_canvasMode || _canvasElement is null || _canvasStrokeActive || _canvasPanActive)
+            return false;
+
+        var target = Rect(_canvasElement.Bounds);
+        if (!target.Contains(surfacePoint))
+            return false;
+
+        var properties = e.GetCurrentPoint(this).Properties;
+        var isPanGesture = e.Pointer.Type == PointerType.Touch
+            || (e.Pointer.Type == PointerType.Mouse && (properties.IsMiddleButtonPressed || properties.IsRightButtonPressed));
+        if (!isPanGesture)
+            return false;
+
+        _canvasPanActive = true;
+        _canvasPanPointer = e.Pointer;
+        _canvasPanLastSurfacePoint = surfacePoint;
+        return true;
+    }
+
+    private void UpdateCanvasPan(Point surfacePoint)
+    {
+        if (_canvasElement is null || _canvasDocumentBounds is null)
+            return;
+
+        var target = Rect(_canvasElement.Bounds);
+        if (target.Width <= 0 || target.Height <= 0)
+            return;
+
+        var viewport = CanvasViewport(target);
+        var delta = surfacePoint - _canvasPanLastSurfacePoint;
+        _canvasViewportCenterX -= delta.X / target.Width * viewport.Width;
+        _canvasViewportCenterY -= delta.Y / target.Height * viewport.Height;
+        _canvasPanLastSurfacePoint = surfacePoint;
+        _ = CanvasViewport(target);
+        _status.Content = $"HUI viewport pan / {_canvasZoom:0.##}x";
+    }
+
+    private void EndCanvasPan(Point surfacePoint)
+    {
+        UpdateCanvasPan(surfacePoint);
+        _canvasPanActive = false;
+        _canvasPanPointer = null;
+        if (_canvasElement is null)
+            return;
+
+        var viewport = CanvasViewport(Rect(_canvasElement.Bounds));
+        Console.WriteLine(
+            $"CANVAS_RNOTE_VIEWPORT_PAN_COMMITTED zoom={_canvasZoom:0.###} x={viewport.X:0.###} y={viewport.Y:0.###} width={viewport.Width:0.###} height={viewport.Height:0.###}");
+    }
+
+    private void ZoomCanvasViewport(Point surfacePoint, double wheelDelta)
+    {
+        if (_canvasElement is null || _canvasDocumentBounds is not { } bounds)
+            return;
+
+        var target = Rect(_canvasElement.Bounds);
+        if (target.Width <= 0 || target.Height <= 0)
+            return;
+
+        var oldViewport = CanvasViewport(target);
+        var u = Math.Clamp((surfacePoint.X - target.X) / target.Width, 0d, 1d);
+        var v = Math.Clamp((surfacePoint.Y - target.Y) / target.Height, 0d, 1d);
+        var documentX = oldViewport.X + u * oldViewport.Width;
+        var documentY = oldViewport.Y + v * oldViewport.Height;
+        var nextZoom = Math.Clamp(_canvasZoom * Math.Pow(1.25d, wheelDelta), CanvasMinZoom, CanvasMaxZoom);
+        if (Math.Abs(nextZoom - _canvasZoom) < 0.0001d)
+            return;
+
+        _canvasZoom = nextZoom;
+        var nextSize = CanvasViewportSize(target, bounds, _canvasZoom);
+        _canvasViewportCenterX = documentX - (u - 0.5d) * nextSize.Width;
+        _canvasViewportCenterY = documentY - (v - 0.5d) * nextSize.Height;
+        var viewport = CanvasViewport(target);
+        _status.Content = $"HUI viewport {_canvasZoom:0.##}x";
+        Console.WriteLine(
+            $"CANVAS_RNOTE_VIEWPORT_ZOOM zoom={_canvasZoom:0.###} x={viewport.X:0.###} y={viewport.Y:0.###} width={viewport.Width:0.###} height={viewport.Height:0.###}");
     }
 
     private bool TrySurfaceToDocument(Point surfacePoint, bool requireInside, out (double X, double Y) documentPoint)
     {
         documentPoint = default;
-        if (_canvasElement is null || _canvasSvgImage is null || _canvasDocumentBounds is not { } bounds)
+        if (_canvasElement is null || _canvasDocumentBounds is null)
             return false;
 
-        var destination = ImageDestination(Rect(_canvasElement.Bounds), _canvasSvgImage.Size, HavenImageLayout.Contain);
-        if (destination.Width <= 0 || destination.Height <= 0)
+        var target = Rect(_canvasElement.Bounds);
+        if (target.Width <= 0 || target.Height <= 0)
             return false;
-        if (requireInside && !destination.Contains(surfacePoint))
+        if (requireInside && !target.Contains(surfacePoint))
             return false;
 
-        var x = (surfacePoint.X - destination.X) / destination.Width;
-        var y = (surfacePoint.Y - destination.Y) / destination.Height;
-        documentPoint = (bounds.X + x * bounds.Width, bounds.Y + y * bounds.Height);
+        var viewport = CanvasViewport(target);
+        var x = Math.Clamp((surfacePoint.X - target.X) / target.Width, 0d, 1d);
+        var y = Math.Clamp((surfacePoint.Y - target.Y) / target.Height, 0d, 1d);
+        documentPoint = (viewport.X + x * viewport.Width, viewport.Y + y * viewport.Height);
         return true;
+    }
+
+    private Rect CanvasViewport(Rect target)
+    {
+        if (_canvasDocumentBounds is not { } bounds)
+            return default;
+
+        var size = CanvasViewportSize(target, bounds, _canvasZoom);
+        if (!_canvasViewportInitialized)
+        {
+            _canvasViewportCenterX = bounds.X;
+            _canvasViewportCenterY = bounds.Y;
+            _canvasViewportInitialized = true;
+        }
+
+        var minCenterX = bounds.X + size.Width / 2d;
+        var maxCenterX = bounds.X + bounds.Width - size.Width / 2d;
+        var minCenterY = bounds.Y + size.Height / 2d;
+        var maxCenterY = bounds.Y + bounds.Height - size.Height / 2d;
+        _canvasViewportCenterX = Math.Clamp(_canvasViewportCenterX, minCenterX, maxCenterX);
+        _canvasViewportCenterY = Math.Clamp(_canvasViewportCenterY, minCenterY, maxCenterY);
+        return new Rect(
+            _canvasViewportCenterX - size.Width / 2d,
+            _canvasViewportCenterY - size.Height / 2d,
+            size.Width,
+            size.Height);
+    }
+
+    private static Size CanvasViewportSize(Rect target, CanvasDocumentBounds bounds, double zoom)
+    {
+        if (target.Width <= 0 || target.Height <= 0 || bounds.Width <= 0 || bounds.Height <= 0)
+            return default;
+
+        var targetAspect = target.Width / target.Height;
+        var documentAspect = bounds.Width / bounds.Height;
+        double baseWidth;
+        double baseHeight;
+        if (documentAspect > targetAspect)
+        {
+            baseHeight = bounds.Height;
+            baseWidth = baseHeight * targetAspect;
+        }
+        else
+        {
+            baseWidth = bounds.Width;
+            baseHeight = baseWidth / targetAspect;
+        }
+
+        var clampedZoom = Math.Clamp(zoom, CanvasMinZoom, CanvasMaxZoom);
+        return new Size(Math.Max(1d, baseWidth / clampedZoom), Math.Max(1d, baseHeight / clampedZoom));
     }
 
     private static double PointerPressure(PointerType pointerType, float pressure) =>
@@ -373,34 +570,22 @@ public sealed class HuiPreviewSurface : Control, IHavenMeasureContext, IDisposab
 
     private void DrawImage(DrawingContext context, HavenImageCommand command)
     {
-        if (!_canvasMode || command.Image.Source != CanvasFrameSource || _canvasSvgImage is null)
+        if (!_canvasMode || command.Image.Source != CanvasFrameSource || _canvasSvgImage is null || _canvasDocumentBounds is not { } bounds)
             throw new NotSupportedException($"Graphical preview cannot resolve HUI image source '{command.Image.Source}'.");
 
         var target = Rect(command.Rect);
-        var destination = ImageDestination(target, _canvasSvgImage.Size, command.Layout);
-        using var opacity = context.PushOpacity(Math.Clamp(command.Opacity, 0d, 1d));
-        if (command.Layout is HavenImageLayout.Cover or HavenImageLayout.None)
-        {
-            using var clip = context.PushClip(target);
-            context.DrawImage(_canvasSvgImage, destination);
+        var viewport = CanvasViewport(target);
+        if (viewport.Width <= 0 || viewport.Height <= 0)
             return;
-        }
 
-        context.DrawImage(_canvasSvgImage, destination);
-    }
-
-    private static Rect ImageDestination(Rect target, Size source, HavenImageLayout layout)
-    {
-        if (layout == HavenImageLayout.Fill || source.Width <= 0 || source.Height <= 0) return target;
-        if (layout == HavenImageLayout.None)
-            return new Rect(target.X + (target.Width - source.Width) / 2d, target.Y + (target.Height - source.Height) / 2d, source.Width, source.Height);
-
-        var scale = layout == HavenImageLayout.Cover
-            ? Math.Max(target.Width / source.Width, target.Height / source.Height)
-            : Math.Min(target.Width / source.Width, target.Height / source.Height);
-        var width = source.Width * scale;
-        var height = source.Height * scale;
-        return new Rect(target.X + (target.Width - width) / 2d, target.Y + (target.Height - height) / 2d, width, height);
+        var source = new Rect(
+            viewport.X - bounds.X,
+            viewport.Y - bounds.Y,
+            viewport.Width,
+            viewport.Height);
+        using var opacity = context.PushOpacity(Math.Clamp(command.Opacity, 0d, 1d));
+        using var clip = context.PushClip(target);
+        context.DrawImage(_canvasSvgImage, source, target);
     }
 
     private static (HuiPage Root, HuiButton Action, HuiText Status) BuildScene()
@@ -458,7 +643,7 @@ public sealed class HuiPreviewSurface : Control, IHavenMeasureContext, IDisposab
 
         var body = new HuiText
         {
-            Content = "HUI owns input and document mapping. Mouse and pen strokes are transformed into Rnote document coordinates; touch remains reserved for the future pan/zoom gesture layer."
+            Content = "HUI owns ink and viewport state. Wheel zoom is cursor-anchored; touch or middle/right drag pans; left mouse and pen contact map into Rnote document coordinates."
         };
         body.SetValue(HavenProperties.FontSize, 14d);
         body.SetValue(HavenProperties.Foreground, "TextSecondary");
