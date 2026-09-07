@@ -49,4 +49,19 @@ jobs:
           fi
 
       - name: Test headless pressure/save/reload/export round trip
-        run: cargo test --manifest-path apps/canvas/rnote-poc/Cargo.toml --all-targets --verbose
+        shell: bash
+        run: |
+          set +e
+          cargo test --manifest-path apps/canvas/rnote-poc/Cargo.toml --all-targets --verbose -- --nocapture 2>&1 | tee /tmp/canvas-rnote-test.log
+          status=${PIPESTATUS[0]}
+          {
+            echo '## Rnote boundary test diagnostics'
+            echo '```text'
+            tail -n 120 /tmp/canvas-rnote-test.log
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+          if [ "$status" -ne 0 ]; then
+            failure_line="$(grep -E 'panicked at|assertion .* failed|assertion.*failed|error:' /tmp/canvas-rnote-test.log | tail -n 1 || true)"
+            echo "::error title=Rnote boundary round-trip failed::${failure_line:-See job summary for cargo test output}"
+          fi
+          exit "$status"
