@@ -12,6 +12,7 @@ void PresentEngine::addSlideAfter(int slideIndex)
     if (slides().size() != before + 1U) {
         throw std::runtime_error("LibreOffice did not add the requested slide");
     }
+    recordNativeMutation();
 }
 
 void PresentEngine::duplicateSlide(int slideIndex)
@@ -22,6 +23,7 @@ void PresentEngine::duplicateSlide(int slideIndex)
     if (slides().size() != before + 1U) {
         throw std::runtime_error("LibreOffice did not duplicate the requested slide");
     }
+    recordNativeMutation();
 }
 
 void PresentEngine::deleteSlide(int slideIndex)
@@ -35,16 +37,7 @@ void PresentEngine::deleteSlide(int slideIndex)
     if (slides().size() + 1U != slideList.size()) {
         throw std::runtime_error("LibreOffice did not delete the requested slide");
     }
-}
-
-void PresentEngine::undo()
-{
-    postUnoCommand(".uno:Undo", {}, true);
-}
-
-void PresentEngine::redo()
-{
-    postUnoCommand(".uno:Redo", {}, true);
+    recordNativeMutation();
 }
 
 } // namespace cakeos::present
