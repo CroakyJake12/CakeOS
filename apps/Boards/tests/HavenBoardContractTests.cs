@@ -1,3 +1,4 @@
+using System.Text;
 using CakeOS.Apps.Boards.Contract;
 using Xunit;
 
@@ -83,6 +84,24 @@ public sealed class HavenBoardReducerTests
 
         Assert.Contains("already exists", error.Message, StringComparison.OrdinalIgnoreCase);
     }
+
+    [Fact]
+    public void Attachment_metadata_is_added_and_removed_through_typed_commands()
+    {
+        var snapshot = HavenBoardSnapshot.CreateDefault();
+        var attachment = new HavenBoardAttachment(
+            "att-one",
+            "brief.txt",
+            "sha256:" + new string('a', 64));
+
+        var attached = HavenBoardReducer.Apply(snapshot, new AddAttachmentCommand("card-1", attachment));
+        var card = attached.Groups[0].Cards.Single(candidate => candidate.Id == "card-1");
+        Assert.Equal(attachment, Assert.Single(card.Attachments!));
+
+        var removed = HavenBoardReducer.Apply(attached, new RemoveAttachmentCommand("card-1", "att-one"));
+        var reloadedCard = removed.Groups[0].Cards.Single(candidate => candidate.Id == "card-1");
+        Assert.Empty(reloadedCard.Attachments!);
+    }
 }
 
 public sealed class JsonFileHavenBoardStoreTests
@@ -108,7 +127,7 @@ public sealed class JsonFileHavenBoardStoreTests
                             new HavenBoardAttachment(
                                 "attachment-1",
                                 "brief.txt",
-                                "attachments/attachment-1",
+                                "sha256:" + new string('a', 64),
                                 HavenBoardAttachmentAvailability.Available)
                         ])])]);
 
@@ -204,6 +223,119 @@ public sealed class JsonFileHavenBoardStoreTests
         try
         {
             using var store = new JsonFileHavenBoardStore(root);
+            await test(store, root);
+        }
+        finally
+        {
+            TryDeleteDirectory(root);
+        }
+    }
+
+    private static void TryDeleteDirectory(string root)
+    {
+        try
+        {
+            if (Directory.Exists(root))
+                Directory.Delete(root, recursive: true);
+        }
+        catch (IOException)
+        {
+            // Test cleanup must not hide the tested assertion result.
+        }
+        catch (UnauthorizedAccessException)
+        {
+            // Test cleanup must not hide the tested assertion result.
+        }
+    }
+}
+
+public sealed class ContentAddressedHavenBoardAttachmentStoreTests
+{
+    [Fact]
+    public async Task Import_is_content_addressed_deduplicated_and_display_name_cannot_escape_storage()
+    {
+        await WithAttachmentStoreAsync(async (store, root) =>
+        {
+            var bytes = Encoding.UTF8.GetBytes("local attachment payload");
+            await using var firstInput = new MemoryStream(bytes);
+            await using var secondInput = new MemoryStream(bytes);
+
+            var first = await store.ImportAsync("board-main", "../../outside.txt", firstInput, "att-one");
+            var second = await store.ImportAsync("board-main", "same.txt", secondInput, "att-two");
+
+            Assert.Equal("outside.txt", first.DisplayName);
+            Assert.StartsWith("sha256:", first.LocalReference, StringComparison.Ordinal);
+            Assert.Equal(first.LocalReference, second.LocalReference);
+
+            var boardDirectory = Path.Combine(root, "board-main");
+            Assert.Single(Directory.GetFiles(boardDirectory, "*.blob"));
+            Assert.False(File.Exists(Path.Combine(root, "outside.txt")));
+
+            await using var opened = await store.OpenReadAsync("board-main", first);
+            Assert.NotNull(opened);
+            using var copy = new MemoryStream();
+            await opened.CopyToAsync(copy);
+            Assert.Equal(bytes, copy.ToArray());
+        });
+    }
+
+    [Fact]
+    public async Task Import_over_size_limit_is_rejected_and_does_not_publish_blob()
+    {
+        await WithAttachmentStoreAsync(async (_, root) =>
+        {
+            var store = new ContentAddressedHavenBoardAttachmentStore(root, maxAttachmentBytes: 3);
+            await using var input = new MemoryStream([1, 2, 3, 4]);
+
+            await Assert.ThrowsAsync<InvalidDataException>(() =>
+                store.ImportAsync("board-main", "too-large.bin", input, "att-large"));
+
+            var boardDirectory = Path.Combine(root, "board-main");
+            Assert.True(Directory.Exists(boardDirectory));
+            Assert.Empty(Directory.GetFiles(boardDirectory));
+        });
+    }
+
+    [Fact]
+    public async Task Unsafe_ids_and_malformed_local_references_are_rejected()
+    {
+        await WithAttachmentStoreAsync(async (store, _) =>
+        {
+            await using var input = new MemoryStream([1, 2, 3]);
+            await Assert.ThrowsAsync<ArgumentException>(() =>
+                store.ImportAsync("../outside", "file.bin", input, "att-one"));
+
+            var malformed = new HavenBoardAttachment("att-one", "file.bin", "../../outside");
+            await Assert.ThrowsAsync<InvalidDataException>(() => store.OpenReadAsync("board-main", malformed));
+        });
+    }
+
+    [Fact]
+    public async Task Existing_deduplicated_blob_must_still_match_its_digest()
+    {
+        await WithAttachmentStoreAsync(async (store, root) =>
+        {
+            var bytes = Encoding.UTF8.GetBytes("trusted bytes");
+            await using var firstInput = new MemoryStream(bytes);
+            var attachment = await store.ImportAsync("board-main", "file.bin", firstInput, "att-one");
+
+            var digest = attachment.LocalReference["sha256:".Length..];
+            var blobPath = Path.Combine(root, "board-main", digest + ".blob");
+            await File.WriteAllTextAsync(blobPath, "tampered");
+
+            await using var secondInput = new MemoryStream(bytes);
+            await Assert.ThrowsAsync<InvalidDataException>(() =>
+                store.ImportAsync("board-main", "file.bin", secondInput, "att-two"));
+        });
+    }
+
+    private static async Task WithAttachmentStoreAsync(
+        Func<ContentAddressedHavenBoardAttachmentStore, string, Task> test)
+    {
+        var root = Path.Combine(Path.GetTempPath(), "cakeos-boards-attachments", Guid.NewGuid().ToString("N"));
+        try
+        {
+            var store = new ContentAddressedHavenBoardAttachmentStore(root);
             await test(store, root);
         }
         finally
