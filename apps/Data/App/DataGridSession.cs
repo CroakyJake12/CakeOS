@@ -14,6 +14,7 @@ public sealed class DataGridSession : IAsyncDisposable
 {
     public const int VisibleRows = 10;
     public const int VisibleColumns = 8;
+    private const int MaximumFilterValueLength = 256;
 
     private readonly IDataSpreadsheetEngine _spreadsheet;
     private DataWorkbookHandle? _workbook;
@@ -192,6 +193,57 @@ public sealed class DataGridSession : IAsyncDisposable
         return await RefreshAsync(cancellationToken).ConfigureAwait(false);
     }
 
+    public async Task<DataGridSessionSnapshot> FilterEqualsAsync(
+        int startRow,
+        int startColumn,
+        int rowCount,
+        int columnCount,
+        int keyColumnOffset,
+        string value,
+        bool containsHeader = true,
+        CancellationToken cancellationToken = default)
+    {
+        ThrowIfDisposed();
+        var workbook = EnsureEditable();
+        var range = VisibleRange(startRow, startColumn, rowCount, columnCount);
+        if (keyColumnOffset < 0 || keyColumnOffset >= columnCount)
+            throw new ArgumentOutOfRangeException(nameof(keyColumnOffset), "Filter key must identify a column inside the requested visible range.");
+        if (containsHeader && rowCount < 2)
+            throw new ArgumentException("A filter range marked as containing a header must include at least one data row.", nameof(rowCount));
+        ValidateFilterValue(value);
+
+        _ = await _spreadsheet.FilterEqualsAsync(
+            workbook.Id,
+            range,
+            keyColumnOffset,
+            value,
+            containsHeader,
+            cancellationToken).ConfigureAwait(false);
+        return await RefreshAsync(cancellationToken).ConfigureAwait(false);
+    }
+
+    public async Task<DataGridSessionSnapshot> ClearFilterAsync(
+        int startRow,
+        int startColumn,
+        int rowCount,
+        int columnCount,
+        bool containsHeader = true,
+        CancellationToken cancellationToken = default)
+    {
+        ThrowIfDisposed();
+        var workbook = EnsureEditable();
+        var range = VisibleRange(startRow, startColumn, rowCount, columnCount);
+        if (containsHeader && rowCount < 2)
+            throw new ArgumentException("A filter range marked as containing a header must include at least one data row.", nameof(rowCount));
+
+        _ = await _spreadsheet.ClearFilterAsync(
+            workbook.Id,
+            range,
+            containsHeader,
+            cancellationToken).ConfigureAwait(false);
+        return await RefreshAsync(cancellationToken).ConfigureAwait(false);
+    }
+
     public Task<DataGridSessionSnapshot> InsertRowsAsync(int index, int count = 1, CancellationToken cancellationToken = default) =>
         MutateStructureAsync(rows: true, insert: true, index, count, cancellationToken);
 
@@ -216,6 +268,8 @@ public sealed class DataGridSession : IAsyncDisposable
 
         if (grid.Values.Count != VisibleRows || grid.Values.Any(row => row.Count != VisibleColumns))
             throw new InvalidDataException($"Spreadsheet engine returned an invalid first-slice grid; expected {VisibleRows} x {VisibleColumns}.");
+        if (grid.RowVisibility is not null && grid.RowVisibility.Count != VisibleRows)
+            throw new InvalidDataException($"Spreadsheet engine returned invalid row-visibility metadata; expected {VisibleRows} rows.");
 
         return new DataGridSessionSnapshot(workbook, _sheets, activeSheet, grid);
     }
@@ -322,6 +376,15 @@ public sealed class DataGridSession : IAsyncDisposable
         if (startRow < 0 || startColumn < 0 || rowCount < 1 || columnCount < 1 ||
             startRow + rowCount > VisibleRows || startColumn + columnCount > VisibleColumns)
             throw new ArgumentOutOfRangeException(nameof(rowCount), $"First-slice range operations must fit wholly inside the {VisibleRows} x {VisibleColumns} viewport.");
+    }
+
+    private static void ValidateFilterValue(string value)
+    {
+        ArgumentNullException.ThrowIfNull(value);
+        if (value.Length is < 1 or > MaximumFilterValueLength)
+            throw new ArgumentException($"First-slice filter values must contain 1-{MaximumFilterValueLength} characters.", nameof(value));
+        if (value.Any(char.IsControl))
+            throw new ArgumentException("First-slice filter values cannot contain control characters.", nameof(value));
     }
 
     private void ThrowIfDisposed()

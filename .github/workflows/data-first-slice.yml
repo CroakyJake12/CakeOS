@@ -90,3 +90,4 @@ jobs:
           dotnet run --project apps/Data/Tests/HavenOS.Data.Runtime.csproj -c Release
           dotnet run --project apps/Data/Tests/HavenOS.Data.Validation.Runtime.csproj -c Release
           dotnet run --project apps/Data/Tests/HavenOS.Data.Sort.Runtime.csproj -c Release
+          dotnet run --project apps/Data/Tests/HavenOS.Data.Filter.Runtime.csproj -c Release
