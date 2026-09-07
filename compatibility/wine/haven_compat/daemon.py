@@ -37,6 +37,8 @@ def default_socket_path() -> Path:
 def dispatch_request(broker: CompatibilityBroker, request: dict[str, Any]) -> Any:
     method = request.get("method")
     params = request.get("params", {})
+    if set(request) - {"method", "params"}:
+        raise RequestError("invalid_request", "unexpected request fields")
     if not isinstance(method, str) or not method:
         raise RequestError("invalid_request", "method must be a non-empty string")
     if not isinstance(params, dict):
@@ -52,6 +54,8 @@ def dispatch_request(broker: CompatibilityBroker, request: dict[str, Any]) -> An
         _require_no_params(params)
         return broker.list_apps()
     if method == "registerApp":
+        if set(params) != {"manifest"}:
+            raise RequestError("invalid_params", "registerApp accepts only params.manifest")
         raw_manifest = params.get("manifest")
         if not isinstance(raw_manifest, dict):
             raise RequestError("invalid_params", "registerApp requires params.manifest object")
@@ -61,7 +65,7 @@ def dispatch_request(broker: CompatibilityBroker, request: dict[str, Any]) -> An
             raise RequestError("invalid_manifest", str(exc)) from exc
         return broker.register_app(manifest)
     if method == "unregisterApp":
-        app_id = _require_app_id(params)
+        app_id = _require_app_id(params, allowed_extra={"deleteState"})
         delete_state = params.get("deleteState", False)
         if not isinstance(delete_state, bool):
             raise RequestError("invalid_params", "deleteState must be boolean")
@@ -73,7 +77,7 @@ def dispatch_request(broker: CompatibilityBroker, request: dict[str, Any]) -> An
     if method == "stop":
         return broker.stop_registered(_require_app_id(params)).as_dict()
     if method == "logs":
-        app_id = _require_app_id(params)
+        app_id = _require_app_id(params, allowed_extra={"lines"})
         lines = params.get("lines", 200)
         if isinstance(lines, bool) or not isinstance(lines, int) or not 1 <= lines <= 1000:
             raise RequestError("invalid_params", "lines must be an integer between 1 and 1000")
@@ -89,8 +93,8 @@ def dispatch_request(broker: CompatibilityBroker, request: dict[str, Any]) -> An
 def serve_connection(connection: socket.socket, broker: CompatibilityBroker) -> None:
     connection.settimeout(10)
     _verify_peer(connection)
-    request = _receive_json(connection)
     try:
+        request = _receive_json(connection)
         result = dispatch_request(broker, request)
         response = {"ok": True, "result": result}
     except RequestError as exc:
@@ -120,8 +124,9 @@ def serve_forever(socket_path: Path | None = None, broker: CompatibilityBroker |
     broker = broker or CompatibilityBroker()
 
     old_umask = os.umask(0o077)
-    server = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+    server: socket.socket | None = None
     try:
+        server = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
         server.bind(str(path))
         os.chmod(path, 0o600)
         server.listen(16)
@@ -131,11 +136,10 @@ def serve_forever(socket_path: Path | None = None, broker: CompatibilityBroker |
                 try:
                     serve_connection(connection, broker)
                 except (DaemonError, OSError, ValueError):
-                    # A malformed or unauthorized client is isolated to its
-                    # connection. Do not terminate the per-user broker.
                     continue
     finally:
-        server.close()
+        if server is not None:
+            server.close()
         os.umask(old_umask)
         _remove_owned_socket(path)
 
@@ -145,12 +149,13 @@ def _require_no_params(params: dict[str, Any]) -> None:
         raise RequestError("invalid_params", "method does not accept parameters")
 
 
-def _require_app_id(params: dict[str, Any]) -> str:
+def _require_app_id(params: dict[str, Any], allowed_extra: set[str] | None = None) -> str:
+    allowed = {"id"} | (allowed_extra or set())
+    if set(params) - allowed:
+        raise RequestError("invalid_params", "unexpected parameters")
     app_id = params.get("id")
     if not isinstance(app_id, str) or not app_id:
         raise RequestError("invalid_params", "params.id must be a non-empty string")
-    if set(params) - {"id", "lines", "deleteState"}:
-        raise RequestError("invalid_params", "unexpected parameters")
     return app_id
 
 
@@ -210,6 +215,7 @@ def _prepare_socket_parent(parent: Path) -> None:
     runtime_dir = Path(runtime_dir_value)
     try:
         runtime_stat = runtime_dir.stat()
+        runtime_resolved = runtime_dir.resolve(strict=True)
     except OSError as exc:
         raise DaemonError("XDG_RUNTIME_DIR is unavailable") from exc
     if runtime_dir.is_symlink() or not runtime_dir.is_dir():
@@ -220,6 +226,12 @@ def _prepare_socket_parent(parent: Path) -> None:
     parent.mkdir(parents=True, exist_ok=True, mode=0o700)
     if parent.is_symlink() or not parent.is_dir():
         raise DaemonError("compatibility socket parent must be a real directory")
+    try:
+        parent_resolved = parent.resolve(strict=True)
+    except OSError as exc:
+        raise DaemonError("compatibility socket parent is unavailable") from exc
+    if runtime_resolved != parent_resolved and runtime_resolved not in parent_resolved.parents:
+        raise DaemonError("compatibility socket must remain beneath XDG_RUNTIME_DIR")
     parent_stat = parent.stat()
     if parent_stat.st_uid != os.geteuid():
         raise DaemonError("compatibility socket parent must be owned by the current user")
