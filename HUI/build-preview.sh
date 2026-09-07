@@ -2,7 +2,7 @@
 set -euo pipefail
 
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-"$root/HUI/stage-donor.sh"
+bash "$root/HUI/stage-donor.sh"
 
 dotnet publish "$root/HUI/Preview/CakeOS.HuiPreview.csproj" \
   -c Release \
