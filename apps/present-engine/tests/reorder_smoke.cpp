@@ -36,7 +36,7 @@ constexpr std::array InitialOrder{
     std::string_view{"Gamma"}
 };
 
-constexpr std::array MovedOrder{
+constexpr std::array DownwardOrder{
     std::string_view{"Beta"},
     std::string_view{"Gamma"},
     std::string_view{"Alpha"}
@@ -57,23 +57,41 @@ int main(int argc, char** argv)
         requireOrder(engine, InitialOrder, "initial order");
 
         engine.moveSlide(0, 2);
-        requireOrder(engine, MovedOrder, "move first slide to end");
+        requireOrder(engine, DownwardOrder, "move first slide to end");
         if (engine.currentSlide() != 2) {
-            throw std::runtime_error("moved slide did not become the current slide at its destination");
+            throw std::runtime_error("downward-moved slide did not become current at its destination");
         }
 
         engine.undo();
-        requireOrder(engine, InitialOrder, "undo reorder");
+        requireOrder(engine, InitialOrder, "undo downward reorder");
 
         engine.redo();
-        requireOrder(engine, MovedOrder, "redo reorder");
+        requireOrder(engine, DownwardOrder, "redo downward reorder");
+
+        engine.moveSlide(2, 0);
+        requireOrder(engine, InitialOrder, "move last slide to beginning");
+        if (engine.currentSlide() != 0) {
+            throw std::runtime_error("upward-moved slide did not become current at its destination");
+        }
+
+        engine.undo();
+        requireOrder(engine, DownwardOrder, "undo upward reorder");
+
+        engine.redo();
+        requireOrder(engine, InitialOrder, "redo upward reorder");
+
+        // Finish in a non-original ordering so save/reopen proves persistence,
+        // rather than accidentally passing with an unchanged document.
+        engine.moveSlide(0, 2);
+        requireOrder(engine, DownwardOrder, "final downward reorder");
 
         engine.saveAs(argv[2], "odp");
         engine.close();
         engine.open(argv[2]);
-        requireOrder(engine, MovedOrder, "saved reorder reopen");
+        requireOrder(engine, DownwardOrder, "saved reorder reopen");
 
         std::cout << "slide_reorder=passed\n";
+        std::cout << "slide_reorder_directions=down,up\n";
         std::cout << "slide_order=Beta,Gamma,Alpha\n";
         return 0;
     } catch (const std::exception& error) {
