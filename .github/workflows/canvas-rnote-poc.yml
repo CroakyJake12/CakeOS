@@ -48,6 +48,12 @@ jobs:
             exit 1
           fi
 
+      - name: Build native C ABI library
+        shell: bash
+        run: |
+          cargo build --manifest-path apps/canvas/rnote-poc/Cargo.toml --lib --verbose
+          test -f apps/canvas/rnote-poc/target/debug/libcakeos_canvas_rnote_poc.so
+
       - name: Test headless pressure/save/reload/export round trip
         shell: bash
         run: |
@@ -65,6 +71,16 @@ jobs:
             echo "::error title=Rnote boundary round-trip failed::${failure_line:-See job summary for cargo test output}"
           fi
           exit "$status"
+
+      - name: Upload native bridge artifact
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: canvas-rnote-native-bridge
+          path: |
+            apps/canvas/rnote-poc/target/debug/libcakeos_canvas_rnote_poc.so
+            apps/canvas/rnote-poc/include/cakeos_canvas.h
+          if-no-files-found: error
 
       - name: Upload boundary test diagnostics
         if: always()
