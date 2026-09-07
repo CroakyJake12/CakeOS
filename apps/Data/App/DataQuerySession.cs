@@ -20,6 +20,7 @@ public sealed class DataQuerySession : IAsyncDisposable
 {
     private const int MaximumRecentQueries = 20;
     private const int MaximumMaterializedColumns = 256;
+    private const int MaximumMaterializedDataRows = 999;
 
     private readonly IDataSpreadsheetEngine _spreadsheet;
     private readonly IDataDatabaseEngine _database;
@@ -113,6 +114,8 @@ public sealed class DataQuerySession : IAsyncDisposable
             throw new InvalidOperationException("Only a successful query from the current open Data query session can be materialized.");
         if (execution.Result.Truncated)
             throw new InvalidOperationException("A truncated query preview cannot be materialized because it would silently create an incomplete sheet.");
+        if (execution.Result.Rows.Count > MaximumMaterializedDataRows)
+            throw new InvalidOperationException($"Query materialization supports at most {MaximumMaterializedDataRows} data rows plus one header row in this slice.");
         if (execution.Result.Columns.Count is < 1 or > MaximumMaterializedColumns)
             throw new InvalidOperationException($"Query materialization requires 1-{MaximumMaterializedColumns} result columns.");
         if (execution.Result.Rows.Any(row => row.Count != execution.Result.Columns.Count))
