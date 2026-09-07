@@ -101,6 +101,15 @@ public:
         std::string_view documentPathOrUrl,
         int slideIndex) const;
 
+    // Resolve a snapshot-scoped semantic object into the live Impress view.
+    // LibreOfficeKit reports the resulting selection geometry through the
+    // normal engine event callback. The object index remains snapshot-only.
+    void selectElement(
+        std::string_view snapshotPathOrUrl,
+        int slideIndex,
+        int objectIndex);
+    void clearElementSelection(int slideIndex, int objectIndex);
+
     // Whole-object single-line plain-text replacement. The saved snapshot is
     // used to verify that objectIndex still identifies exactly one text value
     // before the live document is mutated. Rich/multi-part/multiline text is
