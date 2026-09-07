@@ -14,17 +14,20 @@ DataGridSession / DataAppService
 IDataSpreadsheetEngine   IDataDatabaseEngine
    |          |
 CalcSpreadsheetEngine    DuckDbDatabaseEngine
-   |          |
+   |          |                 ^
 JSON-lines stdio         JSON-lines stdio
-   |          |
+   |          |                 |
 calc_worker.py            duckdb_worker.py
-   |          |
+   |          |                 ^
 UNO local pipe            DuckDB connection
-   |          |
-headless LibreOffice Calc local .duckdb file
+   |                            ^
+headless LibreOffice Calc | local .duckdb file
+          |                |
+          +-- DataWorkbookDatabaseBridge --+
+               typed snapshot publication
 ```
 
-No UNO type or DuckDB API is exposed to HUI.
+No UNO type or DuckDB API is exposed to HUI. The workbook remains Calc-owned; DuckDB receives explicit snapshot tables rather than shared document authority.
 
 ## Evidence ledger
 
@@ -32,11 +35,13 @@ No UNO type or DuckDB API is exposed to HUI.
 | --- | --- |
 | Source implemented | Yes — CakeOS feature branch `data-calc-duckdb-first-slice` |
 | .NET 10 build | Yes — Ubuntu 24.04 GitHub Actions, 0 warnings / 0 errors |
-| Contract smoke | Yes — Ubuntu 24.04 GitHub Actions |
-| Worker Python syntax | Yes — both workers plus integration harness compiled with `py_compile` |
-| DuckDB runtime | Yes — DuckDB 1.5.5 opened a disposable database, executed bounded SELECTs, and rejected DDL/multiple statements/external file access |
+| Contract/session/bridge smoke | Yes — Ubuntu 24.04 GitHub Actions; 10 × 8 session, sheet selection, edit/recalculate/refresh, save delegation and typed workbook→database bridge |
+| Worker Python syntax | Yes — both workers plus integration harnesses compiled with `py_compile` |
+| DuckDB runtime | Yes — DuckDB 1.5.5 opened a disposable database, executed bounded SELECTs, rejected DDL/multiple statements/external file access, accepted typed table publication, safely quoted identifiers and atomically replaced snapshots |
 | Calc/UNO runtime | Yes — LibreOffice 24.2.7 on Ubuntu 24.04 opened a disposable ODS over a local UNO pipe, edited cells/formula, recalculated, saved/reopened ODS and XLSX, and enforced read-only/save-as guards |
-| Approved CakeOS VM | **No** — CakeOS is not currently registered in Sandbox, so Ubuntu 26.04.1 VM acceptance has not been executed |
+| Full first-slice CI | Yes — GitHub Actions run `34144363093` completed successfully across build, smoke, runtime provisioning, Python compilation and worker integration gates |
+| Approved desktop checkout | Located — Sandbox project `cakeos` at `C:\Users\Jacob\OneDrive\Personal Files\Development\CakeOS`; branch switch was correctly refused while another CakeOS worker job was active |
+| Approved CakeOS VM | **No** — Ubuntu 26.04.1 VM acceptance has not been executed |
 | CakeOS package/image | **No** — no package list, image, ISO or VM state was changed |
 | Visual HUI verification | **No** — the target HUI renderer is not yet wired into this app slice |
 
@@ -61,16 +66,37 @@ Spreadsheet side:
 - closes documents and tears down the worker/profile;
 - drains child-process diagnostics and has bounded shutdown/kill fallback.
 
-Database side:
+HUI-facing session side:
+
+- exposes a Haven-owned fixed 10 × 8 first-slice viewport;
+- discovers and selects real Calc worksheets;
+- validates returned grid dimensions before exposing them to HUI;
+- constrains first-slice edits to the visible viewport;
+- performs edit → recalculate → refresh as one typed app operation;
+- supports save-as and deterministic close/dispose semantics;
+- makes workbook-open failure atomic and attempts cleanup without masking the original error.
+
+Database/query side:
 
 - opens a local DuckDB database;
 - pins DuckDB 1.5.5 in CI/runtime proof;
 - disables external access, extension auto-install/auto-load, community extensions and persistent secrets;
 - applies bounded worker memory/thread defaults and locks DuckDB configuration after setup;
-- first slice permits only a single `SELECT` or `EXPLAIN` statement;
+- user/query text permits only a single `SELECT` or `EXPLAIN` statement;
 - mutation/capability keywords are rejected again inside the worker;
 - query previews are capped at 1–1000 rows;
 - no database API is exposed directly to generated UI.
+
+Workbook→database bridge:
+
+- publishes an explicit displayed-value range snapshot rather than sharing workbook ownership;
+- generates stable A/B/C… column names or sanitises an optional first-row header;
+- validates source sheet, coordinates and dimensions before publication;
+- uses a privileged structured `ReplaceTableAsync` operation rather than exposing DDL strings;
+- validates table/column names and shape at both app and worker boundaries;
+- quotes SQL identifiers and parameterises row values;
+- replaces the target table inside a DuckDB transaction;
+- keeps raw user/model SQL read-only even after publication capability is enabled.
 
 ## Runtime dependencies — not installed by this branch
 
@@ -92,20 +118,22 @@ dotnet run --project apps/Data/Tests/HavenOS.Data.Smoke.csproj -c Release
 python3 -m py_compile apps/Data/workers/calc_worker.py
 python3 -m py_compile apps/Data/workers/duckdb_worker.py
 python3 -m py_compile apps/Data/Tests/test_workers.py
+python3 -m py_compile apps/Data/Tests/test_duckdb_publish.py
 ```
 
-The GitHub workflow `.github/workflows/data-first-slice.yml` additionally provisions disposable LibreOffice/UNO and DuckDB runtimes and runs `apps/Data/Tests/test_workers.py` end to end.
+The GitHub workflow `.github/workflows/data-first-slice.yml` provisions disposable LibreOffice/UNO and DuckDB runtimes and runs both worker integration harnesses end to end.
 
 ## Approved-VM P0 gate still required
 
 Use disposable fixture/output/database paths. Do not use normal user documents.
 
-1. Register/resolve the existing CakeOS checkout in Sandbox without replacing the VM or dirty work.
-2. Confirm the approved Ubuntu 26.04.1 environment and current package state.
-3. Build the Data projects without image/package mutation first.
-4. If runtime dependencies are absent, record that fact before any package installation; install only with the platform/package worker's approved path.
-5. Run the same Calc/DuckDB disposable integration tests.
-6. Verify worker cleanup, local-pipe-only UNO communication and filesystem/network confinement.
+1. Wait until the existing CakeOS Sandbox checkout is idle and safe to switch; do not clean, stash or overwrite another worker's state.
+2. Switch the registered checkout to `data-calc-duckdb-first-slice` only through Sandbox's guarded branch-switch operation.
+3. Confirm the approved Ubuntu 26.04.1 environment and current package state.
+4. Build the Data projects without image/package mutation first.
+5. If runtime dependencies are absent, record that fact before any package installation; install only through the platform/package worker's approved path.
+6. Run the same Calc/DuckDB disposable integration tests.
+7. Verify worker cleanup, local-pipe-only UNO communication and filesystem/network confinement.
 
 ## P1 HUI gate still required
 
@@ -125,8 +153,9 @@ Use disposable fixture/output/database paths. Do not use normal user documents.
 - LibreOfficeKit rendering;
 - charts and drawings;
 - formatting/validation/named ranges;
-- SQL mutation/DDL;
-- sheet-to-DuckDB publication and query-result materialisation;
+- raw SQL mutation/DDL;
+- DuckDB query-result materialisation back into a Calc range/sheet;
+- typed preservation beyond displayed strings when publishing Calc ranges to DuckDB;
 - package/image changes;
 - unrestricted generated-UI write operations.
 
