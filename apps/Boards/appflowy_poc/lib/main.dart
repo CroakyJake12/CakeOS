@@ -60,17 +60,17 @@ class _HavenBoardsPocPageState extends State<HavenBoardsPocPage> {
       AppFlowyGroupData(
         id: 'todo',
         name: 'To do',
-        items: [const HavenBoardItem('card-1', 'First task')],
+        items: [HavenBoardItem('card-1', 'First task')],
       ),
       AppFlowyGroupData(
         id: 'doing',
         name: 'Doing',
-        items: [const HavenBoardItem('card-2', 'Try AppFlowy Board')],
+        items: [HavenBoardItem('card-2', 'Try AppFlowy Board')],
       ),
       AppFlowyGroupData(
         id: 'done',
         name: 'Done',
-        items: [const HavenBoardItem('card-3', 'Persist locally')],
+        items: [HavenBoardItem('card-3', 'Persist locally')],
       ),
     ]);
   }
@@ -315,7 +315,7 @@ class _HavenBoardsPocPageState extends State<HavenBoardsPocPage> {
 }
 
 class HavenBoardItem extends AppFlowyGroupItem {
-  const HavenBoardItem(this.id, this.title);
+  HavenBoardItem(this.id, this.title);
 
   @override
   final String id;
