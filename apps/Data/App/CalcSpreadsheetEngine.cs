@@ -4,6 +4,7 @@ public sealed class CalcSpreadsheetEngine : IDataSpreadsheetEngine
 {
     private const int MaximumMaterializedRows = 1000;
     private const int MaximumMaterializedColumns = 256;
+    private const int MaximumStructuralMutationCount = 100;
 
     private readonly JsonLineWorkerClient _worker;
 
@@ -68,6 +69,18 @@ public sealed class CalcSpreadsheetEngine : IDataSpreadsheetEngine
             cancellationToken);
     }
 
+    public Task InsertRowsAsync(string workbookId, string sheet, int index, int count, CancellationToken cancellationToken = default) =>
+        MutateStructureAsync("insertRows", workbookId, sheet, index, count, cancellationToken);
+
+    public Task DeleteRowsAsync(string workbookId, string sheet, int index, int count, CancellationToken cancellationToken = default) =>
+        MutateStructureAsync("deleteRows", workbookId, sheet, index, count, cancellationToken);
+
+    public Task InsertColumnsAsync(string workbookId, string sheet, int index, int count, CancellationToken cancellationToken = default) =>
+        MutateStructureAsync("insertColumns", workbookId, sheet, index, count, cancellationToken);
+
+    public Task DeleteColumnsAsync(string workbookId, string sheet, int index, int count, CancellationToken cancellationToken = default) =>
+        MutateStructureAsync("deleteColumns", workbookId, sheet, index, count, cancellationToken);
+
     public async Task RecalculateAsync(string workbookId, CancellationToken cancellationToken = default)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(workbookId);
@@ -88,6 +101,27 @@ public sealed class CalcSpreadsheetEngine : IDataSpreadsheetEngine
     }
 
     public ValueTask DisposeAsync() => _worker.DisposeAsync();
+
+    private async Task MutateStructureAsync(
+        string method,
+        string workbookId,
+        string sheet,
+        int index,
+        int count,
+        CancellationToken cancellationToken)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(workbookId);
+        ArgumentException.ThrowIfNullOrWhiteSpace(sheet);
+        if (index < 0)
+            throw new ArgumentOutOfRangeException(nameof(index));
+        if (count is < 1 or > MaximumStructuralMutationCount)
+            throw new ArgumentOutOfRangeException(nameof(count), $"Structural mutations must affect 1-{MaximumStructuralMutationCount} rows or columns at a time.");
+
+        _ = await _worker.CallAsync<WorkerAck>(
+            method,
+            new { workbookId, sheet, index, count },
+            cancellationToken).ConfigureAwait(false);
+    }
 
     private static void ValidatePortableSheetName(string sheetName)
     {
