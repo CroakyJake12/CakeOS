@@ -21,6 +21,11 @@ for package in "${expected[@]}"; do
 done
 
 if [[ -d "$root/HUI/vendor/Haven.UI" ]]; then
+  if find "$root/HUI/vendor/Haven.UI" -type d \( -name obj -o -name 'obj-*' -o -name bin -o -name 'bin-*' \) -print -quit | grep -q .; then
+    echo "Staged HUI core contains generated build-output directories" >&2
+    exit 1
+  fi
+
   # Documentation and comments may name Avalonia while describing the boundary.
   # Reject only compile-time dependencies/usages in the platform-neutral HUI core.
   if grep -RInE --include='*.cs' '(^|[[:space:]])using[[:space:]]+Avalonia([.;]|$)|Avalonia\.' "$root/HUI/vendor/Haven.UI" | grep -q .; then
