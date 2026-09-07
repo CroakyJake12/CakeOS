@@ -196,6 +196,8 @@ jobs:
           test -s /tmp/cakeos-present-worker-output-reordered.odp
           grep -q '^worker_protocol=passed$' /tmp/present-worker.log
           grep -q '^worker_events=passed$' /tmp/present-worker.log
+          grep -q '^worker_element_inventory=passed$' /tmp/present-worker.log
+          grep -q '^worker_element_snapshot_staleness=passed$' /tmp/present-worker.log
           grep -q '^worker_slide_reorder=passed$' /tmp/present-worker.log
           grep -q '^worker_slide_order=Beta,Gamma,Alpha$' /tmp/present-worker.log
           grep -q '^worker_saved_slides=2$' /tmp/present-worker.log
