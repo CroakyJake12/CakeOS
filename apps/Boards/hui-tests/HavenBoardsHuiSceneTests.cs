@@ -84,8 +84,87 @@ public sealed class HavenBoardsHuiSceneTests
         Assert.Equal(HavenVisibility.Collapsed, scene.Status.GetValue(HavenProperties.Visibility));
     }
 
+    [Fact]
+    public async Task Open_execute_dispose_reopen_preserves_durable_snapshot_and_scene()
+    {
+        var root = TempBoardDirectory();
+        try
+        {
+            HavenBoardSnapshot expected;
+            using (var firstStore = new JsonFileHavenBoardStore(root))
+            {
+                await using var first = await HavenBoardsHuiSession.OpenAsync(firstStore);
+                await first.ExecuteAsync(new CreateCardCommand("todo", "offline-card", "Offline card"));
+                await first.ExecuteAsync(new MoveCardCommand("todo", 1, "doing", 1));
+                expected = first.Snapshot;
+            }
+
+            using var reopenedStore = new JsonFileHavenBoardStore(root);
+            await using var reopened = await HavenBoardsHuiSession.OpenAsync(reopenedStore);
+
+            Assert.Equal(expected.Version, reopened.Snapshot.Version);
+            Assert.Equal(expected.Groups.Select(group => group.Id), reopened.Snapshot.Groups.Select(group => group.Id));
+            Assert.Equal(
+                expected.Groups.SelectMany(group => group.Cards).Select(card => (group: GroupFor(expected, card.Id), card.Id, card.Title)),
+                reopened.Snapshot.Groups.SelectMany(group => group.Cards).Select(card => (group: GroupFor(reopened.Snapshot, card.Id), card.Id, card.Title)));
+
+            var card = reopened.Scene.Root.DescendantsAndSelf()
+                .Single(element => element.Name == "BoardCard_offlinecard");
+            Assert.Equal("Board card Offline card", card.Accessibility.AccessibleName);
+            Assert.Equal("Loaded locally", reopened.Scene.Status.Content);
+        }
+        finally
+        {
+            DeleteDirectory(root);
+        }
+    }
+
+    [Fact]
+    public async Task Keyboard_scene_command_flushes_to_disk_and_survives_reopen()
+    {
+        var root = TempBoardDirectory();
+        try
+        {
+            using (var firstStore = new JsonFileHavenBoardStore(root))
+            {
+                await using var first = await HavenBoardsHuiSession.OpenAsync(firstStore);
+                var moveNext = FindButton(first.Scene, "Move First task to Doing");
+                var enter = new HavenKeyInput(HavenKey.Enter, HavenKeyModifiers.None);
+
+                Assert.True(moveNext.KeyDown(enter));
+                Assert.True(moveNext.KeyUp(enter));
+                await first.FlushAsync();
+
+                Assert.DoesNotContain(first.Snapshot.Groups[0].Cards, card => card.Id == "card-1");
+                Assert.Equal(new[] { "card-2", "card-1" }, first.Snapshot.Groups[1].Cards.Select(card => card.Id));
+                Assert.Equal("Saved locally", first.Scene.Status.Content);
+            }
+
+            using var reopenedStore = new JsonFileHavenBoardStore(root);
+            await using var reopened = await HavenBoardsHuiSession.OpenAsync(reopenedStore);
+            Assert.DoesNotContain(reopened.Snapshot.Groups[0].Cards, card => card.Id == "card-1");
+            Assert.Equal(new[] { "card-2", "card-1" }, reopened.Snapshot.Groups[1].Cards.Select(card => card.Id));
+        }
+        finally
+        {
+            DeleteDirectory(root);
+        }
+    }
+
     private static HavenButton FindButton(HavenBoardsHuiScene scene, string accessibleName) =>
         scene.Root.DescendantsAndSelf()
             .OfType<HavenButton>()
             .Single(button => button.Accessibility.AccessibleName == accessibleName);
+
+    private static string GroupFor(HavenBoardSnapshot snapshot, string cardId) =>
+        snapshot.Groups.Single(group => group.Cards.Any(card => card.Id == cardId)).Id;
+
+    private static string TempBoardDirectory() =>
+        Path.Combine(Path.GetTempPath(), "cakeos-boards-hui-" + Guid.NewGuid().ToString("N"));
+
+    private static void DeleteDirectory(string path)
+    {
+        if (Directory.Exists(path))
+            Directory.Delete(path, recursive: true);
+    }
 }
