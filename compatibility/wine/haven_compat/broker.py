@@ -24,12 +24,7 @@ class LaunchPlan:
 
 
 class CompatibilityBroker:
-    """Policy-enforcing broker for optional Windows compatibility backends.
-
-    Slice 1 implements Wine launch planning and execution. WinBoat remains an
-    explicit unsupported provider rather than silently falling back to a less
-    isolated path.
-    """
+    """Policy-enforcing broker for optional Windows compatibility backends."""
 
     def __init__(self, state_root: Path | None = None, runtime_root: Path | None = None):
         data_home = Path(os.environ.get("XDG_DATA_HOME", Path.home() / ".local" / "share"))
@@ -41,6 +36,8 @@ class CompatibilityBroker:
             raise CompatibilityError("WinBoat provider is not enabled in compatibility slice 1")
         if manifest.backend != "wine":
             raise CompatibilityError(f"unsupported backend: {manifest.backend}")
+        if manifest.network != "none":
+            raise CompatibilityError("network permissions are not implemented in compatibility slice 1")
         if manifest.clipboard:
             raise CompatibilityError("clipboard permission is not implemented in compatibility slice 1")
         if manifest.audio_output or manifest.microphone:
@@ -50,14 +47,20 @@ class CompatibilityBroker:
         if not bwrap:
             raise CompatibilityError("bubblewrap is required; refusing unsandboxed Wine execution")
 
-        runtime_dir = (self.runtime_root / manifest.runtime).resolve()
+        runtime_root = self.runtime_root.resolve()
+        runtime_dir = (runtime_root / manifest.runtime).resolve()
+        if runtime_root not in runtime_dir.parents:
+            raise CompatibilityError("Wine runtime escaped the managed runtime root")
         wine_bin = runtime_dir / "bin" / "wine"
         if not wine_bin.is_file():
             raise CompatibilityError(f"Wine runtime is unavailable: {wine_bin}")
 
         xdg_runtime_dir, wayland_display, wayland_socket = _wayland_socket()
 
-        app_root = (self.state_root / manifest.app_id).resolve()
+        state_root = self.state_root.resolve()
+        app_root = (state_root / manifest.app_id).resolve()
+        if state_root not in app_root.parents:
+            raise CompatibilityError("application state escaped the compatibility state root")
         prefix = app_root / "prefix"
         data = app_root / "data"
         prefix.mkdir(parents=True, exist_ok=True, mode=0o700)
@@ -72,29 +75,30 @@ class CompatibilityBroker:
             "--dev", "/dev",
             "--tmpfs", "/tmp",
             "--dir", xdg_runtime_dir,
+            "--dir", "/mnt",
+            "--dir", "/mnt/haven-share",
             "--ro-bind", str(runtime_dir), "/opt/haven-wine",
             "--bind", str(prefix), "/var/lib/haven-wine/prefix",
             "--bind", str(data), "/var/lib/haven-wine/data",
             "--ro-bind", wayland_socket, wayland_socket,
         ]
 
-        # Runtime binaries can require host dynamic loader/system libraries.
-        # These paths are exposed read-only and contain no user data.
+        # Runtime binaries can require the host dynamic loader/system libraries.
+        # These are deliberately read-only and contain no user document data.
         for host_path in ("/usr", "/lib", "/lib64"):
             if Path(host_path).exists():
                 argv.extend(["--ro-bind", host_path, host_path])
 
-        # Network is opt-in. bubblewrap's --unshare-all includes a private
-        # network namespace; only an explicit grant re-shares host networking.
-        if manifest.network != "none":
-            argv.append("--share-net")
-
         for mount in manifest.mounts:
+            source = self._validated_mount_source(Path(mount.source))
             flag = "--ro-bind" if mount.mode == "ro" else "--bind"
-            argv.extend([flag, mount.source, mount.target])
+            argv.extend([flag, str(source), mount.target])
 
         if manifest.gpu == "render":
-            for render_node in _existing_render_nodes():
+            render_nodes = tuple(_existing_render_nodes())
+            if not render_nodes:
+                raise CompatibilityError("GPU render permission requested but no render node is available")
+            for render_node in render_nodes:
                 argv.extend(["--dev-bind", render_node, render_node])
 
         argv.extend([
@@ -128,6 +132,35 @@ class CompatibilityBroker:
             raise CompatibilityError("refusing to reset outside compatibility state root")
         if app_root.exists():
             shutil.rmtree(app_root)
+
+    def _validated_mount_source(self, source: Path) -> Path:
+        try:
+            resolved = source.resolve(strict=True)
+        except FileNotFoundError as exc:
+            raise CompatibilityError(f"mount source does not exist: {source}") from exc
+
+        home = Path.home().resolve()
+        if resolved in {Path("/"), Path("/home"), home, Path("/tmp")}:
+            raise CompatibilityError("refusing a broad host filesystem grant")
+
+        forbidden_roots = tuple(
+            Path(path).resolve()
+            for path in ("/etc", "/proc", "/sys", "/dev", "/boot", "/usr", "/bin", "/sbin", "/lib", "/lib64", "/var", "/run", "/root")
+            if Path(path).exists()
+        )
+        if any(resolved == root or root in resolved.parents for root in forbidden_roots):
+            raise CompatibilityError(f"refusing sensitive host path grant: {resolved}")
+
+        compatibility_root = self.state_root.resolve().parent
+        runtime_root = self.runtime_root.resolve()
+        if (
+            resolved == compatibility_root
+            or compatibility_root in resolved.parents
+            or resolved == runtime_root
+            or runtime_root in resolved.parents
+        ):
+            raise CompatibilityError("refusing access to compatibility backend state")
+        return resolved
 
 
 def load_manifest(path: Path) -> AppManifest:
