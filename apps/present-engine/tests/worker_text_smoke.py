@@ -28,6 +28,10 @@ def require_text(response: dict, expected_text: str) -> None:
     element_ref_with_text(response, expected_text)
 
 
+def slide_count(response: dict) -> int:
+    return len(response["result"]["slides"])
+
+
 def main() -> int:
     if len(sys.argv) != 4:
         print(
@@ -42,7 +46,10 @@ def main() -> int:
     updated = output_prefix.with_name(f"{output_prefix.name}-updated.odp")
     undone = output_prefix.with_name(f"{output_prefix.name}-undo.odp")
     redone = output_prefix.with_name(f"{output_prefix.name}-redo.odp")
-    for path in (updated, undone, redone):
+    mixed_base = output_prefix.with_name(f"{output_prefix.name}-mixed-base.odp")
+    mixed_undo = output_prefix.with_name(f"{output_prefix.name}-mixed-undo.odp")
+    mixed_redo = output_prefix.with_name(f"{output_prefix.name}-mixed-redo.odp")
+    for path in (updated, undone, redone, mixed_base, mixed_undo, mixed_redo):
         path.unlink(missing_ok=True)
 
     client = WorkerClient(worker)
@@ -56,7 +63,7 @@ def main() -> int:
                 raise RuntimeError(f"worker is missing text capability {capability}")
 
         opened, _ = client.require_ok("open", path=str(source))
-        if len(opened["result"]["slides"]) != 3:
+        if slide_count(opened) != 3:
             raise RuntimeError("text fixture did not open as a three-slide presentation")
 
         inventory, payload = client.require_ok("listElements", slideIndex=0)
@@ -118,9 +125,47 @@ def main() -> int:
         if malformed.get("ok") or malformed_payload:
             raise RuntimeError("worker accepted a malformed semantic element ref")
 
+        # Prove that a CakeOS-managed text history entry does not obstruct an
+        # earlier LibreOffice-native slide history entry. The worker must undo
+        # text first, then the preceding slide add, and redo both in order.
+        client.require_ok("close")
+        mixed_opened, _ = client.require_ok("open", path=str(source))
+        if slide_count(mixed_opened) != 3:
+            raise RuntimeError("mixed-history fixture did not reopen with three slides")
+
+        mixed_added, _ = client.require_ok("addSlideAfter", slideIndex=0)
+        if slide_count(mixed_added) != 4:
+            raise RuntimeError("mixed-history native slide add failed")
+        client.require_ok("saveAs", path=str(mixed_base), format="odp")
+
+        mixed_inventory, _ = client.require_ok("listElements", slideIndex=0)
+        mixed_ref = element_ref_with_text(mixed_inventory, "Alpha")
+        client.require_ok("replaceElementText", ref=mixed_ref, text="Mixed Text")
+
+        client.require_ok("undo")
+        mixed_native_undo, _ = client.require_ok("undo")
+        if slide_count(mixed_native_undo) != 3:
+            raise RuntimeError(
+                "CakeOS text history blocked the preceding native slide undo"
+            )
+        client.require_ok("saveAs", path=str(mixed_undo), format="odp")
+        mixed_undo_inventory, _ = client.require_ok("listElements", slideIndex=0)
+        require_text(mixed_undo_inventory, "Alpha")
+
+        mixed_native_redo, _ = client.require_ok("redo")
+        if slide_count(mixed_native_redo) != 4:
+            raise RuntimeError(
+                "CakeOS text history blocked the native slide redo"
+            )
+        client.require_ok("redo")
+        client.require_ok("saveAs", path=str(mixed_redo), format="odp")
+        mixed_redo_inventory, _ = client.require_ok("listElements", slideIndex=0)
+        require_text(mixed_redo_inventory, "Mixed Text")
+
         print("worker_text_replace=passed")
         print("worker_text_history=passed")
         print("worker_text_persistence=passed")
+        print("worker_mixed_text_native_history=passed")
         print(f"worker_text_ref={ref}")
         return 0
     finally:
