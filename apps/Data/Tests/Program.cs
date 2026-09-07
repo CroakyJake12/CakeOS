@@ -42,8 +42,9 @@ await using (var session = new DataGridSession(fake))
         "GridSnapshot");
     Assert(published.Columns.SequenceEqual(["A", "B"]), "Database bridge did not generate stable spreadsheet column names.");
     Assert(published.RowCount == 1, "Database bridge published the wrong row count.");
-    Assert(fakeDatabase.LastTable is not null, "Database bridge did not call the database engine.");
-    Assert(fakeDatabase.LastTable.Rows[0].SequenceEqual(["5", "10"]), "Database bridge did not publish displayed spreadsheet values.");
+    var publishedTable = fakeDatabase.LastTable
+        ?? throw new InvalidOperationException("Database bridge did not call the database engine.");
+    Assert(publishedTable.Rows[0].SequenceEqual(["5", "10"]), "Database bridge did not publish displayed spreadsheet values.");
 
     var secondSheet = await session.SelectSheetAsync(1);
     Assert(secondSheet.ActiveSheet.Name == "Summary", "Grid session sheet selection failed.");
