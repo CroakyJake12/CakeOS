@@ -27,13 +27,13 @@
       "priority": 1,
       "cmakeOption": "GGML_CPU",
       "hardware": ["linux-x86_64", "linux-aarch64"],
-      "notes": "Mandatory fallback and approved-VM first target.",
+      "notes": "Mandatory fallback and approved-VM first target. Current runtime proof is limited to GitHub-hosted Ubuntu x86_64 CI; the approved VM remains untested.",
       "evidence": {
         "inspected": {"value": true, "scope": "v0.4.0 CPU build options inspected", "reference": "https://github.com/ggml-org/llama.cpp/blob/v0.4.0/ggml/CMakeLists.txt"},
-        "built": {"value": true, "scope": "Linux x86_64 llama-server CPU build", "reference": "https://github.com/CroakyJake12/CakeOS/actions/runs/34145121326"},
-        "tested": {"value": true, "scope": "binary --version smoke plus Haven repository tests; no model inference", "reference": "https://github.com/CroakyJake12/CakeOS/actions/runs/34145121326"},
-        "runtimeProven": {"value": false, "scope": "No approved GGUF loaded in the approved VM", "reference": null},
-        "benchmarked": {"value": false, "scope": "No model performance run", "reference": null}
+        "built": {"value": true, "scope": "Pinned v0.4.0 llama-server CPU build on GitHub-hosted Ubuntu x86_64 CI", "reference": "https://github.com/CroakyJake12/CakeOS/actions/runs/34158175902"},
+        "tested": {"value": true, "scope": "Repository/model-free tests plus real-model source-tree and installed-package CPU inference on GitHub-hosted Ubuntu x86_64 CI", "reference": "https://github.com/CroakyJake12/CakeOS/actions/runs/34158175902"},
+        "runtimeProven": {"value": true, "scope": "GitHub-hosted Ubuntu x86_64 CI only: exact hash-pinned SmolLM2 GGUF loaded through production modelctl/broker/llama-server from both source-tree and installed Debian-package paths, streamed assistant content, emitted terminal DONE, and unloaded. Approved VM was not exercised.", "reference": "https://github.com/CroakyJake12/CakeOS/actions/runs/34158175902"},
+        "benchmarked": {"value": false, "scope": "No performance benchmark; recorded load/completion timings are single-run observations only", "reference": null}
       }
     },
     {
