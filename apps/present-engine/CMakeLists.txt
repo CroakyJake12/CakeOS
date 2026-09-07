@@ -112,6 +112,12 @@ target_link_libraries(cakeos-present-structure-probe PRIVATE
 )
 cakeos_enable_strict_warnings(cakeos-present-structure-probe)
 
+add_executable(cakeos-present-text-history-probe
+    tests/text_history_probe.cpp
+)
+target_link_libraries(cakeos-present-text-history-probe PRIVATE cakeos-present-engine)
+cakeos_enable_strict_warnings(cakeos-present-text-history-probe)
+
 enable_testing()
 add_executable(cakeos-present-engine-contract-tests
     tests/contract_tests.cpp
