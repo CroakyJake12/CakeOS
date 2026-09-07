@@ -405,16 +405,18 @@ class CalcRuntime:
             sort_field.IsCaseSensitive = False
             sort_field.FieldType = uno.Enum("com.sun.star.table.TableSortFieldType", "AUTOMATIC")
             direction_property = "IsSortColumns"
+            sort_field_sequence_type = "[]com.sun.star.table.TableSortField"
         else:
             sort_field = uno.createUnoStruct("com.sun.star.util.SortField")
             sort_field.Field = key
             sort_field.SortAscending = bool(ascending)
             direction_property = "SortColumns"
+            sort_field_sequence_type = "[]com.sun.star.util.SortField"
 
         seen: set[str] = set()
         for item in descriptor:
             if item.Name == "SortFields":
-                item.Value = (sort_field,)
+                item.Value = uno.Any(sort_field_sequence_type, (sort_field,))
                 seen.add(item.Name)
             elif item.Name == "ContainsHeader":
                 item.Value = bool(contains_header)
