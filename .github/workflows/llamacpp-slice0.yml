@@ -37,3 +37,31 @@ jobs:
           PY
       - name: Validate shell recipe syntax
         run: sh -n runtime/llamacpp/build-cpu.sh
+
+  build-pinned-llamacpp-cpu:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout CakeOS runtime branch
+        uses: actions/checkout@v4
+        with:
+          path: cakeos
+      - name: Checkout pinned upstream llama.cpp
+        uses: actions/checkout@v4
+        with:
+          repository: ggml-org/llama.cpp
+          ref: 5266f24da75dc449bd56cbed7addb9c8e4a6a73e
+          path: llama-src
+          fetch-depth: 1
+      - name: Verify exact upstream commit
+        run: test "$(git -C llama-src rev-parse HEAD)" = '5266f24da75dc449bd56cbed7addb9c8e4a6a73e'
+      - name: Build and test CPU runtime
+        env:
+          LLAMA_SOURCE: ${{ github.workspace }}/llama-src
+          LLAMA_BUILD_DIR: ${{ github.workspace }}/llama-build
+        run: sh cakeos/runtime/llamacpp/build-cpu.sh
+      - name: Record binary provenance
+        run: |
+          test -x llama-build/bin/llama-server
+          llama-build/bin/llama-server --version
+          sha256sum llama-build/bin/llama-server
+          ldd llama-build/bin/llama-server
