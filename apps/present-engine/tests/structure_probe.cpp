@@ -36,6 +36,17 @@ bool containsString(const Json& value, const std::string& expected)
     return false;
 }
 
+std::string takeCommandValues(lok::Office& office, lok::Document& document, const char* command)
+{
+    char* raw = document.getCommandValues(command);
+    if (raw == nullptr) {
+        return {};
+    }
+    std::string result(raw);
+    office.freeError(raw);
+    return result;
+}
+
 } // namespace
 
 int main(int argc, char** argv)
@@ -67,12 +78,18 @@ int main(int argc, char** argv)
         document->initializeForRendering();
         document->setPartMode(LOK_PARTMODE_SLIDES);
 
-        char* raw = document->getCommandValues(".uno:ExtractDocumentStructure?filter=slides");
-        if (raw == nullptr || *raw == '\0') {
-            throw std::runtime_error("ExtractDocumentStructure returned no data");
+        std::string structureText = takeCommandValues(
+            *office,
+            *document,
+            ".uno:ExtractDocumentStructure?filter=slides");
+        std::string commandVariant = "filtered";
+        if (structureText.empty()) {
+            structureText = takeCommandValues(*office, *document, ".uno:ExtractDocumentStructure");
+            commandVariant = "unfiltered";
         }
-        const std::string structureText(raw);
-        office->freeError(raw);
+        if (structureText.empty()) {
+            throw std::runtime_error("ExtractDocumentStructure returned no data through LibreOfficeKit");
+        }
 
         const Json structure = Json::parse(structureText);
         if (!structure.contains("Slides") || !structure.at("Slides").is_object()) {
@@ -95,6 +112,7 @@ int main(int argc, char** argv)
         }
 
         std::cout << "structure_inventory=passed\n";
+        std::cout << "structure_command_variant=" << commandVariant << '\n';
         std::cout << "structure_slide0_objects=" << objectCount << '\n';
         std::cout << "structure_text=Alpha\n";
 
