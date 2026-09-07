@@ -4,6 +4,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
+from compatibility.wine.haven_compat.audit import evaluate_preflight
 from compatibility.wine.haven_compat.broker import CompatibilityBroker, CompatibilityError
 from compatibility.wine.haven_compat.manifest import AppManifest, ManifestError
 
@@ -16,7 +17,26 @@ class ManifestTests(unittest.TestCase):
                 "backend": "wine",
                 "runtime": "wine-11.0",
                 "entrypoint": "app.exe",
-                "mounts": [{"source": "/home", "target": "/share", "mode": "rw"}],
+                "mounts": [{"source": "/home", "target": "/mnt/haven-share/home", "mode": "rw"}],
+            })
+
+    def test_rejects_mount_target_outside_share_root(self):
+        with self.assertRaisesRegex(ManifestError, "haven-share"):
+            AppManifest.from_dict({
+                "id": "bad.target",
+                "backend": "wine",
+                "runtime": "wine-11.0",
+                "entrypoint": "app.exe",
+                "mounts": [{"source": "/home/user/Documents", "target": "/var/lib/haven-wine/prefix", "mode": "rw"}],
+            })
+
+    def test_rejects_runtime_traversal(self):
+        with self.assertRaisesRegex(ManifestError, "runtime"):
+            AppManifest.from_dict({
+                "id": "bad.runtime",
+                "backend": "wine",
+                "runtime": "../system",
+                "entrypoint": "app.exe",
             })
 
     def test_defaults_to_no_network(self):
@@ -69,7 +89,7 @@ class BrokerTests(unittest.TestCase):
         self.assertIn("--unshare-all", plan.argv)
         self.assertIn(str(root / "runtime" / "wayland-0"), plan.argv)
 
-    def test_network_requires_explicit_manifest_grant(self):
+    def test_network_permissions_fail_closed(self):
         temp, root, broker, _ = self._fixture()
         self.addCleanup(temp.cleanup)
         manifest = AppManifest.from_dict({
@@ -79,10 +99,25 @@ class BrokerTests(unittest.TestCase):
             "entrypoint": "app.exe",
             "network": "internet",
         })
+        with self.assertRaisesRegex(CompatibilityError, "network permissions"):
+            broker.plan(manifest)
+
+    def test_gpu_permission_requires_render_node(self):
+        temp, root, broker, _ = self._fixture()
+        self.addCleanup(temp.cleanup)
+        manifest = AppManifest.from_dict({
+            "id": "gpu.app",
+            "backend": "wine",
+            "runtime": "wine-11.0",
+            "entrypoint": "app.exe",
+            "gpu": "render",
+        })
         env = {"XDG_RUNTIME_DIR": str(root / "runtime"), "WAYLAND_DISPLAY": "wayland-0"}
-        with patch.dict(os.environ, env, clear=False), patch("shutil.which", return_value="/usr/bin/bwrap"):
-            plan = broker.plan(manifest)
-        self.assertIn("--share-net", plan.argv)
+        with patch.dict(os.environ, env, clear=False), patch("shutil.which", return_value="/usr/bin/bwrap"), patch(
+            "compatibility.wine.haven_compat.broker._existing_render_nodes", return_value=()
+        ):
+            with self.assertRaisesRegex(CompatibilityError, "no render node"):
+                broker.plan(manifest)
 
     def test_winboat_is_explicitly_disabled_in_slice_one(self):
         temp, root, broker, _ = self._fixture()
@@ -108,6 +143,32 @@ class BrokerTests(unittest.TestCase):
         })
         with self.assertRaisesRegex(CompatibilityError, "PipeWire media permissions"):
             broker.plan(manifest)
+
+
+class AuditTests(unittest.TestCase):
+    def test_wine_preflight_requires_managed_runtime(self):
+        facts = {
+            "platform": {"system": "Linux", "machine": "x86_64"},
+            "commands": {"bwrap": "/usr/bin/bwrap", "podman": None, "docker": None, "freerdp": None},
+            "session": {"waylandSocketExists": True},
+            "devices": {"kvmExists": False, "kvmReadable": False, "kvmWritable": False},
+            "managedWineRuntimes": [],
+        }
+        preflight = evaluate_preflight(facts)
+        self.assertFalse(preflight["wineSlice1"]["prerequisitesPresent"])
+        self.assertIn("managed-wine-runtime", preflight["wineSlice1"]["missing"])
+
+    def test_wine_preflight_can_be_ready_without_winboat(self):
+        facts = {
+            "platform": {"system": "Linux", "machine": "x86_64"},
+            "commands": {"bwrap": "/usr/bin/bwrap", "podman": None, "docker": None, "freerdp": None},
+            "session": {"waylandSocketExists": True},
+            "devices": {"kvmExists": False, "kvmReadable": False, "kvmWritable": False},
+            "managedWineRuntimes": [{"id": "wine-11.0"}],
+        }
+        preflight = evaluate_preflight(facts)
+        self.assertTrue(preflight["wineSlice1"]["prerequisitesPresent"])
+        self.assertFalse(preflight["winboatFuture"]["prerequisitesPresent"])
 
 
 if __name__ == "__main__":
