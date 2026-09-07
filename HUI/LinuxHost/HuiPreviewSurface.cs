@@ -201,7 +201,7 @@ public sealed class HuiPreviewSurface : Control, IHavenMeasureContext
     {
         return element switch
         {
-            HuiText text => MeasureText(text.Content, text.GetValue(HavenProperties.FontSize), available),
+            HuiText text => MeasureText(text, available),
             HuiButton button => new HavenSize(Math.Min(available.Width, Math.Max(160, button.Content.Length * 9 + 40)), Math.Min(available.Height, 46)),
             _ => new HavenSize(Math.Min(available.Width, 48), Math.Min(available.Height, 48)),
         };
@@ -244,11 +244,22 @@ public sealed class HuiPreviewSurface : Control, IHavenMeasureContext
         return (root, action, status);
     }
 
-    private static HavenSize MeasureText(string value, double size, HavenSize available)
+    private static HavenSize MeasureText(HuiText text, HavenSize available)
     {
-        var fontSize = size <= 0 ? 14d : size;
-        var width = Math.Min(available.Width, Math.Max(24d, value.Length * fontSize * .55d));
-        return new HavenSize(width, Math.Min(available.Height, fontSize * 1.45d));
+        var fontSize = text.GetValue(HavenProperties.FontSize);
+        if (fontSize <= 0) fontSize = 14d;
+        var maxWidth = double.IsFinite(available.Width) ? Math.Max(1d, available.Width) : 10000d;
+        var formatted = Text(
+            new HavenTextLayout(
+                text.Content,
+                text.GetValue(HavenProperties.FontFamily),
+                fontSize,
+                text.GetValue(HavenProperties.FontWeight),
+                maxWidth),
+            Brushes.Transparent);
+        return new HavenSize(
+            Math.Min(available.Width, formatted.Width + 2d),
+            Math.Min(available.Height, formatted.Height + 2d));
     }
 
     private static FormattedText Text(HavenTextLayout layout, IBrush brush)
