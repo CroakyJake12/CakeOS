@@ -25,7 +25,7 @@ RestrictAddressFamilies=AF_UNIX
 SystemCallArchitectures=native
 SystemCallFilter=@system-service
 SystemCallErrorNumber=EPERM
-ReadOnlyPaths=%h/.local/share/haven/models
+ReadOnlyPaths=-%h/.local/share/haven/models
 ReadWritePaths=%t/haven
 Environment=HAVEN_INFERENCE_SOCKET=%t/haven/inference.sock
 Environment=HAVEN_LLAMA_WORKER_SOCKET=%t/haven/llamacpp-worker.sock
