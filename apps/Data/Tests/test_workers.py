@@ -161,6 +161,22 @@ def test_calc() -> None:
             )
             require(calculated["values"][0] == ["5", "10"], f"Calc formula result mismatch: {calculated['values']}")
 
+            materialized = worker.call(
+                "createSheetWithValues",
+                {
+                    "workbookId": workbook_id,
+                    "sheetName": "Query Result",
+                    "values": [["value", "note"], ["=1+1", "literal"], ["42", "number-looking text"]],
+                },
+            )
+            require(materialized["sheet"] == "Query Result", "Calc materialisation changed the sheet name.")
+            require(materialized["values"][1][0] == "=1+1", "Formula-looking query output was evaluated instead of written literally.")
+            duplicate_error = worker.expect_error(
+                "createSheetWithValues",
+                {"workbookId": workbook_id, "sheetName": "query result", "values": [["x"]]},
+            )
+            require("already contains" in duplicate_error.lower(), "Calc allowed a case-insensitive duplicate materialized sheet name.")
+
             in_place_error = worker.expect_error("save", {"workbookId": workbook_id, "destinationPath": str(source)})
             require("in-place overwrite is disabled" in in_place_error, "Calc in-place overwrite guard was not enforced.")
             worker.call("save", {"workbookId": workbook_id, "destinationPath": str(saved_ods)})
@@ -168,28 +184,47 @@ def test_calc() -> None:
 
             reopened = worker.call("open", {"path": str(saved_ods), "readOnly": False})
             workbook_id = reopened["id"]
-            sheet = worker.call("listSheets", {"workbookId": workbook_id})[0]["name"]
+            reopened_sheets = worker.call("listSheets", {"workbookId": workbook_id})
+            sheet = reopened_sheets[0]["name"]
             reopened_values = worker.call(
                 "readRange",
                 {"workbookId": workbook_id, "range": {"sheet": sheet, "startRow": 2, "startColumn": 0, "rowCount": 1, "columnCount": 2}},
             )
             require(reopened_values["values"][0] == ["5", "10"], "ODS save/reopen did not preserve the edited formula.")
+            require(any(item["name"] == "Query Result" for item in reopened_sheets), "ODS save/reopen lost the materialized query sheet.")
+            reopened_materialized = worker.call(
+                "readRange",
+                {"workbookId": workbook_id, "range": {"sheet": "Query Result", "startRow": 0, "startColumn": 0, "rowCount": 3, "columnCount": 2}},
+            )
+            require(reopened_materialized["values"][1][0] == "=1+1", "ODS reopen converted literal query output into a formula.")
             worker.call("save", {"workbookId": workbook_id, "destinationPath": str(saved_xlsx)})
             worker.call("close", {"workbookId": workbook_id})
 
             xlsx = worker.call("open", {"path": str(saved_xlsx), "readOnly": True})
             workbook_id = xlsx["id"]
-            sheet = worker.call("listSheets", {"workbookId": workbook_id})[0]["name"]
+            xlsx_sheets = worker.call("listSheets", {"workbookId": workbook_id})
+            sheet = xlsx_sheets[0]["name"]
             xlsx_values = worker.call(
                 "readRange",
                 {"workbookId": workbook_id, "range": {"sheet": sheet, "startRow": 2, "startColumn": 0, "rowCount": 1, "columnCount": 2}},
             )
             require(xlsx_values["values"][0] == ["5", "10"], "XLSX save/reopen did not preserve the edited formula result.")
+            require(any(item["name"] == "Query Result" for item in xlsx_sheets), "XLSX save/reopen lost the materialized query sheet.")
+            xlsx_materialized = worker.call(
+                "readRange",
+                {"workbookId": workbook_id, "range": {"sheet": "Query Result", "startRow": 0, "startColumn": 0, "rowCount": 3, "columnCount": 2}},
+            )
+            require(xlsx_materialized["values"][1][0] == "=1+1", "XLSX reopen converted literal query output into a formula.")
             read_only_error = worker.expect_error(
                 "setCell",
                 {"workbookId": workbook_id, "address": {"sheet": sheet, "row": 0, "column": 0}, "value": "9", "formula": ""},
             )
             require("read-only" in read_only_error.lower(), "Calc read-only mutation guard was not enforced.")
+            read_only_materialize = worker.expect_error(
+                "createSheetWithValues",
+                {"workbookId": workbook_id, "sheetName": "Blocked", "values": [["x"]]},
+            )
+            require("read-only" in read_only_materialize.lower(), "Calc read-only materialisation guard was not enforced.")
             worker.call("close", {"workbookId": workbook_id})
 
         require(saved_ods.exists() and saved_ods.stat().st_size > 0, "Saved ODS is missing or empty.")
