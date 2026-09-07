@@ -1,0 +1,67 @@
+name: Present selection
+
+on:
+  pull_request:
+    paths:
+      - "apps/present-engine/**"
+      - ".github/workflows/present-selection.yml"
+  push:
+    branches:
+      - "migration/present-libreoffice-foundation"
+    paths:
+      - "apps/present-engine/**"
+      - ".github/workflows/present-selection.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  selection-26-04:
+    name: Ubuntu 26.04 HUI selection geometry
+    runs-on: ubuntu-26.04
+    timeout-minutes: 10
+
+    steps:
+      - name: Check out CakeOS
+        uses: actions/checkout@v4
+
+      - name: Install no-GUI LibreOfficeKit dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install --no-install-recommends -y \
+            libreofficekit-dev \
+            libreoffice-impress-nogui \
+            nlohmann-json3-dev
+
+      - name: Configure
+        run: cmake -S apps/present-engine -B build/present-engine -DCMAKE_BUILD_TYPE=Release
+
+      - name: Build worker with warnings as errors
+        run: cmake --build build/present-engine --target cakeos-present-worker --parallel 2
+
+      - name: Create and normalize selection fixture
+        run: |
+          python3 apps/present-engine/tests/make_reorder_fixture.py /tmp/cakeos-present-selection-source.odp
+          mkdir -p /tmp/cakeos-present-selection-normalized
+          /usr/lib/libreoffice/program/soffice \
+            --headless \
+            --convert-to odp \
+            --outdir /tmp/cakeos-present-selection-normalized \
+            /tmp/cakeos-present-selection-source.odp
+          test -s /tmp/cakeos-present-selection-normalized/cakeos-present-selection-source.odp
+
+      - name: Prove snapshot-ref live selection geometry
+        run: |
+          python3 apps/present-engine/tests/worker_selection_smoke.py \
+            build/present-engine/cakeos-present-worker \
+            /tmp/cakeos-present-selection-normalized/cakeos-present-selection-source.odp \
+            /tmp/cakeos-present-selection-output.odp | tee /tmp/present-selection.log
+          test -s /tmp/cakeos-present-selection-output.odp
+          grep -q '^worker_element_selection=passed$' /tmp/present-selection.log
+          grep -q '^worker_element_geometry=passed$' /tmp/present-selection.log
+          grep -q '^worker_selection_staleness=passed$' /tmp/present-selection.log
+          grep -q '^worker_selection_ref=slide:0/object:0$' /tmp/present-selection.log
+
+      - name: Record runtime version
+        if: always()
+        run: /usr/lib/libreoffice/program/soffice --version || true
