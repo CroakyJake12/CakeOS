@@ -28,7 +28,7 @@ jobs:
           dotnet-version: 10.0.x
 
       - name: Install graphical validation tools
-        run: sudo apt-get update && sudo apt-get install -y jq xvfb imagemagick
+        run: sudo apt-get update && sudo apt-get install -y jq xvfb imagemagick openbox xdotool
 
       - name: Validate and stage pinned HUI source
         run: |
@@ -54,18 +54,38 @@ jobs:
           set +e
           xvfb-run -a -s '-screen 0 1280x800x24' bash -c '
             set +e
+            openbox > artifacts/hui-linux-host/openbox.log 2>&1 &
+            wm_pid=$!
             export CAKEOS_HUI_PREVIEW_SELF_TEST=1
             export CAKEOS_HUI_PREVIEW_AUTO_EXIT_MS=5000
             artifacts/hui-linux-host/publish/cakeos-hui-linux-preview > artifacts/hui-linux-host/window.log 2>&1 &
             pid=$!
-            sleep 2
-            import -window root artifacts/hui-linux-host/window.png
-            screenshot_status=$?
+
+            window_id=""
+            for attempt in $(seq 1 30); do
+              window_id=$(xdotool search --name "CakeOS HUI Linux Preview" 2>/dev/null | head -n 1)
+              if test -n "$window_id"; then break; fi
+              sleep 0.1
+            done
+
+            if test -n "$window_id"; then
+              xdotool windowmap "$window_id" >/dev/null 2>&1
+              sleep 0.5
+              import -window "$window_id" artifacts/hui-linux-host/window.png
+              screenshot_status=$?
+              printf "%s\n" "$window_id" > artifacts/hui-linux-host/window-id.txt
+            else
+              screenshot_status=20
+              printf "%s\n" "window-not-found" > artifacts/hui-linux-host/window-id.txt
+            fi
+
             wait "$pid"
             app_status=$?
+            kill "$wm_pid" >/dev/null 2>&1 || true
             printf "%s\n" "$app_status" > artifacts/hui-linux-host/app-exit-code.txt
             printf "%s\n" "$screenshot_status" > artifacts/hui-linux-host/screenshot-exit-code.txt
-            exit "$app_status"
+            if test "$app_status" -ne 0; then exit "$app_status"; fi
+            exit "$screenshot_status"
           '
           runtime_status=$?
           set -e
@@ -75,7 +95,7 @@ jobs:
           if test -s artifacts/hui-linux-host/window.png; then
             identify artifacts/hui-linux-host/window.png | tee artifacts/hui-linux-host/screenshot-info.txt
           else
-            echo 'No screenshot was captured.' | tee artifacts/hui-linux-host/screenshot-info.txt
+            echo 'No application-window screenshot was captured.' | tee artifacts/hui-linux-host/screenshot-info.txt
           fi
           echo "Runtime status: $runtime_status"
           exit "$runtime_status"
@@ -88,6 +108,8 @@ jobs:
           path: |
             artifacts/hui-linux-host/window.png
             artifacts/hui-linux-host/window.log
+            artifacts/hui-linux-host/openbox.log
+            artifacts/hui-linux-host/window-id.txt
             artifacts/hui-linux-host/screenshot-info.txt
             artifacts/hui-linux-host/native-dependencies.txt
             artifacts/hui-linux-host/app-exit-code.txt
