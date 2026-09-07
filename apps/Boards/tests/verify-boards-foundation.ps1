@@ -13,6 +13,7 @@ $huiSession = Join-Path $boards 'hui/HavenBoardsHuiSession.cs'
 $huiProject = Join-Path $boards 'hui/CakeOS.Apps.Boards.Hui.csproj'
 $huiTestProject = Join-Path $boards 'hui-tests/CakeOS.Apps.Boards.Hui.Tests.csproj'
 $huiTests = Join-Path $boards 'hui-tests/HavenBoardsHuiSceneTests.cs'
+$hierarchyHuiTests = Join-Path $boards 'hui-tests/HavenBoardsHierarchyHuiTests.cs'
 $harness = Join-Path $boards 'appflowy_poc/lib/main.dart'
 $flutterTests = Join-Path $boards 'appflowy_poc/test/appflowy_board_poc_test.dart'
 $testProject = Join-Path $boards 'tests/CakeOS.Apps.Boards.Tests.csproj'
@@ -30,6 +31,7 @@ $required = @(
     $huiProject,
     $huiTestProject,
     $huiTests,
+    $hierarchyHuiTests,
     $harness,
     $flutterTests,
     $testProject,
@@ -59,6 +61,16 @@ if ($contractText -match '(?mi)^\s*using\s+(AppFlowy|Avalonia)\b|package:(appflo
 if ($contractText -notmatch 'AddAttachmentCommand' -or $contractText -notmatch 'RemoveAttachmentCommand') {
     throw 'Neutral Haven board contract must retain typed attachment metadata commands.'
 }
+if ($contractText -notmatch 'SetCardParentCommand' -or
+    $contractText -notmatch 'ValidateParentChain' -or
+    $contractText -notmatch 'public static void Validate\(HavenBoardSnapshot snapshot\)') {
+    throw 'Neutral Haven board contract must retain typed hierarchy mutation plus snapshot/cycle validation.'
+}
+if ($contractText -notmatch 'cardsById\.TryAdd' -or
+    $contractText -notmatch 'references missing parent' -or
+    $contractText -notmatch 'hierarchy contains a cycle') {
+    throw 'Hierarchy validation must reject duplicate IDs, missing parents, and cycles.'
+}
 
 $huiText = Get-Content -LiteralPath $hui -Raw
 if ($huiText -match '(?mi)^\s*using\s+(AppFlowy|Avalonia)\b|package:(appflowy_board|flutter)') {
@@ -74,6 +86,9 @@ if ($huiText -notmatch 'SetState\(HavenElementState\.Disabled,\s*!enabled\)' -or
     $huiText -notmatch 'Accessibility\.Enabled\s*=\s*enabled') {
     throw 'HUI board controls must synchronize Enabled, accessibility, and Disabled state.'
 }
+if ($huiText -notmatch 'Nested card') {
+    throw 'HUI board scene must preserve hierarchy presentation for nested cards.'
+}
 
 $huiSessionText = Get-Content -LiteralPath $huiSession -Raw
 if ($huiSessionText -match 'HttpClient|WebSocket|https?://') {
@@ -83,6 +98,9 @@ if ($huiSessionText -notmatch 'Scene\.CommandRequested \+= OnSceneCommandRequest
     $huiSessionText -notmatch 'await _store\.SaveAsync\(updated' -or
     $huiSessionText -notmatch 'Snapshot = updated') {
     throw 'Composed HUI session must bind typed scene commands through durable storage.'
+}
+if ($huiSessionText -notmatch 'HavenBoardReducer\.Validate\(snapshot\)') {
+    throw 'Composed HUI session must validate persisted board hierarchy before rendering.'
 }
 $sessionSaveIndex = $huiSessionText.IndexOf('await _store.SaveAsync(updated', [System.StringComparison]::Ordinal)
 $sessionPublishIndex = $huiSessionText.IndexOf('Snapshot = updated', [System.StringComparison]::Ordinal)
@@ -117,6 +135,12 @@ if ($huiTestsText -notmatch 'Open_execute_dispose_reopen_preserves_durable_snaps
 }
 if ($huiTestsText -notmatch 'Attachment_blob_metadata_and_hui_count_survive_reopen') {
     throw 'HUI tests must cover attachment blob/metadata survival across reopen.'
+}
+
+$hierarchyHuiTestsText = Get-Content -LiteralPath $hierarchyHuiTests -Raw
+if ($hierarchyHuiTestsText -notmatch 'Hierarchy_parent_and_nested_marker_survive_move_and_reopen' -or
+    $hierarchyHuiTestsText -notmatch 'Session_open_rejects_persisted_missing_parent_before_render') {
+    throw 'HUI tests must cover durable hierarchy/move presentation and fail-closed malformed hierarchy open.'
 }
 
 $storeText = Get-Content -LiteralPath $store -Raw
@@ -167,6 +191,11 @@ $contractTestsText = Get-Content -LiteralPath $contractTests -Raw
 if ($contractTestsText -notmatch 'Import_is_content_addressed_deduplicated_and_display_name_cannot_escape_storage' -or
     $contractTestsText -notmatch 'Existing_deduplicated_blob_must_still_match_its_digest') {
     throw 'Contract tests must cover content-addressing/path isolation and tamper detection.'
+}
+if ($contractTestsText -notmatch 'Parent_cycle_is_rejected_without_publishing_mutated_snapshot' -or
+    $contractTestsText -notmatch 'Moving_nested_card_between_groups_preserves_parent_identity' -or
+    $contractTestsText -notmatch 'Snapshot_validator_rejects_missing_parent_existing_cycle_and_duplicate_ids') {
+    throw 'Contract tests must cover hierarchy cycle rejection, move preservation, and malformed snapshot validation.'
 }
 
 Write-Host 'Haven Boards AppFlowy foundation static checks passed.'
