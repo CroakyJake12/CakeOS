@@ -16,8 +16,40 @@ permissions:
   contents: read
 
 jobs:
-  build-test-smoke:
+  compatibility-24-04:
+    name: Ubuntu 24.04 compile compatibility
     runs-on: ubuntu-24.04
+    timeout-minutes: 15
+
+    steps:
+      - name: Check out CakeOS
+        uses: actions/checkout@v4
+
+      - name: Install LibreOfficeKit compatibility headers
+        run: |
+          sudo apt-get update
+          sudo apt-get install --no-install-recommends -y \
+            libreofficekit-dev \
+            libreoffice-impress-nogui
+
+      - name: Configure
+        run: cmake -S apps/present-engine -B build/present-engine -DCMAKE_BUILD_TYPE=Release
+
+      - name: Build with warnings as errors
+        run: cmake --build build/present-engine --parallel 2
+
+      - name: Run contract tests
+        run: ctest --test-dir build/present-engine --output-on-failure
+
+      - name: Record compatibility versions
+        if: always()
+        run: |
+          dpkg-query -W -f='${Package} ${Version}\n' libreofficekit-dev libreoffice-impress-nogui libreoffice-core-nogui || true
+          /usr/lib/libreoffice/program/soffice --version || true
+
+  runtime-26-04:
+    name: Ubuntu 26.04 LibreOfficeKit runtime proof
+    runs-on: ubuntu-26.04
     timeout-minutes: 15
 
     steps:
@@ -53,7 +85,7 @@ jobs:
             /tmp/cakeos-present-source.odp
           test -s /tmp/cakeos-present-normalized/cakeos-present-source.odp
 
-      - name: Prove LibreOfficeKit Impress rendering
+      - name: Prove exact geometry and LibreOfficeKit Impress rendering
         run: |
           build/present-engine/cakeos-present-engine-smoke \
             /tmp/cakeos-present-normalized/cakeos-present-source.odp \
@@ -71,7 +103,7 @@ jobs:
               raise SystemExit('missing extent_twips output')
           width, height = map(int, match.groups())
           if width < 1000 or height < 1000:
-              raise SystemExit(f'unrealistic presentation extent: {width}x{height} twips')
+              raise SystemExit(f'unrealistic slide extent: {width}x{height} twips')
 
           data = Path('/tmp/cakeos-present-smoke.ppm').read_bytes()
           _, body = data.split(b'\n255\n', 1)
