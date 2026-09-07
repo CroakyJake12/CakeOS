@@ -92,6 +92,43 @@ public sealed class DataGridSession : IAsyncDisposable
         return await RefreshAsync(cancellationToken).ConfigureAwait(false);
     }
 
+    public Task<IReadOnlyList<DataNamedRangeSummary>> ListNamedRangesAsync(CancellationToken cancellationToken = default)
+    {
+        ThrowIfDisposed();
+        var workbook = EnsureOpen();
+        return _spreadsheet.ListNamedRangesAsync(workbook.Id, cancellationToken);
+    }
+
+    public Task<DataNamedRangeSummary> CreateNamedRangeAsync(
+        string name,
+        int startRow,
+        int startColumn,
+        int rowCount,
+        int columnCount,
+        CancellationToken cancellationToken = default)
+    {
+        ThrowIfDisposed();
+        var workbook = EnsureEditable();
+        ValidateVisibleRange(startRow, startColumn, rowCount, columnCount);
+        var range = new DataRangeRequest(
+            _sheets[_activeSheetIndex].Name,
+            startRow,
+            startColumn,
+            rowCount,
+            columnCount);
+        return _spreadsheet.CreateNamedRangeAsync(workbook.Id, name, range, cancellationToken);
+    }
+
+    public async Task<IReadOnlyList<DataNamedRangeSummary>> DeleteNamedRangeAsync(
+        string name,
+        CancellationToken cancellationToken = default)
+    {
+        ThrowIfDisposed();
+        var workbook = EnsureEditable();
+        await _spreadsheet.DeleteNamedRangeAsync(workbook.Id, name, cancellationToken).ConfigureAwait(false);
+        return await _spreadsheet.ListNamedRangesAsync(workbook.Id, cancellationToken).ConfigureAwait(false);
+    }
+
     public Task<DataGridSessionSnapshot> InsertRowsAsync(int index, int count = 1, CancellationToken cancellationToken = default) =>
         MutateStructureAsync(rows: true, insert: true, index, count, cancellationToken);
 
@@ -209,6 +246,13 @@ public sealed class DataGridSession : IAsyncDisposable
             throw new ArgumentOutOfRangeException(nameof(row), $"First-slice rows must be between 0 and {VisibleRows - 1}.");
         if (column < 0 || column >= VisibleColumns)
             throw new ArgumentOutOfRangeException(nameof(column), $"First-slice columns must be between 0 and {VisibleColumns - 1}.");
+    }
+
+    private static void ValidateVisibleRange(int startRow, int startColumn, int rowCount, int columnCount)
+    {
+        if (startRow < 0 || startColumn < 0 || rowCount < 1 || columnCount < 1 ||
+            startRow + rowCount > VisibleRows || startColumn + columnCount > VisibleColumns)
+            throw new ArgumentOutOfRangeException(nameof(rowCount), $"Named ranges created through the first-slice grid must fit wholly inside its {VisibleRows} x {VisibleColumns} viewport.");
     }
 
     private void ThrowIfDisposed()
