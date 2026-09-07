@@ -69,7 +69,23 @@ def main() -> int:
             require("Only SELECT" in ddl_error or "disabled" in ddl_error, "Raw DDL became reachable after adding publication.")
             worker.call("close")
 
-    print("DuckDB structured publication checks passed.")
+        # Persistence gate: a fresh worker/process must be able to reopen the same
+        # local database and observe the last committed structured snapshots.
+        with Worker(DUCKDB_WORKER) as reopened_worker:
+            reopened_worker.call("open", {"databasePath": database})
+            persisted = reopened_worker.call(
+                "query",
+                {"sql": 'SELECT "label", "value" FROM "WorkbookValues"', "maxRows": 20},
+            )
+            require(persisted["rows"] == [["C", "7"]], "Structured publication did not survive database close/reopen.")
+            quoted_persisted = reopened_worker.call(
+                "query",
+                {"sql": 'SELECT "quoted""column" FROM "quoted""table"', "maxRows": 20},
+            )
+            require(quoted_persisted["rows"] == [["safe"]], "Quoted structured publication did not survive close/reopen.")
+            reopened_worker.call("close")
+
+    print("DuckDB structured publication and close/reopen persistence checks passed.")
     return 0
 
 
