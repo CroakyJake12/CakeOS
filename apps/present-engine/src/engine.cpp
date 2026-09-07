@@ -511,13 +511,13 @@ std::vector<ElementSnapshot> PresentEngine::elementSnapshot(
     char* raw = impl_->office->extractDocumentStructureRequest(path.c_str(), "slides");
     if (raw == nullptr || *raw == '\0') {
         if (raw != nullptr) {
-            impl_->office->freeMemory(raw);
+            impl_->office->freeError(raw);
         }
         throw std::runtime_error("LibreOfficeKit returned no presentation structure snapshot");
     }
 
     std::string structureText(raw);
-    impl_->office->freeMemory(raw);
+    impl_->office->freeError(raw);
 
     const Json structure = Json::parse(structureText);
     const Json* slides = findObjectMemberRecursive(structure, "Slides");
