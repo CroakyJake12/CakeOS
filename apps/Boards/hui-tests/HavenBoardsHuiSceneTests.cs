@@ -1,9 +1,11 @@
+using System.Text;
 using CakeOS.Apps.Boards.Contract;
 using CakeOS.Apps.Boards.Hui;
 using Haven.UI;
 using Haven.UI.Components;
 using Xunit;
 using HavenButton = Haven.UI.Components.Button;
+using HavenText = Haven.UI.Components.Text;
 
 namespace CakeOS.Apps.Boards.Hui.Tests;
 
@@ -144,6 +146,62 @@ public sealed class HavenBoardsHuiSceneTests
             await using var reopened = await HavenBoardsHuiSession.OpenAsync(reopenedStore);
             Assert.DoesNotContain(reopened.Snapshot.Groups[0].Cards, card => card.Id == "card-1");
             Assert.Equal(new[] { "card-2", "card-1" }, reopened.Snapshot.Groups[1].Cards.Select(card => card.Id));
+        }
+        finally
+        {
+            DeleteDirectory(root);
+        }
+    }
+
+    [Fact]
+    public async Task Attachment_blob_metadata_and_hui_count_survive_reopen()
+    {
+        var root = TempBoardDirectory();
+        var boardRoot = Path.Combine(root, "boards");
+        var attachmentRoot = Path.Combine(root, "attachments");
+        var attachmentStore = new ContentAddressedHavenBoardAttachmentStore(attachmentRoot);
+        var expectedBytes = Encoding.UTF8.GetBytes("Haven Boards local attachment");
+
+        try
+        {
+            HavenBoardAttachment attachment;
+            using (var firstStore = new JsonFileHavenBoardStore(boardRoot))
+            {
+                await using var first = await HavenBoardsHuiSession.OpenAsync(firstStore);
+                await using var input = new MemoryStream(expectedBytes);
+                attachment = await attachmentStore.ImportAsync(
+                    "board-main",
+                    "../brief.txt",
+                    input,
+                    "att-local");
+
+                await first.ExecuteAsync(new AddAttachmentCommand("card-1", attachment));
+                var firstCard = first.Scene.Root.DescendantsAndSelf()
+                    .Single(element => element.Name == "BoardCard_card1");
+                Assert.Contains(
+                    firstCard.DescendantsAndSelf().OfType<HavenText>(),
+                    text => text.Content == "1 attachment");
+            }
+
+            using var reopenedStore = new JsonFileHavenBoardStore(boardRoot);
+            await using var reopened = await HavenBoardsHuiSession.OpenAsync(reopenedStore);
+            var reopenedCard = reopened.Snapshot.Groups
+                .SelectMany(group => group.Cards)
+                .Single(card => card.Id == "card-1");
+            var reopenedAttachment = Assert.Single(reopenedCard.Attachments!);
+            Assert.Equal(attachment, reopenedAttachment);
+
+            var sceneCard = reopened.Scene.Root.DescendantsAndSelf()
+                .Single(element => element.Name == "BoardCard_card1");
+            Assert.Contains(
+                sceneCard.DescendantsAndSelf().OfType<HavenText>(),
+                text => text.Content == "1 attachment");
+
+            await using var opened = Assert.IsAssignableFrom<Stream>(
+                await attachmentStore.OpenReadAsync("board-main", reopenedAttachment));
+            using var copy = new MemoryStream();
+            await opened.CopyToAsync(copy);
+            Assert.Equal(expectedBytes, copy.ToArray());
         }
         finally
         {
