@@ -1,13 +1,15 @@
 # Haven Data — Calc + DuckDB first slice
 
-Status: **implemented and runtime-proven on disposable Ubuntu 24.04 and Ubuntu 26.04.1 CI; not yet accepted inside the approved CakeOS VM**.
+Status: **implemented and runtime-proven in disposable Ubuntu CI, including a thin HUI contract integration against the accepted CakeOS HUI reference; not yet graphically hosted inside the accepted Linux host and not yet accepted inside the approved CakeOS VM**.
 
 This directory is the CakeOS-native Haven Data foundation. It does not copy the legacy donor implementation or LibreOffice/DuckDB upstream source. HUI-facing code depends only on Haven-owned interfaces; LibreOffice Calc and DuckDB live behind separate worker processes.
 
 ## Boundary
 
 ```text
-HUI / generated UI
+accepted Haven.UI contract
+        |
+DataHuiScene / DataHuiController
         |
 DataGridSession / DataQuerySession / DataAppService
    |                         |
@@ -27,7 +29,17 @@ headless LibreOffice Calc     local .duckdb file
                typed snapshot publication
 ```
 
-No UNO type or DuckDB API is exposed to HUI. Calc remains authoritative for workbook semantics. DuckDB receives explicit snapshots. Query results return to Calc only through a typed, new-sheet, literal-value materialisation operation.
+No UNO type, DuckDB API, Avalonia type, Linux-host renderer primitive or platform backend crosses the Data HUI boundary. Calc remains authoritative for workbook semantics. DuckDB receives explicit typed snapshots. Query results return to Calc only through a typed, new-sheet, literal-value materialisation operation.
+
+## Accepted HUI reference
+
+The Data branch consumes, but does not merge or copy, the accepted CakeOS HUI platform revision:
+
+- CakeOS HUI platform: `2a578502c31973fbefa3b3f82efa22d7ad11db53`
+- pinned `Haven.UI` donor: `CroakyJake12/CakeAI@7c021082565b3e0ef9110bc4a1287ca3cc2c1fbb:src/Haven.UI`
+- Data pin: `apps/Data/Hui/hui-platform-reference.txt`
+
+CI stages that exact platform commit into a disposable worktree, runs its own donor-staging contract, checks the exact donor revision, runs the accepted HUI preview smoke, then builds and exercises `apps/Data/Hui` against the staged `Haven.UI.csproj`. The Data branch does not wholesale merge the accepted platform branch.
 
 ## Evidence ledger
 
@@ -48,14 +60,20 @@ No UNO type or DuckDB API is exposed to HUI. Calc remains authoritative for work
 | Calc → DuckDB bridge | Yes — displayed-value range publication with generated/sanitised headers and structured table replacement |
 | DuckDB → Calc bridge | Yes — non-truncated current-session query results materialise into a new Calc sheet as literal text; formula-looking values such as `=1+1` are not executed |
 | Full .NET → workers runtime path | Yes — real C# adapters perform workbook edits, formula recalc, structural edits, named-range, validation, sort and filter operations, Calc→DuckDB publication, SQL aggregation, DuckDB→Calc materialisation, save and reopen |
+| Accepted HUI contract provenance | Yes — CI stages exactly CakeOS HUI `2a578502c31973fbefa3b3f82efa22d7ad11db53` and verifies its pinned `Haven.UI` donor `7c021082565b3e0ef9110bc4a1287ca3cc2c1fbb` |
+| Thin Data HUI adapter | Yes — `apps/Data/Hui` builds against the staged accepted `Haven.UI` with zero warnings/errors and is guarded against Avalonia, UNO and package references |
+| HUI layout/render/input contract | Yes — headless contract proof uses accepted `HavenLayoutEngine`, `HavenSceneRenderer` and `HavenInputRouter`; it produces layout/render commands and exercises pointer and keyboard routing |
+| HUI → Data → Calc runtime | Yes — on Ubuntu 26.04.1, pointer selection and keyboard action dispatch drive real Calc edit → recalculation → refresh, proven single-key sort, save-as and reopen; run `34159933201` prints `Haven Data HUI contract edit/recalc/sort/save-reopen runtime checks passed.` |
 | Ubuntu 26.04.1 distro proof | Yes — GitHub Actions `ubuntu-26.04`, LibreOffice `26.2.5.2-0ubuntu0.26.04.1`, Python 3.14, DuckDB 1.5.5 and .NET 10 |
 | Worker protocol cancellation safety | Implemented — an in-flight cancellation or malformed/misaligned response faults and terminates the worker instead of reusing a desynchronised stream |
-| Approved desktop checkout | Located — Sandbox project `cakeos` at `C:\Users\Jacob\OneDrive\Personal Files\Development\CakeOS`; its tracked/untracked Boards work is intentionally untouched by this Data branch |
+| Accepted Data graphical Linux-host window | **No** — the accepted Linux host currently constructs its own private preview scene and exposes no external scene/root-provider injection seam for Data; no renderer copy is introduced here |
+| Visual screenshot of the Data scene | **No** — Data HUI contract/runtime is proven headlessly, not through the accepted graphical host screenshot gate |
+| Approved desktop checkout | Located — Sandbox project `cakeos`; its tracked/untracked Boards work is intentionally untouched by this Data branch |
 | Approved CakeOS VM | **No** — the actual CakeOS VM/session has not run this branch |
 | CakeOS package/image | **No** — no package list, image, ISO or VM state was changed by this branch |
-| Visual HUI verification | **No** — `HUI/` still has no usable renderer contract on this branch |
+| Approved-VM visual/accessibility acceptance | **No** — requires the graphical host seam first, then actual CakeOS-session verification |
 
-The Ubuntu 26.04.1 proof materially narrows distro/runtime risk, but it is deliberately **not** labelled as approved-VM, packaged-image or visual-runtime acceptance.
+The HUI contract result is intentionally labelled separately from graphical-host and approved-VM proof. A headless layout/render/input pass does not establish that the Data scene has been drawn in the accepted Linux window or visually inspected in CakeOS.
 
 ## Implemented spreadsheet behaviour
 
@@ -95,7 +113,34 @@ The Ubuntu 26.04.1 proof materially narrows distro/runtime risk, but it is delib
 - save-as and deterministic close/dispose semantics;
 - atomic open/close failure handling.
 
-The real HUI renderer remains a separate platform seam. No UNO/VCL object crosses this layer.
+`DataHuiScene` and `DataHuiController` add only a thin HUI presentation/intent layer:
+
+- `Page`, `Container`, `Button` and `Text` from the accepted `Haven.UI` contract;
+- one 10 × 8 HUI grid whose cells mirror the typed `DataGridSession` snapshot;
+- selected-cell state and accessibility names;
+- hidden-row state represented from `DataRangeSnapshot.RowVisibility` without changing workbook values;
+- typed actions for edit, ascending sort and save/reopen;
+- no Avalonia, UNO, DuckDB or Linux-host backend references.
+
+The accepted platform renderer remains platform-owned. Data does not copy or fork it.
+
+## HUI contract runtime proof
+
+The `hui-contract` CI job on Ubuntu 26.04.1 performs one reproducible integration chain:
+
+1. stage exact accepted HUI platform revision `2a578502c31973fbefa3b3f82efa22d7ad11db53`;
+2. stage and verify its exact `Haven.UI` donor `7c021082565b3e0ef9110bc4a1287ca3cc2c1fbb`;
+3. run the accepted HUI preview smoke;
+4. enforce that `apps/Data/Hui` has no Avalonia/UNO/package dependency;
+5. build the Data HUI adapter against that exact `Haven.UI` project;
+6. create a disposable ODS fixture with LibreOffice;
+7. layout/render the Data HUI scene with `HavenLayoutEngine` and `HavenSceneRenderer`;
+8. route pointer input through `HavenInputRouter` to select cell B2;
+9. route keyboard Enter to a typed edit action, update B2, and verify a dependent Calc formula recalculates;
+10. route a typed ascending-sort action and verify workbook row order;
+11. route save/reopen and verify the edited and sorted state survives ODS persistence.
+
+Run `34159933201` completed the HUI job successfully and the unchanged Ubuntu 24.04/26.04 Data engine matrix remained green on the same source head.
 
 ## Sort compatibility and safety boundary
 
@@ -185,6 +230,8 @@ The Ubuntu 26.04.1 CI lane proved the narrow distro packages `libreoffice-calc-n
 
 ## Reproducible checks
 
+Base Data checks:
+
 ```bash
 dotnet build apps/Data/App/HavenOS.Data.App.csproj -c Release
 dotnet run --project apps/Data/Tests/HavenOS.Data.Smoke.csproj -c Release
@@ -217,27 +264,43 @@ dotnet run --project apps/Data/Tests/HavenOS.Data.Sort.Runtime.csproj -c Release
 dotnet run --project apps/Data/Tests/HavenOS.Data.Filter.Runtime.csproj -c Release
 ```
 
-`.github/workflows/data-first-slice.yml` runs all gates on Ubuntu 24.04 and Ubuntu 26.04.
+After staging the accepted `Haven.UI` project at an exact path:
+
+```bash
+dotnet build apps/Data/Hui/HavenOS.Data.Hui.csproj -c Release \
+  -p:HavenUiProject=/absolute/path/to/Haven.UI.csproj
+
+HAVEN_DATA_PYTHON=/usr/bin/python3 \
+dotnet run --project apps/Data/Tests/HavenOS.Data.Hui.Runtime.csproj -c Release \
+  -p:HavenUiProject=/absolute/path/to/Haven.UI.csproj
+```
+
+`.github/workflows/data-first-slice.yml` reproduces both the dual-distro engine matrix and the accepted-HUI contract integration gate.
+
+## Graphical HUI host gate still required
+
+The accepted `HUI/LinuxHost` graphical implementation is platform-owned and already has its own Xvfb/screenshot proof, but its current preview surface constructs a private hard-coded scene. Data cannot inject `DataHuiScene.Root` into that host through a published seam.
+
+The next platform-owned slice should therefore be deliberately small:
+
+1. add a generic scene/root-provider injection seam to the accepted Linux host without making it Data-specific;
+2. keep measurement, rendering, pointer/keyboard translation and screenshot capture owned by `HUI/LinuxHost`;
+3. host `DataHuiScene.Root` through that seam under the existing Xvfb graphical gate;
+4. exercise selection, edit/recalc/refresh, sort and save/reopen in the actual graphical host;
+5. retain the screenshot and interaction evidence separately from approved-VM acceptance.
+
+Data should **not** copy the Avalonia host, `HuiPreviewSurface`, renderer bridge or screenshot plumbing just to bypass this seam.
 
 ## Approved-VM gate still required
 
 1. Preserve the existing dirty Boards checkout; do not clean, stash, reset or overwrite it for Data testing.
-2. When that work has been safely preserved by its owner, switch the registered CakeOS checkout to `data-calc-duckdb-first-slice` only through Sandbox's guarded branch-switch operation.
+2. Only after the graphical platform seam is accepted should this Data branch be consumed by an approved platform integration path.
 3. Confirm the approved VM identity, Ubuntu 26.04.1 environment and current package state before mutation.
 4. Build first without package/image mutation.
 5. If dependencies are absent, record that before any install and add them only through the approved platform/package path.
-6. Run the same disposable Python and .NET integration gates.
-7. Verify worker cleanup, local-pipe-only UNO communication, filesystem/network confinement, resource limits and failure/restart behaviour in the actual CakeOS session.
-
-## HUI gate still required
-
-Once the platform provides a real HUI renderer contract:
-
-1. Render the `DataGridSession` 10 × 8 snapshot and honour its row-visibility metadata.
-2. Exercise sheet selection, edits, row/column operations, single-key sorting, literal equality filtering, named ranges and list validation through typed commands.
-3. Verify focus, selection, keyboard navigation and screen-reader semantics, including how hidden rows are announced/navigated.
-4. Render query results from `DataQuerySession` without exposing raw engine objects.
-5. Verify generated-UI actions map only to typed Haven operations, never unrestricted UNO/SQL authority.
+6. Run the same disposable Python/.NET/HUI integration gates in the actual CakeOS session.
+7. Verify worker cleanup, local-pipe-only UNO communication, filesystem/network confinement, resource limits and failure/restart behaviour.
+8. Perform visual and accessibility acceptance in the actual CakeOS session; do not infer it from headless CI.
 
 ## Deliberately deferred
 
@@ -253,8 +316,9 @@ Once the platform provides a real HUI renderer contract:
 - raw SQL mutation/DDL;
 - typed preservation beyond displayed strings in Calc↔DuckDB transfer;
 - package/image changes;
-- unrestricted generated-UI write operations.
+- unrestricted generated-UI write operations;
+- copying or forking the platform graphical renderer into the Data app.
 
 ## Safety notes
 
-The worker boundary is defence in depth, not the final OS sandbox. Before shipping, Calc and DuckDB still need target-runtime confinement (AppArmor/systemd/bubblewrap or the platform-selected equivalent), explicit filesystem brokers, resource limits, crash supervision, a larger golden-file/formula corpus and visual/accessibility acceptance through HUI.
+The worker boundary is defence in depth, not the final OS sandbox. Before shipping, Calc and DuckDB still need target-runtime confinement (AppArmor/systemd/bubblewrap or the platform-selected equivalent), explicit filesystem brokers, resource limits, crash supervision, a larger golden-file/formula corpus and actual visual/accessibility acceptance through the platform HUI host and approved CakeOS runtime.
