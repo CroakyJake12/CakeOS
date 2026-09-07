@@ -4,14 +4,26 @@ import argparse
 import json
 from pathlib import Path
 
+from .audit import audit_environment
 from .broker import CompatibilityBroker, load_manifest
 
 
-def main() -> int:
+def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="haven-compat")
-    parser.add_argument("manifest", type=Path)
-    parser.add_argument("action", choices=("plan", "launch", "reset"))
-    args = parser.parse_args()
+    subparsers = parser.add_subparsers(dest="action", required=True)
+
+    audit_parser = subparsers.add_parser("audit", help="read-only runtime prerequisite audit")
+    audit_parser.add_argument("--runtime-root", type=Path)
+
+    for action in ("plan", "launch", "reset"):
+        action_parser = subparsers.add_parser(action)
+        action_parser.add_argument("manifest", type=Path)
+
+    args = parser.parse_args(argv)
+
+    if args.action == "audit":
+        print(json.dumps(audit_environment(args.runtime_root), indent=2))
+        return 0
 
     broker = CompatibilityBroker()
     manifest = load_manifest(args.manifest)
@@ -22,7 +34,7 @@ def main() -> int:
         return 0
     if args.action == "launch":
         process = broker.launch(manifest)
-        print(process.pid)
+        print(json.dumps({"pid": process.pid}))
         return 0
 
     broker.reset(manifest)
