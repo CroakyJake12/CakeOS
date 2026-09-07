@@ -53,7 +53,11 @@ public sealed class DataGridSession : IAsyncDisposable
         }
         catch
         {
-            await _spreadsheet.CloseAsync(opened.Id, CancellationToken.None).ConfigureAwait(false);
+            _workbook = null;
+            _sheets = [];
+            _activeSheetIndex = 0;
+            try { await _spreadsheet.CloseAsync(opened.Id, CancellationToken.None).ConfigureAwait(false); }
+            catch { }
             throw;
         }
     }
@@ -140,6 +144,7 @@ public sealed class DataGridSession : IAsyncDisposable
             var id = _workbook.Id;
             _workbook = null;
             _sheets = [];
+            _activeSheetIndex = 0;
             try { await _spreadsheet.CloseAsync(id, CancellationToken.None).ConfigureAwait(false); }
             catch { }
         }
