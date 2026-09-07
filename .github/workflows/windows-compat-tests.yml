@@ -1,0 +1,33 @@
+name: Windows compatibility broker tests
+
+on:
+  push:
+    branches:
+      - feature/windows-compat-broker
+  pull_request:
+    paths:
+      - 'compatibility/wine/**'
+      - 'tests/test_haven_compat*.py'
+      - '.github/workflows/windows-compat-tests.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  compatibility-tests:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Compile compatibility broker
+        run: python -m compileall -q compatibility/wine/haven_compat
+
+      - name: Run compatibility tests
+        run: python -m unittest discover -s tests -p 'test_haven_compat*.py' -v
