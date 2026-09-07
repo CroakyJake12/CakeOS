@@ -16,6 +16,7 @@ endif()
 
 add_library(cakeos-present-engine STATIC
     src/engine.cpp
+    src/semantic.cpp
 )
 
 target_include_directories(cakeos-present-engine
@@ -42,6 +43,11 @@ add_executable(cakeos-present-engine-smoke
 
 target_include_directories(cakeos-present-engine-smoke PRIVATE ${LIBREOFFICEKIT_INCLUDE_DIR})
 target_link_libraries(cakeos-present-engine-smoke PRIVATE cakeos-present-engine)
+
+add_executable(cakeos-present-engine-lifecycle-smoke
+    tests/lifecycle_smoke.cpp
+)
+target_link_libraries(cakeos-present-engine-lifecycle-smoke PRIVATE cakeos-present-engine)
 
 enable_testing()
 add_executable(cakeos-present-engine-contract-tests
