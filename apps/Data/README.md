@@ -2,7 +2,7 @@
 
 Status: **implemented and runtime-proven on disposable Ubuntu 24.04 and Ubuntu 26.04.1 CI; not yet accepted inside the approved CakeOS VM**.
 
-This directory is the first CakeOS-native Haven Data slice. It intentionally does not copy the legacy donor implementation or LibreOffice/DuckDB upstream source. HUI-facing code depends only on Haven-owned interfaces; LibreOffice Calc and DuckDB live behind separate worker processes.
+This directory is the CakeOS-native Haven Data foundation. It does not copy the legacy donor implementation or LibreOffice/DuckDB upstream source. HUI-facing code depends only on Haven-owned interfaces; LibreOffice Calc and DuckDB live behind separate worker processes.
 
 ## Boundary
 
@@ -27,91 +27,102 @@ headless LibreOffice Calc     local .duckdb file
                typed snapshot publication
 ```
 
-No UNO type or DuckDB API is exposed to HUI. The workbook remains Calc-owned; DuckDB receives explicit snapshot tables rather than shared document authority. Raw query text never receives the structured schema-mutation capability used by the snapshot bridge.
+No UNO type or DuckDB API is exposed to HUI. Calc remains authoritative for workbook semantics. DuckDB receives explicit snapshots. Query results return to Calc only through a typed, new-sheet, literal-value materialisation operation.
 
 ## Evidence ledger
 
 | Claim | Evidence |
 | --- | --- |
-| Source implemented | Yes — CakeOS feature branch `data-calc-duckdb-first-slice` |
-| .NET 10 build | Yes — Ubuntu 24.04 and Ubuntu 26.04.1 GitHub Actions, warnings treated as errors |
-| Grid/query/bridge smoke | Yes — 10 × 8 grid session, sheet selection, edit/recalculate/refresh, save delegation, typed workbook→database publication, bounded query execution and 20-entry recent-query history |
-| Worker Python syntax | Yes — both workers and all Python integration/corpus harnesses compile with `py_compile` |
-| DuckDB runtime | Yes — pinned DuckDB 1.5.5 opens disposable databases, executes bounded SELECTs, rejects DDL/multiple statements/external file access, accepts typed table publication, safely quotes identifiers and atomically replaces snapshots |
-| Calc/UNO runtime | Yes — live headless Calc opens disposable ODS files over a local UNO pipe, edits cells/formulas, recalculates, saves/reopens ODS and XLSX, and enforces read-only/save-as guards |
-| Formula compatibility baseline | Yes — live Calc corpus currently covers arithmetic precedence, SUM, absolute references, exponentiation, AVERAGE, COUNT, MIN and MAX |
-| Full .NET→worker runtime path | Yes — real `CalcSpreadsheetEngine` + `DuckDbDatabaseEngine` edit/recalculate a workbook, publish it into DuckDB, aggregate it with SQL, save it and reopen the saved ODS |
-| Ubuntu 26.04.1 distro proof | Yes — GitHub Actions `ubuntu-26.04` runner, LibreOffice `26.2.5.2-0ubuntu0.26.04.1`, Python 3.14 and DuckDB 1.5.5; full runtime gate passed |
-| Worker protocol cancellation safety | Implemented — once an in-flight request may have been written, cancellation or malformed/misaligned response faults and terminates the worker rather than reusing a desynchronised protocol stream |
-| Approved desktop checkout | Located — Sandbox project `cakeos` at `C:\Users\Jacob\OneDrive\Personal Files\Development\CakeOS`; guarded switch to this branch is currently refused because the existing Boards checkout has tracked/untracked changes that must be preserved |
+| Source implemented | Yes — CakeOS branch `data-calc-duckdb-first-slice` |
+| .NET 10 build | Yes — Ubuntu 24.04 and Ubuntu 26.04.1 GitHub Actions with warnings treated as errors |
+| HUI-facing app smoke | Yes — 10 × 8 grid, edit/recalculate/refresh, sheet selection, row/column edits, range-backed named ranges, database publication, bounded query history and query-result materialisation |
+| Worker Python syntax | Yes — workers and integration/corpus harnesses compile with `py_compile` |
+| Calc/UNO runtime | Yes — live headless Calc over a local UNO pipe opens, edits, recalculates, structurally edits, manages range-backed names, saves and reopens disposable ODS/XLSX workbooks |
+| Formula compatibility baseline | Yes — arithmetic precedence, SUM, absolute references, exponentiation, AVERAGE, COUNT, MIN and MAX |
+| Row/column structural edits | Yes — live Calc insert/delete shifts formulas/references correctly, rejects unsafe/read-only edits and survives save/reopen |
+| Range-backed named ranges | Yes — create/list/delete, case-insensitive duplicate/delete handling, row/column shift tracking and ODS persistence are live-proven; arbitrary named formulas are not exposed |
+| DuckDB runtime | Yes — DuckDB 1.5.5 opens disposable databases, executes bounded read-only SQL, rejects DDL/multiple statements/external access, and atomically replaces typed snapshot tables |
+| Calc → DuckDB bridge | Yes — displayed-value range publication with generated/sanitised headers and structured table replacement |
+| DuckDB → Calc bridge | Yes — non-truncated current-session query results materialise into a new Calc sheet as literal text; formula-looking values such as `=1+1` are not executed |
+| Full .NET → workers runtime path | Yes — real C# adapters perform workbook edits, formula recalc, structural edits, named-range operations, Calc→DuckDB publication, SQL aggregation, DuckDB→Calc materialisation, save and reopen |
+| Ubuntu 26.04.1 distro proof | Yes — GitHub Actions `ubuntu-26.04`, LibreOffice `26.2.5.2-0ubuntu0.26.04.1`, Python 3.14, DuckDB 1.5.5 and .NET 10 |
+| Worker protocol cancellation safety | Implemented — an in-flight cancellation or malformed/misaligned response faults and terminates the worker instead of reusing a desynchronised stream |
+| Approved desktop checkout | Located — Sandbox project `cakeos` at `C:\Users\Jacob\OneDrive\Personal Files\Development\CakeOS`; guarded branch switching is currently refused because the Boards checkout contains tracked/untracked work that must be preserved |
 | Approved CakeOS VM | **No** — the actual CakeOS VM/session has not run this branch |
 | CakeOS package/image | **No** — no package list, image, ISO or VM state was changed by this branch |
-| Visual HUI verification | **No** — `HUI/` currently has no usable renderer contract on this branch, so no fake UI integration is claimed |
+| Visual HUI verification | **No** — `HUI/` still has no usable renderer contract on this branch |
 
-The Ubuntu 26.04.1 CI proof materially narrows distro/runtime risk, but it is deliberately **not** labelled as approved-VM, packaged-image or visual-runtime acceptance.
+The Ubuntu 26.04.1 proof materially narrows distro/runtime risk, but it is deliberately **not** labelled as approved-VM, packaged-image or visual-runtime acceptance.
 
 ## Implemented spreadsheet behaviour
 
-- starts a dedicated headless `soffice` process;
-- creates a disposable LibreOffice user profile for the worker;
-- connects through a local UNO pipe rather than a TCP listener;
-- disables macro execution and document-link updates at load;
-- rejects non-Calc documents;
-- enumerates real worksheet names;
-- opens a workbook hidden and optionally read-only;
-- reads bounded ranges;
-- edits text, numbers and formulas;
-- requests full recalculation;
-- permits first-slice save-as to `.ods` or `.xlsx`, not in-place overwrite;
-- verifies that a save produced a non-empty output;
-- closes documents and tears down the worker/profile;
-- drains child-process diagnostics and uses bounded shutdown/kill fallback.
+- isolated headless `soffice` process and disposable LibreOffice user profile;
+- local UNO pipe rather than a TCP listener;
+- macro execution and document-link updates disabled at load;
+- non-Calc document rejection;
+- real worksheet enumeration;
+- bounded range reads and viewport-bounded typed cell edits;
+- text, number and formula editing with Calc-owned recalculation;
+- row/column insertion and deletion behind typed operations;
+- global named ranges backed by one concrete cell range only;
+- range-backed named ranges track Calc row/column shifts and persist in ODS;
+- formula-style/non-range named expressions are not surfaced through the Haven API;
+- first-slice save-as to `.ods` or `.xlsx`, with in-place overwrite disabled;
+- saved-output existence/size verification;
+- worker stderr draining and bounded shutdown/kill fallback.
 
-## Implemented HUI-facing spreadsheet session
+## HUI-facing spreadsheet session
 
 `DataGridSession` exposes only Haven-owned records and operations:
 
 - fixed 10 × 8 first-slice viewport;
-- real Calc worksheet discovery and selection;
-- returned-grid dimension validation;
-- viewport-bounded edits;
-- edit → recalculate → refresh as one typed app operation;
+- worksheet discovery and selection;
+- edit → recalculate → refresh;
+- typed row/column insertion and deletion with refresh;
+- named-range create/list/delete; creation must fit wholly inside the current viewport in this slice;
 - save-as and deterministic close/dispose semantics;
-- atomic workbook-open failure cleanup.
+- atomic open/close failure handling.
 
-The real HUI renderer remains a separate platform seam. This app layer is ready to supply it with typed state without leaking UNO/VCL objects.
+The real HUI renderer remains a separate platform seam. No UNO/VCL object crosses this layer.
 
-## Implemented database/query behaviour
+## Database/query behaviour
 
-- opens a local DuckDB database;
-- pins DuckDB 1.5.5 in CI/runtime proof;
-- disables external access, extension auto-install/auto-load, community extensions and persistent secrets;
-- applies bounded worker memory/thread defaults and locks DuckDB configuration after setup;
-- raw user/model query text permits only a single `SELECT` or `EXPLAIN` statement;
-- mutation/capability keywords are rejected again inside the worker;
-- query previews are capped at 1–1000 rows;
-- `DataQuerySession` tracks typed published tables and the 20 most recent successful queries;
-- query-session close is atomic: logical state is retained if engine close fails so the caller can retry;
-- no database API is exposed directly to generated UI.
+- local DuckDB database;
+- DuckDB 1.5.5 pinned in CI/runtime proof;
+- external access, extension autoload/install, community extensions and persistent secrets disabled;
+- bounded memory/thread defaults followed by locked DuckDB configuration;
+- raw query text restricted to one `SELECT` or `EXPLAIN` statement;
+- worker-side mutation/capability keyword rejection;
+- query previews capped at 1–1000 rows;
+- `DataQuerySession` tracks published tables and the 20 most recent successful queries;
+- query-session close is atomic;
+- raw database APIs are not exposed directly to generated UI.
 
-## Workbook→database bridge
+## Calc → DuckDB bridge
 
-- publishes an explicit displayed-value range snapshot rather than sharing workbook ownership;
-- supports generated A/B/C… column names or sanitised first-row headers;
-- validates source sheet, coordinates and dimensions before publication;
-- uses privileged structured `ReplaceTableAsync` rather than exposing DDL strings;
-- validates table/column names and shape at app and worker boundaries;
-- quotes SQL identifiers and parameterises row values;
-- replaces the target table inside a DuckDB transaction;
-- keeps raw user/model SQL read-only after publication capability is enabled.
+- explicit displayed-value range snapshots rather than shared workbook authority;
+- generated A/B/C… columns or sanitised first-row headers;
+- source range validation;
+- privileged structured `ReplaceTableAsync` rather than exposing DDL strings;
+- worker-side table/shape validation;
+- quoted SQL identifiers, parameterised values and transactional replacement;
+- raw user/model SQL remains read-only.
 
-Current publication is intentionally string/display-value based. Typed cell/date/error preservation is a later compatibility milestone.
+Current publication is intentionally display-string based. Typed date/error/value preservation is a later compatibility milestone.
+
+## DuckDB → Calc bridge
+
+- only a successful query from the currently open query session can be materialised;
+- truncated query previews are refused rather than silently producing incomplete sheets;
+- first slice supports at most 999 data rows plus one header and 256 columns;
+- result data always creates a **new** sheet; existing sheets are not overwritten;
+- query output is written through Calc `setString`, so formula-looking values remain literal text;
+- portable sheet-name validation and case-insensitive duplicate detection are enforced;
+- ODS/XLSX save/reopen tests prove literal result values stay literal.
 
 ## Worker protocol safety
 
-`JsonLineWorkerClient` serialises calls per worker. If cancellation happens after a request may have been written, or if stdout contains malformed JSON, a missing result, EOF or a mismatched response ID, the client faults and terminates that worker process. It does not attempt to continue on a potentially shifted request/response stream.
-
-This prevents a cancelled request's late response from being consumed as the next operation's response.
+`JsonLineWorkerClient` serialises calls per worker. If cancellation occurs after a request may have been written, or stdout contains malformed JSON, EOF, a missing result or a mismatched response ID, the client faults and terminates the worker. It does not continue on a potentially shifted request/response stream.
 
 ## Runtime dependencies — not installed into CakeOS by this branch
 
@@ -119,11 +130,11 @@ The Calc worker expects:
 
 - LibreOffice Calc headless runtime (`soffice`);
 - Python with LibreOffice `pyuno`/`uno` bindings;
-- Calc filters needed for ODS/XLSX.
+- Calc filters required for ODS/XLSX.
 
-The DuckDB worker expects Python and the approved/pinned DuckDB runtime package. The worker is deliberately process-local so a later move from the Python binding to the DuckDB C API does not change the HUI-facing contracts.
+The DuckDB worker expects Python and the approved/pinned DuckDB runtime. The process boundary means a later move from the Python binding to the DuckDB C API does not change HUI-facing contracts.
 
-The Ubuntu 26.04.1 CI lane proved the narrow distro packages `libreoffice-calc-nogui`, `libreoffice-core-nogui`, `libreoffice-common` and `python3-uno` are sufficient for the current integration tests. This branch itself does **not** install those packages into the CakeOS image or approved VM.
+The Ubuntu 26.04.1 CI lane proved the narrow distro packages `libreoffice-calc-nogui`, `libreoffice-core-nogui`, `libreoffice-common` and `python3-uno` are sufficient for the current integration suite. This branch does **not** install those packages into the CakeOS image or approved VM.
 
 ## Reproducible checks
 
@@ -135,6 +146,8 @@ python3 -m py_compile apps/Data/workers/duckdb_worker.py
 python3 -m py_compile apps/Data/Tests/test_workers.py
 python3 -m py_compile apps/Data/Tests/test_duckdb_publish.py
 python3 -m py_compile apps/Data/Tests/test_calc_formula_corpus.py
+python3 -m py_compile apps/Data/Tests/test_calc_structure.py
+python3 -m py_compile apps/Data/Tests/test_calc_named_ranges.py
 ```
 
 After disposable LibreOffice/UNO and DuckDB runtimes are available:
@@ -143,33 +156,32 @@ After disposable LibreOffice/UNO and DuckDB runtimes are available:
 python3 apps/Data/Tests/test_workers.py
 python3 apps/Data/Tests/test_duckdb_publish.py
 python3 apps/Data/Tests/test_calc_formula_corpus.py
+python3 apps/Data/Tests/test_calc_structure.py
+python3 apps/Data/Tests/test_calc_named_ranges.py
 dotnet run --project apps/Data/Tests/HavenOS.Data.Runtime.csproj -c Release
 ```
 
-`.github/workflows/data-first-slice.yml` runs these gates on both Ubuntu 24.04 and Ubuntu 26.04.
+`.github/workflows/data-first-slice.yml` runs all gates on Ubuntu 24.04 and Ubuntu 26.04.
 
 ## Approved-VM gate still required
-
-Use disposable fixture/output/database paths. Do not use normal user documents.
 
 1. Preserve the existing dirty Boards checkout; do not clean, stash, reset or overwrite it for Data testing.
 2. When that work has been safely preserved by its owner, switch the registered CakeOS checkout to `data-calc-duckdb-first-slice` only through Sandbox's guarded branch-switch operation.
 3. Confirm the approved VM identity, Ubuntu 26.04.1 environment and current package state before mutation.
-4. Build the Data projects without package/image mutation first.
-5. If runtime dependencies are absent, record that fact before any installation; add them only through the approved platform/package path.
+4. Build first without package/image mutation.
+5. If dependencies are absent, record that before any install and add them only through the approved platform/package path.
 6. Run the same disposable Python and .NET integration gates.
-7. Verify worker cleanup, local-pipe-only UNO communication, filesystem/network confinement, resource limits and restart/failure behaviour in the real session.
+7. Verify worker cleanup, local-pipe-only UNO communication, filesystem/network confinement, resource limits and failure/restart behaviour in the actual CakeOS session.
 
 ## HUI gate still required
 
 Once the platform provides a real HUI renderer contract:
 
-1. Render the `DataGridSession` 10 × 8 snapshot through HUI.
-2. Select a real worksheet discovered by the engine.
-3. Edit text/numeric cells and a dependent formula through typed commands.
-4. Verify focus, selection, keyboard navigation and screen-reader semantics.
-5. Render query results from `DataQuerySession` without exposing raw engine objects.
-6. Verify all generated-UI actions map to typed Haven operations rather than unrestricted UNO/SQL authority.
+1. Render the `DataGridSession` 10 × 8 snapshot.
+2. Exercise sheet selection, edits, row/column operations and named ranges through typed commands.
+3. Verify focus, selection, keyboard navigation and screen-reader semantics.
+4. Render query results from `DataQuerySession` without exposing raw engine objects.
+5. Verify generated-UI actions map only to typed Haven operations, never unrestricted UNO/SQL authority.
 
 ## Deliberately deferred
 
@@ -177,10 +189,11 @@ Once the platform provides a real HUI renderer contract:
 - embedding LibreOffice/VCL UI;
 - LibreOfficeKit rendering;
 - charts and drawings;
-- formatting/validation/named ranges;
+- formatting and data validation;
+- sort/filter operations;
+- arbitrary named formulas/expressions;
 - raw SQL mutation/DDL;
-- DuckDB query-result materialisation back into a Calc range/sheet;
-- typed preservation beyond displayed strings when publishing Calc ranges to DuckDB;
+- typed preservation beyond displayed strings in Calc↔DuckDB transfer;
 - package/image changes;
 - unrestricted generated-UI write operations.
 
