@@ -1,0 +1,194 @@
+//! Read-only-migration-approved proof of concept for a renderer-neutral Rnote core.
+//!
+//! This crate deliberately depends on `rnote-engine` with default features disabled.
+//! It must not enable Rnote's `ui` feature or depend on GTK/Libadwaita.
+
+use std::collections::HashSet;
+use std::time::Instant;
+
+use anyhow::{Context, Result};
+use nalgebra::Vector2;
+use rnote_compose::penevent::PenEvent;
+use rnote_compose::penpath::Element;
+use rnote_engine::engine::export::{DocExportFormat, DocExportPrefs};
+use rnote_engine::engine::EngineSnapshot;
+use rnote_engine::pens::PenMode;
+use rnote_engine::Engine;
+
+/// One normalized Haven/HUI pointer sample.
+///
+/// Tilt remains in the Haven boundary because Rnote 0.14.2 only accepts position
+/// and pressure in its core `Element` type. Keeping tilt here prevents a lossy
+/// public API if the engine is extended later.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct CanvasPointerSample {
+    pub x: f64,
+    pub y: f64,
+    pub pressure: f64,
+    pub tilt_x: f64,
+    pub tilt_y: f64,
+}
+
+impl CanvasPointerSample {
+    pub fn new(x: f64, y: f64, pressure: f64) -> Self {
+        Self {
+            x,
+            y,
+            pressure: pressure.clamp(0.0, 1.0),
+            tilt_x: 0.0,
+            tilt_y: 0.0,
+        }
+    }
+
+    fn rnote_element(self) -> Element {
+        Element::new(Vector2::new(self.x, self.y), self.pressure)
+    }
+}
+
+/// Smallest engine boundary intended to prove that Rnote can run beneath HUI
+/// without embedding `rnote-ui`.
+#[derive(Debug)]
+pub struct HeadlessCanvasEngine {
+    engine: Engine,
+}
+
+impl Default for HeadlessCanvasEngine {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl HeadlessCanvasEngine {
+    pub fn new() -> Self {
+        let mut engine = Engine::default();
+        // Initialize the currently configured pen while keeping the `ui` feature off.
+        let _ = engine.reinstall_pen_current_style();
+        Self { engine }
+    }
+
+    /// Feed one complete pressure-sensitive freehand stroke to Rnote's abstract
+    /// pen-event API. Device arbitration (mouse/touch/stylus/palm rejection)
+    /// intentionally stays above this adapter in HUI.
+    pub fn draw_stroke(&mut self, samples: &[CanvasPointerSample]) -> Result<()> {
+        if samples.len() < 2 {
+            anyhow::bail!("a stroke requires at least two pointer samples");
+        }
+
+        let modifiers = HashSet::new();
+        let now = Instant::now();
+
+        for sample in samples {
+            let _ = self.engine.handle_pen_event(
+                PenEvent::Down {
+                    element: sample.rnote_element(),
+                    modifier_keys: modifiers.clone(),
+                },
+                Some(PenMode::Pen),
+                now,
+            );
+        }
+
+        let last = *samples.last().expect("length checked above");
+        let _ = self.engine.handle_pen_event(
+            PenEvent::Up {
+                element: last.rnote_element(),
+                modifier_keys: modifiers,
+            },
+            Some(PenMode::Pen),
+            now,
+        );
+
+        Ok(())
+    }
+
+    /// Produce renderer-neutral SVG bytes using the engine export path.
+    /// This is the first HUI-consumable rendering proof; viewport tile exposure
+    /// remains a later optimization rather than importing GTK/GSK into HUI.
+    pub async fn export_svg(&self) -> Result<Vec<u8>> {
+        let prefs = DocExportPrefs {
+            export_format: DocExportFormat::Svg,
+            ..DocExportPrefs::default()
+        };
+
+        self.engine
+            .export_doc("CakeOS Canvas PoC".to_string(), Some(prefs))
+            .await
+            .context("Rnote SVG export channel closed")?
+            .context("Rnote SVG export failed")
+    }
+
+    /// Save a native Rnote payload for compatibility/interchange testing.
+    pub async fn save_rnote(&self) -> Result<Vec<u8>> {
+        self.engine
+            .save_as_rnote_bytes("canvas-poc.rnote".to_string())
+            .await
+            .context("Rnote save channel closed")?
+            .context("Rnote save failed")
+    }
+
+    /// Restore a fresh engine from native Rnote bytes.
+    pub async fn from_rnote(bytes: Vec<u8>) -> Result<Self> {
+        let snapshot = EngineSnapshot::load_from_rnote_bytes(bytes)
+            .await
+            .context("Rnote snapshot load failed")?;
+        let mut engine = Engine::default();
+        let _ = engine.load_snapshot(snapshot);
+        Ok(Self { engine })
+    }
+
+    /// Expose a debug-only JSON snapshot for mechanical assertions in the PoC.
+    pub fn debug_state_json(&self) -> Result<String> {
+        self.engine
+            .export_state_as_json()
+            .context("Rnote state serialization failed")
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use futures::executor::block_on;
+
+    fn sample_stroke() -> [CanvasPointerSample; 5] {
+        [
+            CanvasPointerSample::new(120.0, 120.0, 0.15),
+            CanvasPointerSample::new(150.0, 140.0, 0.35),
+            CanvasPointerSample::new(190.0, 160.0, 0.65),
+            CanvasPointerSample::new(235.0, 190.0, 0.90),
+            CanvasPointerSample::new(280.0, 220.0, 0.55),
+        ]
+    }
+
+    #[test]
+    fn pressure_is_clamped_but_tilt_is_preserved_at_hui_boundary() {
+        let mut sample = CanvasPointerSample::new(1.0, 2.0, 2.5);
+        sample.tilt_x = 37.0;
+        sample.tilt_y = -22.0;
+        assert_eq!(sample.pressure, 1.0);
+        assert_eq!(sample.tilt_x, 37.0);
+        assert_eq!(sample.tilt_y, -22.0);
+    }
+
+    #[test]
+    fn headless_engine_draws_exports_saves_and_reloads() {
+        block_on(async {
+            let mut canvas = HeadlessCanvasEngine::new();
+            canvas.draw_stroke(&sample_stroke()).unwrap();
+
+            let svg_before = canvas.export_svg().await.unwrap();
+            let svg_text = std::str::from_utf8(&svg_before).unwrap();
+            assert!(svg_text.contains("<svg"));
+            assert!(svg_before.len() > 200, "SVG unexpectedly empty");
+
+            let native = canvas.save_rnote().await.unwrap();
+            assert!(native.len() > 100, ".rnote payload unexpectedly empty");
+
+            let restored = HeadlessCanvasEngine::from_rnote(native).await.unwrap();
+            let svg_after = restored.export_svg().await.unwrap();
+            assert!(svg_after.len() > 200, "reloaded SVG unexpectedly empty");
+
+            let state = restored.debug_state_json().unwrap();
+            assert!(state.contains("stroke_components"));
+        });
+    }
+}
