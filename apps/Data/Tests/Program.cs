@@ -35,6 +35,13 @@ await using (var session = new DataGridSession(fake))
     Assert(formula.Grid.Values[0][1] == "10", "Grid session did not expose the recalculated formula result.");
     Assert(fake.RecalculateCalls == 2, "Grid session did not recalculate the formula edit.");
 
+    _ = await session.InsertRowsAsync(1);
+    _ = await session.DeleteRowsAsync(1);
+    _ = await session.InsertColumnsAsync(1);
+    _ = await session.DeleteColumnsAsync(1);
+    Assert(fake.InsertRowsCalls == 1 && fake.DeleteRowsCalls == 1, "Grid session did not delegate row structural edits exactly once.");
+    Assert(fake.InsertColumnsCalls == 1 && fake.DeleteColumnsCalls == 1, "Grid session did not delegate column structural edits exactly once.");
+
     var bridge = new DataWorkbookDatabaseBridge(fake, fakeDatabase);
     var published = await bridge.PublishRangeAsync(
         opened.Workbook.Id,
@@ -125,7 +132,7 @@ await using (var querySession = new DataQuerySession(querySpreadsheet, queryData
 }
 await querySpreadsheet.CloseAsync(queryWorkbook.Id);
 
-Console.WriteLine("Haven Data contract, grid-session, database-bridge, query-session and materialisation smoke checks passed.");
+Console.WriteLine("Haven Data contract, grid-session, structural-edit, database-bridge, query-session and materialisation smoke checks passed.");
 
 internal sealed class FakeSpreadsheetEngine : IDataSpreadsheetEngine
 {
@@ -136,6 +143,10 @@ internal sealed class FakeSpreadsheetEngine : IDataSpreadsheetEngine
     public int RecalculateCalls { get; private set; }
     public int CloseCalls { get; private set; }
     public int MaterializedSheetCalls { get; private set; }
+    public int InsertRowsCalls { get; private set; }
+    public int DeleteRowsCalls { get; private set; }
+    public int InsertColumnsCalls { get; private set; }
+    public int DeleteColumnsCalls { get; private set; }
     public string? LastSavePath { get; private set; }
 
     public Task<DataWorkbookHandle> OpenAsync(string path, bool readOnly, CancellationToken cancellationToken = default)
@@ -196,6 +207,38 @@ internal sealed class FakeSpreadsheetEngine : IDataSpreadsheetEngine
             for (var column = 0; column < values[row].Count; column++)
                 _values[(sheetName, row, column)] = values[row][column];
         return Task.FromResult(new DataRangeSnapshot(sheetName, 0, 0, values.Select(row => (IReadOnlyList<string>)row.ToArray()).ToArray()));
+    }
+
+    public Task InsertRowsAsync(string workbookId, string sheet, int index, int count, CancellationToken cancellationToken = default)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        EnsureOpen(workbookId);
+        InsertRowsCalls++;
+        return Task.CompletedTask;
+    }
+
+    public Task DeleteRowsAsync(string workbookId, string sheet, int index, int count, CancellationToken cancellationToken = default)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        EnsureOpen(workbookId);
+        DeleteRowsCalls++;
+        return Task.CompletedTask;
+    }
+
+    public Task InsertColumnsAsync(string workbookId, string sheet, int index, int count, CancellationToken cancellationToken = default)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        EnsureOpen(workbookId);
+        InsertColumnsCalls++;
+        return Task.CompletedTask;
+    }
+
+    public Task DeleteColumnsAsync(string workbookId, string sheet, int index, int count, CancellationToken cancellationToken = default)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        EnsureOpen(workbookId);
+        DeleteColumnsCalls++;
+        return Task.CompletedTask;
     }
 
     public Task RecalculateAsync(string workbookId, CancellationToken cancellationToken = default)
