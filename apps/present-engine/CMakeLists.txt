@@ -122,6 +122,7 @@ add_executable(cakeos-present-geometry-probe
     tests/geometry_probe.cpp
 )
 target_include_directories(cakeos-present-geometry-probe PRIVATE ${LIBREOFFICEKIT_INCLUDE_DIR})
+target_compile_definitions(cakeos-present-geometry-probe PRIVATE LOK_USE_UNSTABLE_API)
 target_link_libraries(cakeos-present-geometry-probe PRIVATE cakeos-present-engine)
 cakeos_enable_strict_warnings(cakeos-present-geometry-probe)
 
