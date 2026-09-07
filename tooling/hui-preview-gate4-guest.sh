@@ -170,7 +170,8 @@ if [[ "$mode" == probe ]]; then
   shell_ping
   capture_platform_versions "$evidence/platform-after.txt"
   cmp "$evidence/platform-before.txt" "$evidence/platform-after.txt"
-  printf 'probe=passed\npackage_sha256=%s\n' "$actual_sha256" > "$evidence/result.txt"
+  printf 'probe=passed\nruntime_self_test=passed\nplatform_invariant=passed\npackage_sha256=%s\n' \
+    "$actual_sha256" > "$evidence/result.txt"
   exported="$(export_evidence "$package_path" "$evidence")"
   echo "Gate 4 rootless probe passed. Local evidence: $evidence"
   echo "Exported evidence: $exported"
@@ -211,7 +212,7 @@ run_preview /usr/bin/cakeos-hui-preview "$evidence/preview.log"
 shell_ping
 capture_platform_versions "$evidence/platform-after.txt"
 cmp "$evidence/platform-before.txt" "$evidence/platform-after.txt"
-printf 'install=passed\npackage_sha256=%s\ninstalled_version=%s\n' \
+printf 'install=passed\nruntime_self_test=passed\nplatform_invariant=passed\npackage_sha256=%s\ninstalled_version=%s\n' \
   "$actual_sha256" "$installed_version" > "$evidence/result.txt"
 exported="$(export_evidence "$package_path" "$evidence")"
 
