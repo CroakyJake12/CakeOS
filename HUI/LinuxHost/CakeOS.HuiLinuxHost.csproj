@@ -8,5 +8,6 @@
     <ProjectReference Include="..\vendor\Haven.UI\Haven.UI.csproj" />
     <PackageReference Include="Avalonia" Version="12.0.1" />
     <PackageReference Include="Avalonia.Desktop" Version="12.0.1" />
+    <PackageReference Include="Svg.Controls.Skia.Avalonia" Version="12.0.0.17" />
   </ItemGroup>
 </Project>
