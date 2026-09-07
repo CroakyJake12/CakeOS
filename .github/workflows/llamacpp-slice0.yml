@@ -6,6 +6,7 @@ on:
       - 'runtime/llamacpp/**'
       - 'packaging/systemd/user/haven-inference-broker.service'
       - 'packaging/bin/haven-modelctl'
+      - 'packaging/llamacpp/**'
       - '.github/workflows/llamacpp-slice0.yml'
       - 'havenos.lock'
   workflow_dispatch:
@@ -56,6 +57,8 @@ jobs:
         run: sh -n runtime/llamacpp/build-cpu.sh
       - name: Validate model-manager wrapper syntax
         run: sh -n packaging/bin/haven-modelctl
+      - name: Validate Debian package builder syntax
+        run: sh -n packaging/llamacpp/build-deb.sh
 
   build-pinned-llamacpp-cpu:
     runs-on: ubuntu-latest
@@ -107,3 +110,59 @@ jobs:
           llama-build/bin/llama-server --version
           sha256sum llama-build/bin/llama-server
           ldd llama-build/bin/llama-server || true
+
+  package-runtime-amd64:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout CakeOS packaging branch
+        uses: actions/checkout@v4
+        with:
+          path: cakeos
+      - name: Checkout pinned upstream llama.cpp
+        uses: actions/checkout@v4
+        with:
+          repository: ggml-org/llama.cpp
+          ref: 5266f24da75dc449bd56cbed7addb9c8e4a6a73e
+          path: llama-src
+          fetch-depth: 1
+      - name: Verify committed upstream MIT notice is exact
+        run: cmp cakeos/runtime/llamacpp/licenses/llama.cpp-LICENSE llama-src/LICENSE
+      - name: Build pinned CPU server for package
+        env:
+          LLAMA_SOURCE: ${{ github.workspace }}/llama-src
+          LLAMA_BUILD_DIR: ${{ github.workspace }}/llama-package-build
+          LLAMA_BUILD_PARALLEL: '2'
+        run: sh cakeos/runtime/llamacpp/build-cpu.sh
+      - name: Build model-free Debian package
+        env:
+          LLAMA_SERVER_BINARY: ${{ github.workspace }}/llama-package-build/bin/llama-server
+          HAVEN_PACKAGE_OUTPUT_DIR: ${{ github.workspace }}/package-out
+        run: sh cakeos/packaging/llamacpp/build-deb.sh
+      - name: Inspect package without installing it
+        shell: bash
+        run: |
+          deb=$(find package-out -maxdepth 1 -type f -name '*.deb' -print -quit)
+          test -n "$deb"
+          test "$(dpkg-deb --field "$deb" Package)" = 'haven-llamacpp-runtime'
+          test "$(dpkg-deb --field "$deb" Architecture)" = 'amd64'
+          dpkg-deb --contents "$deb" | tee package-out/contents.txt
+          if grep -E '/models/|\.gguf($| )' package-out/contents.txt; then
+            echo 'Package contains forbidden model data.' >&2
+            exit 1
+          fi
+          mkdir extracted
+          dpkg-deb --extract "$deb" extracted
+          cmp cakeos/runtime/llamacpp/licenses/llama.cpp-LICENSE extracted/usr/share/doc/haven-llamacpp-runtime/llama.cpp-LICENSE
+          python3 -m compileall -q extracted/usr/lib/haven/inference
+          extracted/usr/lib/haven/llama.cpp/llama-server --version
+          cat "$deb.sha256"
+      - name: Upload package evidence artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: haven-llamacpp-runtime-amd64
+          path: |
+            package-out/*.deb
+            package-out/*.sha256
+            package-out/contents.txt
+          if-no-files-found: error
+          retention-days: 14
