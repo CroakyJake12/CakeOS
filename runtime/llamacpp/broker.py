@@ -23,6 +23,8 @@ import urllib.parse
 from dataclasses import dataclass
 from typing import Any
 
+from gguf import GgufValidationError, read_gguf_version
+
 RUNTIME_DIR = pathlib.Path(os.environ.get("XDG_RUNTIME_DIR", "/tmp")) / "haven"
 DATA_HOME = pathlib.Path(os.environ.get("XDG_DATA_HOME", pathlib.Path.home() / ".local/share")) / "haven"
 MODEL_ROOT = DATA_HOME / "models"
@@ -30,6 +32,7 @@ MANIFEST_ROOT = MODEL_ROOT / "manifests"
 BLOB_ROOT = MODEL_ROOT / "blobs" / "sha256"
 BROKER_SOCKET = pathlib.Path(os.environ.get("HAVEN_INFERENCE_SOCKET", RUNTIME_DIR / "inference.sock"))
 WORKER_SOCKET = pathlib.Path(os.environ.get("HAVEN_LLAMA_WORKER_SOCKET", RUNTIME_DIR / "llamacpp-worker.sock"))
+WORKER_HOME = RUNTIME_DIR / "worker-home"
 LLAMA_SERVER = pathlib.Path(os.environ.get("HAVEN_LLAMA_SERVER", "/usr/lib/haven/llama.cpp/llama-server"))
 START_TIMEOUT_SECONDS = float(os.environ.get("HAVEN_LLAMA_START_TIMEOUT", "30"))
 
@@ -82,6 +85,9 @@ def load_manifests() -> dict[str, ModelManifest]:
         model_id = str(raw["id"])
         if not model_id or model_id in result:
             raise BrokerError(f"{path.name}: invalid or duplicate model id")
+        gguf_versions = tuple(int(v) for v in raw["ggufVersions"])
+        if not gguf_versions or any(v not in (2, 3) for v in gguf_versions):
+            raise BrokerError(f"{path.name}: Slice 0 manifests may declare only GGUF versions 2 and 3")
         result[model_id] = ModelManifest(
             model_id=model_id,
             display_name=str(raw["displayName"]),
@@ -90,7 +96,7 @@ def load_manifests() -> dict[str, ModelManifest]:
             relative_blob=str(raw["blob"]),
             license_id=str(raw["license"]),
             source=str(raw["source"]),
-            gguf_versions=tuple(int(v) for v in raw["ggufVersions"]),
+            gguf_versions=gguf_versions,
         )
     return result
 
@@ -102,6 +108,12 @@ def verify_blob(manifest: ModelManifest) -> pathlib.Path:
     stat = path.stat()
     if stat.st_size != manifest.size:
         raise BrokerError("model size does not match its manifest")
+    try:
+        version = read_gguf_version(path)
+    except GgufValidationError as exc:
+        raise BrokerError(str(exc)) from exc
+    if version not in manifest.gguf_versions:
+        raise BrokerError(f"GGUF version {version} is not allowed by this model manifest")
     digest = hashlib.sha256()
     with path.open("rb") as handle:
         for chunk in iter(lambda: handle.read(1024 * 1024), b""):
@@ -148,6 +160,7 @@ class Worker:
             if not LLAMA_SERVER.is_file():
                 raise BrokerError(f"llama-server is unavailable at {LLAMA_SERVER}")
             WORKER_SOCKET.unlink(missing_ok=True)
+            WORKER_HOME.mkdir(mode=0o700, parents=True, exist_ok=True)
             args = [
                 str(LLAMA_SERVER),
                 "--model", str(model_path),
@@ -156,7 +169,10 @@ class Worker:
                 "--parallel", "1",
             ]
             env = os.environ.copy()
-            env["HOME"] = str(DATA_HOME / "runtime-home")
+            env["HOME"] = str(WORKER_HOME)
+            env.pop("HTTP_PROXY", None)
+            env.pop("HTTPS_PROXY", None)
+            env.pop("ALL_PROXY", None)
             self._process = subprocess.Popen(
                 args,
                 stdin=subprocess.DEVNULL,
@@ -357,7 +373,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
 
 def main() -> int:
     RUNTIME_DIR.mkdir(mode=0o700, parents=True, exist_ok=True)
-    (DATA_HOME / "runtime-home").mkdir(mode=0o700, parents=True, exist_ok=True)
+    WORKER_HOME.mkdir(mode=0o700, parents=True, exist_ok=True)
     server = ThreadingUnixServer(str(BROKER_SOCKET), Handler)
     try:
         server.serve_forever(poll_interval=0.25)
