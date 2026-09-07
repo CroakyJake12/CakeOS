@@ -205,6 +205,11 @@ class UnixHTTPConnection(http.client.HTTPConnection):
         sock.connect(self.unix_path)
         self.sock = sock
 
+    def duplicate_transport(self) -> socket.socket:
+        if self.sock is None:
+            raise BrokerError("cannot duplicate an unconnected worker transport")
+        return self.sock.dup()
+
     def abort(self) -> None:
         sock = self.sock
         if sock is not None:
@@ -363,6 +368,7 @@ class Worker:
 @dataclass
 class ActiveRequest:
     connection: UnixHTTPConnection | None
+    cancellation_transport: socket.socket | None = None
     cancelled: threading.Event = field(default_factory=threading.Event)
     _lock: threading.Lock = field(default_factory=threading.Lock, repr=False)
 
@@ -370,12 +376,22 @@ class ActiveRequest:
         self.cancelled.set()
         with self._lock:
             connection = self.connection
+            cancellation_transport = self.cancellation_transport
+        if cancellation_transport is not None:
+            try:
+                cancellation_transport.shutdown(socket.SHUT_RDWR)
+            except OSError:
+                pass
         if connection is not None:
             connection.abort()
 
     def detach(self) -> None:
         with self._lock:
+            cancellation_transport = self.cancellation_transport
+            self.cancellation_transport = None
             self.connection = None
+        if cancellation_transport is not None:
+            cancellation_transport.close()
 
 
 WORKER = Worker()
@@ -525,9 +541,12 @@ class Handler(http.server.BaseHTTPRequestHandler):
         payload["stream"] = True
 
         conn = UnixHTTPConnection(WORKER_SOCKET)
-        active = ActiveRequest(conn)
+        conn.connect()
+        active = ActiveRequest(conn, conn.duplicate_transport())
         with ACTIVE_LOCK:
             if request_id in ACTIVE_REQUESTS:
+                active.detach()
+                conn.close()
                 raise BrokerError("request_id is already active")
             ACTIVE_REQUESTS[request_id] = active
 
