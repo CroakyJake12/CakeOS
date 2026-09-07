@@ -99,7 +99,7 @@ jobs:
             exit 1
           fi
 
-      - name: Run Canvas through HUI, draw pointer ink, and capture real window
+      - name: Run Canvas through HUI, zoom, pan, draw ink, and capture real window
         shell: bash
         run: |
           mkdir -p artifacts/canvas-rnote-hui
@@ -110,7 +110,7 @@ jobs:
             wm_pid=$!
             export CAKEOS_HUI_CANVAS_PREVIEW=1
             export CAKEOS_HUI_PREVIEW_SELF_TEST=1
-            export CAKEOS_HUI_PREVIEW_AUTO_EXIT_MS=12000
+            export CAKEOS_HUI_PREVIEW_AUTO_EXIT_MS=15000
             export LD_LIBRARY_PATH="$GITHUB_WORKSPACE/apps/canvas/rnote-poc/target/debug${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
             artifacts/hui-linux-host/publish/cakeos-hui-linux-preview > artifacts/canvas-rnote-hui/window.log 2>&1 &
             pid=$!
@@ -133,9 +133,22 @@ jobs:
               xdotool windowraise "$window_id" >/dev/null 2>&1 || true
               sleep 1
 
-              # The visible Rnote document is contained inside the HUI Image element.
-              # Drive a real X11 mouse gesture through Avalonia -> HUI document mapping
-              # -> managed ABI -> Rnote, then capture the refreshed HUI frame.
+              # HUI owns viewport state. Prove cursor-anchored wheel zoom first.
+              xdotool mousemove --window "$window_id" 480 260
+              xdotool click 4
+              xdotool click 4
+              sleep 0.25
+
+              # Prove a non-ink middle-button drag pans the HUI viewport.
+              xdotool mousemove --window "$window_id" 500 280
+              xdotool mousedown 2
+              xdotool mousemove --window "$window_id" 475 265
+              xdotool mousemove --window "$window_id" 450 245
+              xdotool mouseup 2
+              sleep 0.25
+
+              # Then prove primary-button ink is mapped through the changed viewport
+              # into Rnote document coordinates and refreshed through HUI.
               xdotool mousemove --window "$window_id" 420 220
               xdotool mousedown 1
               xdotool mousemove --window "$window_id" 450 245
@@ -170,6 +183,8 @@ jobs:
           cat artifacts/canvas-rnote-hui/x11-window-tree.txt 2>/dev/null || true
 
           grep -q 'CANVAS_RNOTE_HUI_RENDER_READY abi=1 format=svg coordinate=document' artifacts/canvas-rnote-hui/window.log
+          grep -q 'CANVAS_RNOTE_VIEWPORT_ZOOM' artifacts/canvas-rnote-hui/window.log
+          grep -q 'CANVAS_RNOTE_VIEWPORT_PAN_COMMITTED' artifacts/canvas-rnote-hui/window.log
           grep -q 'CANVAS_RNOTE_POINTER_STROKE_COMMITTED' artifacts/canvas-rnote-hui/window.log
           test -s artifacts/canvas-rnote-hui/window.png
           identify artifacts/canvas-rnote-hui/window.png | tee artifacts/canvas-rnote-hui/screenshot-info.txt
