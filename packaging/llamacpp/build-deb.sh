@@ -68,7 +68,7 @@ Section: utils
 Priority: optional
 Architecture: $ARCH
 Maintainer: CakeOS Project
-Depends: python3, libc6, libstdc++6, libgomp1
+Depends: python3, libc6, libstdc++6, libgcc-s1, libgomp1
 Installed-Size: $INSTALLED_SIZE
 Description: local llama.cpp inference runtime for Haven/CakeOS
  Haven-owned Unix-socket inference broker and model lifecycle tools with a

@@ -35,7 +35,7 @@ class PackagingTests(unittest.TestCase):
 
     def test_runtime_dependencies_cover_observed_cpu_binary_libraries(self) -> None:
         dependencies = set(self.manifest["runtimeDependencies"])
-        self.assertTrue({"python3", "libc6", "libstdc++6", "libgomp1"}.issubset(dependencies))
+        self.assertTrue({"python3", "libc6", "libstdc++6", "libgcc-s1", "libgomp1"}.issubset(dependencies))
 
     def test_builder_has_no_package_install_or_service_enable_step(self) -> None:
         builder = (REPOSITORY / "packaging/llamacpp/build-deb.sh").read_text(encoding="utf-8")
@@ -43,6 +43,7 @@ class PackagingTests(unittest.TestCase):
         self.assertNotIn("apt install", builder)
         self.assertNotIn("systemctl enable", builder)
         self.assertNotIn("systemctl start", builder)
+        self.assertIn("libgcc-s1", builder)
 
 
 if __name__ == "__main__":

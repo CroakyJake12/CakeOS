@@ -5,7 +5,7 @@
   "architecture": "amd64",
   "containsModels": false,
   "autoEnableUserService": false,
-  "runtimeDependencies": ["python3", "libc6", "libstdc++6", "libgomp1"],
+  "runtimeDependencies": ["python3", "libc6", "libstdc++6", "libgcc-s1", "libgomp1"],
   "upstream": {
     "repository": "https://github.com/ggml-org/llama.cpp.git",
     "tag": "v0.4.0",
