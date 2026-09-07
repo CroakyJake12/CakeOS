@@ -14,6 +14,17 @@ if(NOT LIBREOFFICEKIT_INCLUDE_DIR)
     message(FATAL_ERROR "LibreOfficeKit headers not found. Install libreofficekit-dev.")
 endif()
 
+find_package(nlohmann_json 3.2.0 REQUIRED)
+
+function(cakeos_enable_strict_warnings target)
+    target_compile_options(${target} PRIVATE
+        -Wall
+        -Wextra
+        -Wpedantic
+        -Werror
+    )
+endfunction()
+
 add_library(cakeos-present-engine STATIC
     src/engine.cpp
     src/semantic.cpp
@@ -27,31 +38,35 @@ target_include_directories(cakeos-present-engine
 )
 
 target_compile_definitions(cakeos-present-engine PRIVATE LOK_USE_UNSTABLE_API)
-
-target_compile_options(cakeos-present-engine PRIVATE
-    -Wall
-    -Wextra
-    -Wpedantic
-    -Werror
-)
-
 target_link_libraries(cakeos-present-engine PRIVATE ${CMAKE_DL_LIBS})
+cakeos_enable_strict_warnings(cakeos-present-engine)
+
+add_executable(cakeos-present-worker
+    src/worker.cpp
+)
+target_link_libraries(cakeos-present-worker PRIVATE
+    cakeos-present-engine
+    nlohmann_json::nlohmann_json
+)
+cakeos_enable_strict_warnings(cakeos-present-worker)
 
 add_executable(cakeos-present-engine-smoke
     src/main.cpp
 )
-
 target_include_directories(cakeos-present-engine-smoke PRIVATE ${LIBREOFFICEKIT_INCLUDE_DIR})
 target_link_libraries(cakeos-present-engine-smoke PRIVATE cakeos-present-engine)
+cakeos_enable_strict_warnings(cakeos-present-engine-smoke)
 
 add_executable(cakeos-present-engine-lifecycle-smoke
     tests/lifecycle_smoke.cpp
 )
 target_link_libraries(cakeos-present-engine-lifecycle-smoke PRIVATE cakeos-present-engine)
+cakeos_enable_strict_warnings(cakeos-present-engine-lifecycle-smoke)
 
 enable_testing()
 add_executable(cakeos-present-engine-contract-tests
     tests/contract_tests.cpp
 )
 target_link_libraries(cakeos-present-engine-contract-tests PRIVATE cakeos-present-engine)
+cakeos_enable_strict_warnings(cakeos-present-engine-contract-tests)
 add_test(NAME present-engine-contract COMMAND cakeos-present-engine-contract-tests)
