@@ -114,15 +114,38 @@ jobs:
           print(f'unique_rgb_values={len(pixels)}')
           PY
 
-      - name: Prove semantic slide lifecycle and persistence
+      - name: Prove semantic lifecycle, persistence, and PPTX round trip
         run: |
-          rm -f /tmp/cakeos-present-mutated.odp
+          rm -f \
+            /tmp/cakeos-present-mutated.odp \
+            /tmp/cakeos-present-mutated.pptx \
+            /tmp/cakeos-present-pptx.ppm
           build/present-engine/cakeos-present-engine-lifecycle-smoke \
             /tmp/cakeos-present-normalized/cakeos-present-source.odp \
-            /tmp/cakeos-present-mutated.odp | tee /tmp/present-lifecycle.log
+            /tmp/cakeos-present-mutated.odp \
+            /tmp/cakeos-present-mutated.pptx | tee /tmp/present-lifecycle.log
           test -s /tmp/cakeos-present-mutated.odp
+          test -s /tmp/cakeos-present-mutated.pptx
           grep -q '^semantic_lifecycle=passed$' /tmp/present-lifecycle.log
           grep -q '^saved_slides=2$' /tmp/present-lifecycle.log
+          grep -q '^pptx_roundtrip=passed$' /tmp/present-lifecycle.log
+
+          build/present-engine/cakeos-present-engine-smoke \
+            /tmp/cakeos-present-mutated.pptx \
+            /tmp/cakeos-present-pptx.ppm | tee /tmp/present-pptx.log
+          test -s /tmp/cakeos-present-pptx.ppm
+          grep -q '^slides=2$' /tmp/present-pptx.log
+          grep -q '^pixels=1280x720$' /tmp/present-pptx.log
+          python3 - <<'PY'
+          from pathlib import Path
+
+          data = Path('/tmp/cakeos-present-pptx.ppm').read_bytes()
+          _, body = data.split(b'\n255\n', 1)
+          pixels = {body[i:i+3] for i in range(0, len(body), 3)}
+          if len(pixels) < 2:
+              raise SystemExit('PPTX round-trip render is a uniform image')
+          print(f'pptx_unique_rgb_values={len(pixels)}')
+          PY
 
       - name: Record runtime versions
         if: always()
