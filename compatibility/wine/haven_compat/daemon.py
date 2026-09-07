@@ -27,6 +27,13 @@ class RequestError(ValueError):
         self.message = message
 
 
+def _effective_uid() -> int:
+    getter = getattr(os, "geteuid", None)
+    if getter is None:
+        raise DaemonError("compatibility daemon requires Linux/POSIX effective-UID support")
+    return int(getter())
+
+
 def default_socket_path() -> Path:
     runtime_dir = os.environ.get("XDG_RUNTIME_DIR")
     if not runtime_dir:
@@ -113,7 +120,8 @@ def serve_connection(connection: socket.socket, broker: CompatibilityBroker) -> 
 
 
 def serve_forever(socket_path: Path | None = None, broker: CompatibilityBroker | None = None) -> None:
-    if os.geteuid() == 0:
+    uid = _effective_uid()
+    if uid == 0:
         raise DaemonError("compatibility daemon must run as an unprivileged user")
     if not hasattr(socket, "SO_PEERCRED"):
         raise DaemonError("same-user peer verification requires Linux SO_PEERCRED")
@@ -164,7 +172,7 @@ def _verify_peer(connection: socket.socket) -> None:
         raise DaemonError("SO_PEERCRED is unavailable")
     credentials = connection.getsockopt(socket.SOL_SOCKET, socket.SO_PEERCRED, struct.calcsize("3i"))
     _pid, uid, _gid = struct.unpack("3i", credentials)
-    if uid != os.geteuid():
+    if uid != _effective_uid():
         raise DaemonError("compatibility daemon rejected a different-user client")
 
 
@@ -209,6 +217,7 @@ def _read_exact(connection: socket.socket, size: int) -> bytes:
 
 
 def _prepare_socket_parent(parent: Path) -> None:
+    uid = _effective_uid()
     runtime_dir_value = os.environ.get("XDG_RUNTIME_DIR")
     if not runtime_dir_value:
         raise DaemonError("XDG_RUNTIME_DIR is required")
@@ -220,7 +229,7 @@ def _prepare_socket_parent(parent: Path) -> None:
         raise DaemonError("XDG_RUNTIME_DIR is unavailable") from exc
     if runtime_dir.is_symlink() or not runtime_dir.is_dir():
         raise DaemonError("XDG_RUNTIME_DIR must be a real directory")
-    if runtime_stat.st_uid != os.geteuid():
+    if runtime_stat.st_uid != uid:
         raise DaemonError("XDG_RUNTIME_DIR must be owned by the current user")
 
     parent.mkdir(parents=True, exist_ok=True, mode=0o700)
@@ -233,25 +242,27 @@ def _prepare_socket_parent(parent: Path) -> None:
     if runtime_resolved != parent_resolved and runtime_resolved not in parent_resolved.parents:
         raise DaemonError("compatibility socket must remain beneath XDG_RUNTIME_DIR")
     parent_stat = parent.stat()
-    if parent_stat.st_uid != os.geteuid():
+    if parent_stat.st_uid != uid:
         raise DaemonError("compatibility socket parent must be owned by the current user")
     os.chmod(parent, 0o700)
 
 
 def _remove_stale_socket(path: Path) -> None:
+    uid = _effective_uid()
     try:
         metadata = path.lstat()
     except FileNotFoundError:
         return
-    if metadata.st_uid != os.geteuid() or not stat.S_ISSOCK(metadata.st_mode):
+    if metadata.st_uid != uid or not stat.S_ISSOCK(metadata.st_mode):
         raise DaemonError("refusing to replace a non-owned or non-socket compatibility path")
     path.unlink()
 
 
 def _remove_owned_socket(path: Path) -> None:
+    uid = _effective_uid()
     try:
         metadata = path.lstat()
     except FileNotFoundError:
         return
-    if metadata.st_uid == os.geteuid() and stat.S_ISSOCK(metadata.st_mode):
+    if metadata.st_uid == uid and stat.S_ISSOCK(metadata.st_mode):
         path.unlink()
