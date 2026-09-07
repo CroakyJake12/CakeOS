@@ -15,7 +15,7 @@ use rnote_engine::engine::EngineSnapshot;
 use rnote_engine::pens::PenMode;
 use rnote_engine::Engine;
 
-/// One normalized CakeOS/HUI pointer sample.
+/// One normalized CakeOS/HUI pointer sample in Canvas document coordinates.
 ///
 /// Tilt remains in the CakeOS boundary because Rnote 0.14.2 only accepts position
 /// and pressure in its core `Element` type. Keeping tilt here prevents a lossy
@@ -42,6 +42,54 @@ impl CanvasPointerSample {
 
     fn rnote_element(self) -> Element {
         Element::new(Vector2::new(self.x, self.y), self.pressure)
+    }
+}
+
+/// Coordinate space used by all stable Canvas bridge geometry in this PoC.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CanvasCoordinateSpace {
+    Document,
+}
+
+/// Renderer-neutral format exposed to HUI.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CanvasRenderFormat {
+    Svg,
+}
+
+impl CanvasRenderFormat {
+    pub const fn mime_type(self) -> &'static str {
+        match self {
+            Self::Svg => "image/svg+xml",
+        }
+    }
+}
+
+/// Bounds of the Rnote document represented by a render frame.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct CanvasDocumentBounds {
+    pub x: f64,
+    pub y: f64,
+    pub width: f64,
+    pub height: f64,
+}
+
+/// Stable renderer-neutral payload for HUI composition.
+///
+/// HUI owns viewport pan/zoom and surface-to-document transforms. The bytes are
+/// intentionally whole-document SVG for this first slice; dirty-region/tile
+/// output is a later performance boundary.
+#[derive(Debug, Clone, PartialEq)]
+pub struct CanvasRenderFrame {
+    pub format: CanvasRenderFormat,
+    pub coordinate_space: CanvasCoordinateSpace,
+    pub bounds: CanvasDocumentBounds,
+    pub bytes: Vec<u8>,
+}
+
+impl CanvasRenderFrame {
+    pub const fn mime_type(&self) -> &'static str {
+        self.format.mime_type()
     }
 }
 
@@ -135,6 +183,16 @@ impl HeadlessCanvasEngine {
         self.end_stroke(*samples.last().expect("length checked above"))
     }
 
+    /// Current document-space bounds carried alongside renderer-neutral output.
+    pub fn document_bounds(&self) -> CanvasDocumentBounds {
+        CanvasDocumentBounds {
+            x: self.engine.document.x,
+            y: self.engine.document.y,
+            width: self.engine.document.width,
+            height: self.engine.document.height,
+        }
+    }
+
     /// Produce renderer-neutral SVG bytes using the engine export path.
     /// This is the first HUI-consumable rendering proof; viewport tile exposure
     /// remains a later optimization rather than importing GTK/GSK into HUI.
@@ -149,6 +207,19 @@ impl HeadlessCanvasEngine {
             .await
             .context("Rnote SVG export channel closed")?
             .context("Rnote SVG export failed")
+    }
+
+    /// Produce the stable renderer-neutral frame consumed by the future HUI
+    /// Canvas surface. It deliberately contains no GTK/GSK/Rnote UI types.
+    pub async fn render_frame(&self) -> Result<CanvasRenderFrame> {
+        let bounds = self.document_bounds();
+        let bytes = self.export_svg().await?;
+        Ok(CanvasRenderFrame {
+            format: CanvasRenderFormat::Svg,
+            coordinate_space: CanvasCoordinateSpace::Document,
+            bounds,
+            bytes,
+        })
     }
 
     /// Save a native Rnote payload for compatibility/interchange testing.
@@ -222,6 +293,23 @@ mod tests {
         canvas.update_stroke(samples[2]).unwrap();
         canvas.end_stroke(samples[3]).unwrap();
         assert!(!canvas.stroke_active());
+    }
+
+    #[test]
+    fn renderer_neutral_frame_carries_document_metadata() {
+        block_on(async {
+            let mut canvas = HeadlessCanvasEngine::new();
+            canvas.draw_stroke(&sample_stroke()).unwrap();
+
+            let frame = canvas.render_frame().await.unwrap();
+            assert_eq!(frame.format, CanvasRenderFormat::Svg);
+            assert_eq!(frame.coordinate_space, CanvasCoordinateSpace::Document);
+            assert_eq!(frame.mime_type(), "image/svg+xml");
+            assert!(frame.bounds.width > 0.0);
+            assert!(frame.bounds.height > 0.0);
+            assert!(std::str::from_utf8(&frame.bytes).unwrap().contains("<svg"));
+            assert!(frame.bytes.len() > 200, "render frame unexpectedly empty");
+        });
     }
 
     #[test]
