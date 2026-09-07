@@ -17,6 +17,10 @@ def audit_environment(runtime_root: Path | None = None) -> dict[str, Any]:
         "wine": shutil.which("wine"),
         "vulkaninfo": shutil.which("vulkaninfo"),
         "wpctl": shutil.which("wpctl"),
+        "systemd-run": shutil.which("systemd-run"),
+        "systemctl": shutil.which("systemctl"),
+        "journalctl": shutil.which("journalctl"),
+        "env": shutil.which("env"),
         "podman": shutil.which("podman"),
         "docker": shutil.which("docker"),
         "freerdp": _first_command("wlfreerdp3", "xfreerdp3", "wlfreerdp", "xfreerdp"),
@@ -27,6 +31,7 @@ def audit_environment(runtime_root: Path | None = None) -> dict[str, Any]:
     wayland_socket = Path(runtime_dir) / wayland_display if runtime_dir and wayland_display else None
     render_nodes = _render_nodes()
     managed_runtimes = _managed_runtimes(runtime_root)
+    systemd_user_reachable = _systemd_user_reachable(commands["systemctl"])
 
     facts: dict[str, Any] = {
         "schemaVersion": 1,
@@ -39,6 +44,7 @@ def audit_environment(runtime_root: Path | None = None) -> dict[str, Any]:
         "versions": {
             "bwrap": _command_version(commands["bwrap"], "--version"),
             "wine": _command_version(commands["wine"], "--version"),
+            "systemd": _command_version(commands["systemctl"], "--version"),
             "podman": _command_version(commands["podman"], "--version"),
             "docker": _command_version(commands["docker"], "--version"),
             "freerdp": _command_version(commands["freerdp"], "/version"),
@@ -50,6 +56,7 @@ def audit_environment(runtime_root: Path | None = None) -> dict[str, Any]:
             "waylandSocketExists": bool(wayland_socket and wayland_socket.exists()),
             "display": os.environ.get("DISPLAY"),
             "pipeWireSocketExists": bool(runtime_dir and (Path(runtime_dir) / "pipewire-0").exists()),
+            "systemdUserReachable": systemd_user_reachable,
         },
         "devices": {
             "kvmExists": Path("/dev/kvm").exists(),
@@ -86,6 +93,10 @@ def evaluate_preflight(facts: dict[str, Any]) -> dict[str, Any]:
         wine_missing.append("wayland-socket")
     if not runtimes:
         wine_missing.append("managed-wine-runtime")
+    if not all(commands.get(name) for name in ("systemd-run", "systemctl", "journalctl", "env")):
+        wine_missing.append("systemd-user-supervisor-tools")
+    elif not session.get("systemdUserReachable"):
+        wine_missing.append("systemd-user-manager")
 
     winboat_missing: list[str] = []
     if system != "linux":
@@ -138,6 +149,23 @@ def _command_version(binary: str | None, argument: str) -> str | None:
         return None
     first_line = completed.stdout.strip().splitlines()
     return first_line[0] if first_line else None
+
+
+def _systemd_user_reachable(systemctl: str | None) -> bool:
+    if not systemctl:
+        return False
+    try:
+        completed = subprocess.run(
+            [systemctl, "--user", "show-environment"],
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            timeout=3,
+            check=False,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return False
+    return completed.returncode == 0
 
 
 def _managed_runtimes(runtime_root: Path) -> list[dict[str, Any]]:
