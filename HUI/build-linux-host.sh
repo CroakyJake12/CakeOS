@@ -3,6 +3,8 @@ set -euo pipefail
 
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 bash "$root/HUI/stage-donor.sh"
+python3 "$root/HUI/patches/apply-linux-migration-patches.py"
+bash "$root/tests/verify-hui-preview.sh"
 
 out="$root/artifacts/hui-linux-host/publish"
 rm -rf "$out"
