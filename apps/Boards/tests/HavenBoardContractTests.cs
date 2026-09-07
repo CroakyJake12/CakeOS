@@ -1,4 +1,5 @@
 using CakeOS.Apps.Boards.Contract;
+using Xunit;
 
 namespace CakeOS.Apps.Boards.Tests;
 
@@ -24,7 +25,7 @@ public sealed class HavenBoardReducerTests
             snapshot,
             AppFlowyBoardEventAdapter.MoveCardWithinGroup("todo", 0, 1));
 
-        Assert.Equal(["b", "a", "c"], updated.Groups[0].Cards.Select(card => card.Id).ToArray());
+        Assert.Equal(new[] { "b", "a", "c" }, updated.Groups[0].Cards.Select(card => card.Id).ToArray());
         Assert.Equal(8, updated.Version);
     }
 
@@ -45,21 +46,31 @@ public sealed class HavenBoardReducerTests
             AppFlowyBoardEventAdapter.MoveCardBetweenGroups("todo", 0, "done", 1));
 
         Assert.Empty(updated.Groups[0].Cards);
-        Assert.Equal(["b", "a"], updated.Groups[1].Cards.Select(card => card.Id).ToArray());
+        Assert.Equal(new[] { "b", "a" }, updated.Groups[1].Cards.Select(card => card.Id).ToArray());
     }
 
     [Fact]
     public void Move_group_reorders_without_changing_card_identity()
     {
         var snapshot = HavenBoardSnapshot.CreateDefault();
-        var cardIds = snapshot.Groups.SelectMany(group => group.Cards).Select(card => card.Id).Order().ToArray();
+        var cardIds = snapshot.Groups
+            .SelectMany(group => group.Cards)
+            .Select(card => card.Id)
+            .OrderBy(id => id, StringComparer.Ordinal)
+            .ToArray();
 
         var updated = HavenBoardReducer.Apply(snapshot, AppFlowyBoardEventAdapter.MoveGroup(0, 2));
 
         Assert.Equal("doing", updated.Groups[0].Id);
         Assert.Equal("done", updated.Groups[1].Id);
         Assert.Equal("todo", updated.Groups[2].Id);
-        Assert.Equal(cardIds, updated.Groups.SelectMany(group => group.Cards).Select(card => card.Id).Order().ToArray());
+        Assert.Equal(
+            cardIds,
+            updated.Groups
+                .SelectMany(group => group.Cards)
+                .Select(card => card.Id)
+                .OrderBy(id => id, StringComparer.Ordinal)
+                .ToArray());
     }
 
     [Fact]
@@ -105,7 +116,7 @@ public sealed class JsonFileHavenBoardStoreTests
             var loaded = await store.LoadAsync("board-main");
 
             Assert.NotNull(loaded);
-            Assert.Equal(snapshot, loaded);
+            AssertSnapshotsEquivalent(snapshot, loaded);
         });
     }
 
@@ -149,9 +160,41 @@ public sealed class JsonFileHavenBoardStoreTests
             var reloaded = await store.LoadAsync("board-main");
 
             Assert.NotNull(reloaded);
-            Assert.Equal(updated, reloaded);
+            AssertSnapshotsEquivalent(updated, reloaded);
             Assert.Contains(reloaded.Groups[0].Cards, card => card.Id == "card-4" && card.Title == "Persist me");
         });
+    }
+
+    private static void AssertSnapshotsEquivalent(HavenBoardSnapshot expected, HavenBoardSnapshot actual)
+    {
+        Assert.Equal(expected.Id, actual.Id);
+        Assert.Equal(expected.Title, actual.Title);
+        Assert.Equal(expected.Version, actual.Version);
+        Assert.Equal(expected.Groups.Count, actual.Groups.Count);
+
+        for (var groupIndex = 0; groupIndex < expected.Groups.Count; groupIndex++)
+        {
+            var expectedGroup = expected.Groups[groupIndex];
+            var actualGroup = actual.Groups[groupIndex];
+            Assert.Equal(expectedGroup.Id, actualGroup.Id);
+            Assert.Equal(expectedGroup.Title, actualGroup.Title);
+            Assert.Equal(expectedGroup.Cards.Count, actualGroup.Cards.Count);
+
+            for (var cardIndex = 0; cardIndex < expectedGroup.Cards.Count; cardIndex++)
+            {
+                var expectedCard = expectedGroup.Cards[cardIndex];
+                var actualCard = actualGroup.Cards[cardIndex];
+                Assert.Equal(expectedCard.Id, actualCard.Id);
+                Assert.Equal(expectedCard.Title, actualCard.Title);
+                Assert.Equal(expectedCard.ParentCardId, actualCard.ParentCardId);
+
+                var expectedAttachments = expectedCard.Attachments ?? [];
+                var actualAttachments = actualCard.Attachments ?? [];
+                Assert.Equal(expectedAttachments.Count, actualAttachments.Count);
+                for (var attachmentIndex = 0; attachmentIndex < expectedAttachments.Count; attachmentIndex++)
+                    Assert.Equal(expectedAttachments[attachmentIndex], actualAttachments[attachmentIndex]);
+            }
+        }
     }
 
     private static async Task WithStoreAsync(Func<JsonFileHavenBoardStore, string, Task> test)
