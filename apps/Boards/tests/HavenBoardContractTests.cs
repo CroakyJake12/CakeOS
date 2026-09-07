@@ -86,6 +86,98 @@ public sealed class HavenBoardReducerTests
     }
 
     [Fact]
+    public void Card_parent_can_be_set_across_groups_and_cleared()
+    {
+        var snapshot = HavenBoardSnapshot.CreateDefault();
+
+        var nested = HavenBoardReducer.Apply(snapshot, new SetCardParentCommand("card-3", "card-1"));
+        Assert.Equal("card-1", FindCard(nested, "card-3").ParentCardId);
+
+        var cleared = HavenBoardReducer.Apply(nested, new SetCardParentCommand("card-3", null));
+        Assert.Null(FindCard(cleared, "card-3").ParentCardId);
+    }
+
+    [Fact]
+    public void Missing_and_self_parent_assignments_are_rejected()
+    {
+        var snapshot = HavenBoardSnapshot.CreateDefault();
+
+        var missing = Assert.Throws<InvalidOperationException>(() =>
+            HavenBoardReducer.Apply(snapshot, new SetCardParentCommand("card-3", "missing-card")));
+        Assert.Contains("does not exist", missing.Message, StringComparison.OrdinalIgnoreCase);
+
+        var self = Assert.Throws<InvalidOperationException>(() =>
+            HavenBoardReducer.Apply(snapshot, new SetCardParentCommand("card-3", "card-3")));
+        Assert.Contains("own parent", self.Message, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void Parent_cycle_is_rejected_without_publishing_mutated_snapshot()
+    {
+        var snapshot = HavenBoardSnapshot.CreateDefault();
+        var first = HavenBoardReducer.Apply(snapshot, new SetCardParentCommand("card-2", "card-1"));
+        var second = HavenBoardReducer.Apply(first, new SetCardParentCommand("card-3", "card-2"));
+
+        var error = Assert.Throws<InvalidOperationException>(() =>
+            HavenBoardReducer.Apply(second, new SetCardParentCommand("card-1", "card-3")));
+
+        Assert.Contains("cycle", error.Message, StringComparison.OrdinalIgnoreCase);
+        Assert.Null(FindCard(second, "card-1").ParentCardId);
+    }
+
+    [Fact]
+    public void Moving_nested_card_between_groups_preserves_parent_identity()
+    {
+        var nested = HavenBoardReducer.Apply(
+            HavenBoardSnapshot.CreateDefault(),
+            new SetCardParentCommand("card-3", "card-1"));
+
+        var moved = HavenBoardReducer.Apply(
+            nested,
+            new MoveCardCommand("done", 0, "doing", 1));
+
+        var card = FindCard(moved, "card-3");
+        Assert.Equal("card-1", card.ParentCardId);
+        Assert.Equal(new[] { "card-2", "card-3" }, moved.Groups.Single(group => group.Id == "doing").Cards.Select(candidate => candidate.Id));
+    }
+
+    [Fact]
+    public void Snapshot_validator_rejects_missing_parent_existing_cycle_and_duplicate_ids()
+    {
+        var missingParent = new HavenBoardSnapshot(
+            "board-main",
+            "Invalid",
+            1,
+            [new HavenBoardGroup("todo", "To do", [new HavenBoardCard("child", "Child", "missing")])]);
+        Assert.Throws<InvalidOperationException>(() => HavenBoardReducer.Validate(missingParent));
+
+        var cycle = new HavenBoardSnapshot(
+            "board-main",
+            "Invalid",
+            1,
+            [new HavenBoardGroup(
+                "todo",
+                "To do",
+                [
+                    new HavenBoardCard("a", "A", "b"),
+                    new HavenBoardCard("b", "B", "a")
+                ])]);
+        var cycleError = Assert.Throws<InvalidOperationException>(() => HavenBoardReducer.Validate(cycle));
+        Assert.Contains("cycle", cycleError.Message, StringComparison.OrdinalIgnoreCase);
+
+        var duplicate = new HavenBoardSnapshot(
+            "board-main",
+            "Invalid",
+            1,
+            [
+                new HavenBoardGroup("todo", "To do", [new HavenBoardCard("same", "One")]),
+                new HavenBoardGroup("done", "Done", [new HavenBoardCard("same", "Two")])
+            ]);
+        var duplicateError = Assert.Throws<InvalidOperationException>(() => HavenBoardReducer.Validate(duplicate));
+        Assert.Contains("duplicated", duplicateError.Message, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
     public void Attachment_metadata_is_added_and_removed_through_typed_commands()
     {
         var snapshot = HavenBoardSnapshot.CreateDefault();
@@ -102,6 +194,9 @@ public sealed class HavenBoardReducerTests
         var reloadedCard = removed.Groups[0].Cards.Single(candidate => candidate.Id == "card-1");
         Assert.Empty(reloadedCard.Attachments!);
     }
+
+    private static HavenBoardCard FindCard(HavenBoardSnapshot snapshot, string cardId) =>
+        snapshot.Groups.SelectMany(group => group.Cards).Single(card => card.Id == cardId);
 }
 
 public sealed class JsonFileHavenBoardStoreTests
@@ -118,23 +213,28 @@ public sealed class JsonFileHavenBoardStoreTests
                 [new HavenBoardGroup(
                     "todo",
                     "To do",
-                    [new HavenBoardCard(
-                        "child",
-                        "Nested",
-                        ParentCardId: "parent",
-                        Attachments:
-                        [
-                            new HavenBoardAttachment(
-                                "attachment-1",
-                                "brief.txt",
-                                "sha256:" + new string('a', 64),
-                                HavenBoardAttachmentAvailability.Available)
-                        ])])]);
+                    [
+                        new HavenBoardCard("parent", "Parent"),
+                        new HavenBoardCard(
+                            "child",
+                            "Nested",
+                            ParentCardId: "parent",
+                            Attachments:
+                            [
+                                new HavenBoardAttachment(
+                                    "attachment-1",
+                                    "brief.txt",
+                                    "sha256:" + new string('a', 64),
+                                    HavenBoardAttachmentAvailability.Available)
+                            ])
+                    ])]);
 
+            HavenBoardReducer.Validate(snapshot);
             await store.SaveAsync(snapshot);
             var loaded = await store.LoadAsync("board-main");
 
             Assert.NotNull(loaded);
+            HavenBoardReducer.Validate(loaded);
             AssertSnapshotsEquivalent(snapshot, loaded);
         });
     }
