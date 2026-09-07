@@ -1,0 +1,25 @@
+{
+  "schemaVersion": 1,
+  "repository": "https://github.com/ggml-org/llama.cpp.git",
+  "tag": "v0.4.0",
+  "commit": "5266f24da75dc449bd56cbed7addb9c8e4a6a73e",
+  "tagObject": "5ac847190e979e0da7c4a21806630805f396d487",
+  "license": "MIT",
+  "build": {
+    "baseline": "linux-amd64-cpu",
+    "cmake": [
+      "-DCMAKE_BUILD_TYPE=Release",
+      "-DLLAMA_BUILD_SERVER=ON",
+      "-DLLAMA_BUILD_EXAMPLES=OFF",
+      "-DLLAMA_BUILD_TESTS=ON",
+      "-DGGML_CPU=ON",
+      "-DGGML_RPC=OFF",
+      "-DGGML_CUDA=OFF",
+      "-DGGML_HIP=OFF",
+      "-DGGML_VULKAN=OFF",
+      "-DGGML_SYCL=OFF",
+      "-DGGML_OPENCL=OFF",
+      "-DGGML_OPENVINO=OFF"
+    ]
+  }
+}
