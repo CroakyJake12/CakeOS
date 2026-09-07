@@ -86,6 +86,18 @@ int toLokMouseType(MouseEventType type)
     throw std::invalid_argument("unsupported mouse event type");
 }
 
+PixelFormat toPixelFormat(int tileMode)
+{
+    switch (tileMode) {
+    case LOK_TILEMODE_RGBA:
+        return PixelFormat::Rgba;
+    case LOK_TILEMODE_BGRA:
+        return PixelFormat::Bgra;
+    default:
+        throw std::runtime_error("LibreOfficeKit returned an unsupported tile format");
+    }
+}
+
 } // namespace
 
 struct PresentEngine::Impl {
@@ -115,7 +127,7 @@ struct PresentEngine::Impl {
         office.reset();
         if (ownsProfile) {
             std::error_code ignored;
-            const auto prefix = std::string("file://");
+            constexpr std::string_view prefix{"file://"};
             if (options.userProfileUrl.rfind(prefix, 0) == 0 &&
                 options.userProfileUrl.find('%') == std::string::npos) {
                 std::filesystem::remove_all(options.userProfileUrl.substr(prefix.size()), ignored);
@@ -246,6 +258,17 @@ void PresentEngine::setCurrentSlide(int slideIndex)
     impl_->document->setPart(slideIndex);
 }
 
+DocumentExtent PresentEngine::documentExtent() const
+{
+    impl_->requireDocument();
+    DocumentExtent extent;
+    impl_->document->getDocumentSize(&extent.widthTwips, &extent.heightTwips);
+    if (extent.widthTwips <= 0 || extent.heightTwips <= 0) {
+        throw std::runtime_error("LibreOfficeKit returned an invalid presentation extent");
+    }
+    return extent;
+}
+
 RenderedTile PresentEngine::renderTile(const TileRequest& request)
 {
     impl_->requireSlideIndex(request.slideIndex);
@@ -256,7 +279,8 @@ RenderedTile PresentEngine::renderTile(const TileRequest& request)
 
     const auto width = static_cast<std::size_t>(request.pixelWidth);
     const auto height = static_cast<std::size_t>(request.pixelHeight);
-    if (width > std::numeric_limits<std::size_t>::max() / height / 4U) {
+    if (height > std::numeric_limits<std::size_t>::max() / 4U ||
+        width > std::numeric_limits<std::size_t>::max() / (height * 4U)) {
         throw std::overflow_error("requested tile buffer is too large");
     }
 
@@ -264,7 +288,7 @@ RenderedTile PresentEngine::renderTile(const TileRequest& request)
     RenderedTile tile;
     tile.pixelWidth = request.pixelWidth;
     tile.pixelHeight = request.pixelHeight;
-    tile.pixelFormat = impl_->document->getTileMode();
+    tile.pixelFormat = toPixelFormat(impl_->document->getTileMode());
     tile.pixels.resize(width * height * 4U);
 
     impl_->document->paintTile(
