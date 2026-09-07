@@ -3,7 +3,10 @@
 #include <LibreOfficeKit/LibreOfficeKit.hxx>
 #include <LibreOfficeKit/LibreOfficeKitEnums.h>
 
+#include <charconv>
 #include <chrono>
+#include <cmath>
+#include <cctype>
 #include <filesystem>
 #include <limits>
 #include <stdexcept>
@@ -60,6 +63,50 @@ std::string makePrivateProfileUrl()
         ("cakeos-present-" + std::to_string(pid) + "-" + std::to_string(stamp));
     std::filesystem::create_directories(path);
     return "file://" + percentEncodePath(path.generic_string());
+}
+
+long parsePositiveLongField(std::string_view json, std::string_view field)
+{
+    const std::string key = "\"" + std::string(field) + "\"";
+    const auto keyPosition = json.find(key);
+    if (keyPosition == std::string_view::npos) {
+        throw std::runtime_error("LibreOfficeKit part metadata is missing " + std::string(field));
+    }
+
+    auto valuePosition = json.find(':', keyPosition + key.size());
+    if (valuePosition == std::string_view::npos) {
+        throw std::runtime_error("LibreOfficeKit returned malformed part metadata");
+    }
+    ++valuePosition;
+    while (valuePosition < json.size() &&
+           std::isspace(static_cast<unsigned char>(json[valuePosition])) != 0) {
+        ++valuePosition;
+    }
+
+    long value = 0;
+    const char* begin = json.data() + valuePosition;
+    const char* end = json.data() + json.size();
+    const auto result = std::from_chars(begin, end, value);
+    if (result.ec != std::errc{} || result.ptr == begin || value <= 0) {
+        throw std::runtime_error("LibreOfficeKit returned an invalid " + std::string(field));
+    }
+    return value;
+}
+
+long mm100ToTwips(long value)
+{
+    if (value <= 0) {
+        throw std::runtime_error("LibreOfficeKit returned an invalid page dimension");
+    }
+
+    // Impress stores page dimensions in hundredths of a millimetre. Core's
+    // getPartSize() converts (dimension + 1) to TWIPs; use the same ratio here.
+    const long double twips =
+        (static_cast<long double>(value) + 1.0L) * 72.0L / 127.0L;
+    if (twips > static_cast<long double>(std::numeric_limits<long>::max())) {
+        throw std::overflow_error("presentation page dimension is too large");
+    }
+    return static_cast<long>(std::llround(twips));
 }
 
 int toLokKeyType(KeyEventType type)
@@ -187,6 +234,17 @@ struct PresentEngine::Impl {
         return value;
     }
 
+    std::string partInfo(int slideIndex) const
+    {
+        requireSlideIndex(slideIndex);
+        LibreOfficeKitDocument* rawDocument = document->get();
+        if (!LIBREOFFICEKIT_DOCUMENT_HAS(rawDocument, getPartInfo) ||
+            rawDocument->pClass->getPartInfo == nullptr) {
+            throw std::runtime_error("LibreOfficeKit runtime does not expose slide metadata");
+        }
+        return takeString(rawDocument->pClass->getPartInfo(rawDocument, slideIndex));
+    }
+
     EngineOptions options;
     bool ownsProfile{false};
     std::unique_ptr<lok::Office> office;
@@ -258,15 +316,16 @@ void PresentEngine::setCurrentSlide(int slideIndex)
     impl_->document->setPart(slideIndex);
 }
 
-DocumentExtent PresentEngine::documentExtent() const
+SlideExtent PresentEngine::slideExtent(int slideIndex) const
 {
-    impl_->requireDocument();
-    DocumentExtent extent;
-    impl_->document->getDocumentSize(&extent.widthTwips, &extent.heightTwips);
-    if (extent.widthTwips <= 0 || extent.heightTwips <= 0) {
-        throw std::runtime_error("LibreOfficeKit returned an invalid presentation extent");
+    const std::string info = impl_->partInfo(slideIndex);
+    if (info.empty()) {
+        throw std::runtime_error("LibreOfficeKit returned no metadata for the requested slide");
     }
-    return extent;
+
+    const long widthMm100 = parsePositiveLongField(info, "width");
+    const long heightMm100 = parsePositiveLongField(info, "height");
+    return SlideExtent{mm100ToTwips(widthMm100), mm100ToTwips(heightMm100)};
 }
 
 RenderedTile PresentEngine::renderTile(const TileRequest& request)
