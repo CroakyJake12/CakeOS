@@ -6,6 +6,7 @@ public sealed record DataRangeRequest(string Sheet, int StartRow, int StartColum
 public sealed record DataRangeSnapshot(string Sheet, int StartRow, int StartColumn, IReadOnlyList<IReadOnlyList<string>> Values);
 public sealed record DataSheetSummary(string Name, int Index);
 public sealed record DataWorkbookHandle(string Id, string Path, bool ReadOnly);
+public sealed record DataNamedRangeSummary(string Name, DataRangeRequest Range);
 public sealed record DataTableSnapshot(string Name, IReadOnlyList<string> Columns, IReadOnlyList<IReadOnlyList<string>> Rows);
 public sealed record DataPublishedTable(string Name, IReadOnlyList<string> Columns, int RowCount, DataRangeRequest SourceRange);
 public sealed record DataQueryResult(IReadOnlyList<string> Columns, IReadOnlyList<IReadOnlyList<string>> Rows, bool Truncated);
@@ -18,6 +19,9 @@ public interface IDataSpreadsheetEngine : IAsyncDisposable
     Task<DataRangeSnapshot> ReadRangeAsync(string workbookId, DataRangeRequest range, CancellationToken cancellationToken = default);
     Task<DataCellSnapshot> SetCellAsync(string workbookId, DataCellAddress address, string? value, string? formula = null, CancellationToken cancellationToken = default);
     Task<DataRangeSnapshot> CreateSheetWithValuesAsync(string workbookId, string sheetName, IReadOnlyList<IReadOnlyList<string>> values, CancellationToken cancellationToken = default);
+    Task<IReadOnlyList<DataNamedRangeSummary>> ListNamedRangesAsync(string workbookId, CancellationToken cancellationToken = default);
+    Task<DataNamedRangeSummary> CreateNamedRangeAsync(string workbookId, string name, DataRangeRequest range, CancellationToken cancellationToken = default);
+    Task DeleteNamedRangeAsync(string workbookId, string name, CancellationToken cancellationToken = default);
     Task InsertRowsAsync(string workbookId, string sheet, int index, int count, CancellationToken cancellationToken = default);
     Task DeleteRowsAsync(string workbookId, string sheet, int index, int count, CancellationToken cancellationToken = default);
     Task InsertColumnsAsync(string workbookId, string sheet, int index, int count, CancellationToken cancellationToken = default);
