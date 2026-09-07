@@ -20,6 +20,16 @@ struct SlideInfo {
     std::string hash;
 };
 
+struct DocumentExtent {
+    long widthTwips{};
+    long heightTwips{};
+};
+
+enum class PixelFormat {
+    Rgba,
+    Bgra
+};
+
 struct TileRequest {
     int slideIndex{};
     int pixelWidth{};
@@ -33,7 +43,7 @@ struct TileRequest {
 struct RenderedTile {
     int pixelWidth{};
     int pixelHeight{};
-    int pixelFormat{};
+    PixelFormat pixelFormat{PixelFormat::Bgra};
     std::vector<std::uint8_t> pixels;
 };
 
@@ -72,6 +82,7 @@ public:
     [[nodiscard]] std::vector<SlideInfo> slides() const;
     [[nodiscard]] int currentSlide() const;
     void setCurrentSlide(int slideIndex);
+    [[nodiscard]] DocumentExtent documentExtent() const;
 
     [[nodiscard]] RenderedTile renderTile(const TileRequest& request);
 
