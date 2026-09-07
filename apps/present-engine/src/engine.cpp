@@ -200,6 +200,17 @@ PixelFormat toPixelFormat(int tileMode)
 } // namespace
 
 struct PresentEngine::Impl {
+    enum class HistoryKind {
+        Native,
+        Move
+    };
+
+    struct HistoryEntry {
+        HistoryKind kind{HistoryKind::Native};
+        int fromIndex{};
+        int toIndex{};
+    };
+
     explicit Impl(EngineOptions value)
         : options(std::move(value))
     {
@@ -297,11 +308,33 @@ struct PresentEngine::Impl {
         return takeString(rawDocument->pClass->getPartInfo(rawDocument, slideIndex));
     }
 
+    void clearHistory()
+    {
+        history.clear();
+        historyCursor = 0U;
+        replayingHistory = false;
+    }
+
+    void appendHistory(HistoryEntry entry)
+    {
+        if (replayingHistory) {
+            return;
+        }
+        if (historyCursor < history.size()) {
+            history.erase(history.begin() + static_cast<std::ptrdiff_t>(historyCursor), history.end());
+        }
+        history.push_back(entry);
+        historyCursor = history.size();
+    }
+
     EngineOptions options;
     bool ownsProfile{false};
     std::unique_ptr<lok::Office> office;
     std::unique_ptr<lok::Document> document;
     EventCallback eventCallback;
+    std::vector<HistoryEntry> history;
+    std::size_t historyCursor{0U};
+    bool replayingHistory{false};
 };
 
 PresentEngine::PresentEngine(EngineOptions options)
@@ -328,11 +361,13 @@ void PresentEngine::open(std::string_view documentPathOrUrl)
     next->setPartMode(LOK_PARTMODE_SLIDES);
     next->registerCallback(&Impl::callbackThunk, impl_.get());
     impl_->document = std::move(next);
+    impl_->clearHistory();
 }
 
 void PresentEngine::close() noexcept
 {
     impl_->document.reset();
+    impl_->clearHistory();
 }
 
 bool PresentEngine::isOpen() const noexcept
@@ -380,7 +415,7 @@ SlideExtent PresentEngine::slideExtent(int slideIndex) const
     return SlideExtent{mm100ToTwips(widthMm100), mm100ToTwips(heightMm100)};
 }
 
-void PresentEngine::moveSlide(int fromIndex, int toIndex)
+void PresentEngine::applySlideMove(int fromIndex, int toIndex)
 {
     impl_->requireSlideIndex(fromIndex);
     impl_->requireSlideIndex(toIndex);
@@ -408,6 +443,69 @@ void PresentEngine::moveSlide(int fromIndex, int toIndex)
     }
 
     setCurrentSlide(toIndex);
+}
+
+void PresentEngine::moveSlide(int fromIndex, int toIndex)
+{
+    if (fromIndex == toIndex) {
+        impl_->requireSlideIndex(fromIndex);
+        return;
+    }
+    applySlideMove(fromIndex, toIndex);
+    impl_->appendHistory(Impl::HistoryEntry{Impl::HistoryKind::Move, fromIndex, toIndex});
+}
+
+void PresentEngine::recordNativeMutation()
+{
+    impl_->appendHistory(Impl::HistoryEntry{Impl::HistoryKind::Native, 0, 0});
+}
+
+void PresentEngine::undo()
+{
+    impl_->requireDocument();
+    if (impl_->historyCursor == 0U) {
+        postUnoCommand(".uno:Undo", {}, true);
+        return;
+    }
+
+    const auto entry = impl_->history[impl_->historyCursor - 1U];
+    impl_->replayingHistory = true;
+    try {
+        if (entry.kind == Impl::HistoryKind::Move) {
+            applySlideMove(entry.toIndex, entry.fromIndex);
+        } else {
+            postUnoCommand(".uno:Undo", {}, true);
+        }
+        --impl_->historyCursor;
+        impl_->replayingHistory = false;
+    } catch (...) {
+        impl_->replayingHistory = false;
+        throw;
+    }
+}
+
+void PresentEngine::redo()
+{
+    impl_->requireDocument();
+    if (impl_->historyCursor >= impl_->history.size()) {
+        postUnoCommand(".uno:Redo", {}, true);
+        return;
+    }
+
+    const auto entry = impl_->history[impl_->historyCursor];
+    impl_->replayingHistory = true;
+    try {
+        if (entry.kind == Impl::HistoryKind::Move) {
+            applySlideMove(entry.fromIndex, entry.toIndex);
+        } else {
+            postUnoCommand(".uno:Redo", {}, true);
+        }
+        ++impl_->historyCursor;
+        impl_->replayingHistory = false;
+    } catch (...) {
+        impl_->replayingHistory = false;
+        throw;
+    }
 }
 
 RenderedTile PresentEngine::renderTile(const TileRequest& request)
