@@ -6,14 +6,24 @@ namespace cakeos::present {
 
 void PresentEngine::addSlideAfter(int slideIndex)
 {
+    const auto before = slides().size();
     setCurrentSlide(slideIndex);
     postUnoCommand(".uno:InsertPage", {}, true);
+    if (slides().size() != before + 1U) {
+        throw std::runtime_error("LibreOffice did not add the requested slide");
+    }
+    recordNativeMutation();
 }
 
 void PresentEngine::duplicateSlide(int slideIndex)
 {
+    const auto before = slides().size();
     setCurrentSlide(slideIndex);
     postUnoCommand(".uno:DuplicatePage", {}, true);
+    if (slides().size() != before + 1U) {
+        throw std::runtime_error("LibreOffice did not duplicate the requested slide");
+    }
+    recordNativeMutation();
 }
 
 void PresentEngine::deleteSlide(int slideIndex)
@@ -24,16 +34,10 @@ void PresentEngine::deleteSlide(int slideIndex)
     }
     setCurrentSlide(slideIndex);
     postUnoCommand(".uno:DeletePage", {}, true);
-}
-
-void PresentEngine::undo()
-{
-    postUnoCommand(".uno:Undo", {}, true);
-}
-
-void PresentEngine::redo()
-{
-    postUnoCommand(".uno:Redo", {}, true);
+    if (slides().size() + 1U != slideList.size()) {
+        throw std::runtime_error("LibreOffice did not delete the requested slide");
+    }
+    recordNativeMutation();
 }
 
 } // namespace cakeos::present
