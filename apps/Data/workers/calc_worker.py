@@ -28,6 +28,7 @@ except Exception as exc:  # pragma: no cover - runtime dependency gate
 MAX_MATERIALIZED_ROWS = 1000
 MAX_MATERIALIZED_COLUMNS = 256
 MAX_STRUCTURAL_MUTATION_COUNT = 100
+MAX_NAMED_RANGE_NAME_LENGTH = 64
 PORTABLE_SHEET_FORBIDDEN = set("[]:*?/\\")
 
 
@@ -48,6 +49,19 @@ def portable_sheet_name(value: object) -> str:
         raise ValueError("Materialized sheet name contains a character that is unsafe for ODS/XLSX portability.")
     if text.startswith("'") or text.endswith("'"):
         raise ValueError("Materialized sheet names cannot begin or end with an apostrophe.")
+    return text
+
+
+def named_range_name(value: object) -> str:
+    text = str(value or "").strip()
+    if not text:
+        raise ValueError("Named range name is required.")
+    if len(text) > MAX_NAMED_RANGE_NAME_LENGTH:
+        raise ValueError(f"Named range names must be at most {MAX_NAMED_RANGE_NAME_LENGTH} characters in this slice.")
+    if not (text[0].isalpha() or text[0] == "_"):
+        raise ValueError("Named range names must start with a letter or underscore.")
+    if any(not (character.isalnum() or character in "_.") for character in text[1:]):
+        raise ValueError("Named range names may contain only letters, digits, underscores or periods after the first character.")
     return text
 
 
@@ -149,10 +163,116 @@ class CalcRuntime:
             raise KeyError(f"Workbook does not contain sheet '{name}'.")
         return sheets.getByName(name)
 
+    @staticmethod
+    def _range_request(sheet_name: str, address) -> dict:
+        return {
+            "sheet": sheet_name,
+            "startRow": int(address.StartRow),
+            "startColumn": int(address.StartColumn),
+            "rowCount": int(address.EndRow - address.StartRow + 1),
+            "columnCount": int(address.EndColumn - address.StartColumn + 1),
+        }
+
+    @staticmethod
+    def _find_name_case_insensitive(names: tuple | list, requested: str) -> str | None:
+        requested_folded = requested.casefold()
+        for existing in names:
+            text = str(existing)
+            if text.casefold() == requested_folded:
+                return text
+        return None
+
+    def _named_range_summary(self, document, name: str) -> dict | None:
+        named_ranges = document.NamedRanges
+        named = named_ranges.getByName(name)
+        try:
+            referred = named.getReferredCells()
+        except Exception:
+            return None
+        if referred is None:
+            return None
+        try:
+            address = referred.getRangeAddress()
+        except Exception:
+            return None
+        sheet_names = document.getSheets().getElementNames()
+        sheet_index = int(address.Sheet)
+        if sheet_index < 0 or sheet_index >= len(sheet_names):
+            return None
+        sheet_name = str(sheet_names[sheet_index])
+        return {"name": name, "range": self._range_request(sheet_name, address)}
+
     def list_sheets(self, workbook_id: str) -> list[dict]:
         document = self._doc(workbook_id)
         names = document.getSheets().getElementNames()
         return [{"name": str(name), "index": index} for index, name in enumerate(names)]
+
+    def list_named_ranges(self, workbook_id: str) -> list[dict]:
+        document = self._doc(workbook_id)
+        names = [str(name) for name in document.NamedRanges.getElementNames()]
+        summaries: list[dict] = []
+        for name in sorted(names, key=str.casefold):
+            summary = self._named_range_summary(document, name)
+            if summary is not None:
+                summaries.append(summary)
+        return summaries
+
+    def create_named_range(self, workbook_id: str, supplied_name: object, request: dict) -> dict:
+        document = self._doc(workbook_id)
+        if bool(document.isReadonly()):
+            raise PermissionError("Workbook was opened read-only.")
+        name = named_range_name(supplied_name)
+        sheet_name = str(request.get("sheet") or "").strip()
+        start_row = int(request["startRow"])
+        start_column = int(request["startColumn"])
+        row_count = int(request["rowCount"])
+        column_count = int(request["columnCount"])
+        if not sheet_name:
+            raise ValueError("Named range sheet is required.")
+        if min(start_row, start_column) < 0 or row_count < 1 or column_count < 1:
+            raise ValueError("Invalid named range coordinates.")
+        if row_count > MAX_MATERIALIZED_ROWS or column_count > MAX_MATERIALIZED_COLUMNS:
+            raise ValueError("Named range exceeds first-slice safety limits.")
+
+        sheet = self._sheet(document, sheet_name)
+        row_capacity = int(sheet.getRows().getCount())
+        column_capacity = int(sheet.getColumns().getCount())
+        if start_row + row_count > row_capacity or start_column + column_count > column_capacity:
+            raise ValueError("Named range exceeds the sheet bounds.")
+
+        named_ranges = document.NamedRanges
+        existing_names = tuple(named_ranges.getElementNames())
+        if self._find_name_case_insensitive(existing_names, name) is not None:
+            raise ValueError(f"Workbook already contains a named range named '{name}'.")
+
+        end_row = start_row + row_count - 1
+        end_column = start_column + column_count - 1
+        cell_range = sheet.getCellRangeByPosition(start_column, start_row, end_column, end_row)
+        absolute_name = str(cell_range.AbsoluteName)
+        reference_address = cell_range.getCellByPosition(0, 0).CellAddress
+        named_ranges.addNewByName(name, absolute_name, reference_address, 0)
+        summary = self._named_range_summary(document, name)
+        if summary is None:
+            try:
+                named_ranges.removeByName(name)
+            except Exception:
+                pass
+            raise RuntimeError("LibreOffice created a named expression that did not resolve to the requested cell range.")
+        return summary
+
+    def delete_named_range(self, workbook_id: str, supplied_name: object) -> dict:
+        document = self._doc(workbook_id)
+        if bool(document.isReadonly()):
+            raise PermissionError("Workbook was opened read-only.")
+        requested = named_range_name(supplied_name)
+        named_ranges = document.NamedRanges
+        actual = self._find_name_case_insensitive(tuple(named_ranges.getElementNames()), requested)
+        if actual is None:
+            raise KeyError(f"Workbook does not contain named range '{requested}'.")
+        if self._named_range_summary(document, actual) is None:
+            raise PermissionError("Haven Data can delete only named ranges that resolve to one concrete cell range in this slice.")
+        named_ranges.removeByName(actual)
+        return {"ok": True}
 
     def read_range(self, workbook_id: str, request: dict) -> dict:
         document = self._doc(workbook_id)
@@ -387,6 +507,12 @@ def serve() -> int:
                     result = runtime.open(params["path"], bool(params.get("readOnly", False)))
                 elif method == "listSheets":
                     result = runtime.list_sheets(params["workbookId"])
+                elif method == "listNamedRanges":
+                    result = runtime.list_named_ranges(params["workbookId"])
+                elif method == "createNamedRange":
+                    result = runtime.create_named_range(params["workbookId"], params["name"], params["range"])
+                elif method == "deleteNamedRange":
+                    result = runtime.delete_named_range(params["workbookId"], params["name"])
                 elif method == "readRange":
                     result = runtime.read_range(params["workbookId"], params["range"])
                 elif method == "setCell":
