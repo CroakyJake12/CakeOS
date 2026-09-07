@@ -45,6 +45,7 @@ add_executable(cakeos-present-worker
     src/worker.cpp
 )
 target_include_directories(cakeos-present-worker PRIVATE ${LIBREOFFICEKIT_INCLUDE_DIR})
+target_compile_definitions(cakeos-present-worker PRIVATE LOK_USE_UNSTABLE_API)
 target_link_libraries(cakeos-present-worker PRIVATE
     cakeos-present-engine
     nlohmann_json::nlohmann_json
