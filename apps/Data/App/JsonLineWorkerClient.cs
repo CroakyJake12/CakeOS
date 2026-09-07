@@ -16,6 +16,7 @@ internal sealed class JsonLineWorkerClient : IAsyncDisposable
     private readonly object _stderrLock = new();
     private readonly Task _stderrPump;
     private int _nextId;
+    private bool _faulted;
 
     public JsonLineWorkerClient(string executable, IEnumerable<string> arguments, IReadOnlyDictionary<string, string?>? environment = null)
     {
@@ -43,13 +44,21 @@ internal sealed class JsonLineWorkerClient : IAsyncDisposable
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(method);
         await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        var requestMayHaveBeenSent = false;
         try
         {
+            if (_faulted)
+                throw new InvalidOperationException($"Worker protocol is faulted and cannot be reused.{FormatStderrTail()}");
             if (_process.HasExited)
                 throw new InvalidOperationException($"Worker exited with code {_process.ExitCode}.{FormatStderrTail()}");
 
             var id = Interlocked.Increment(ref _nextId);
             var request = JsonSerializer.Serialize(new { id, method, @params = parameters }, _json);
+
+            // Cancellation after writing begins makes request/response alignment uncertain.
+            // If that happens, fail closed and terminate the worker rather than allowing a
+            // stale response to be consumed by the next call.
+            requestMayHaveBeenSent = true;
             await _process.StandardInput.WriteLineAsync(request.AsMemory(), cancellationToken).ConfigureAwait(false);
             await _process.StandardInput.FlushAsync(cancellationToken).ConfigureAwait(false);
 
@@ -58,12 +67,33 @@ internal sealed class JsonLineWorkerClient : IAsyncDisposable
             using var document = JsonDocument.Parse(line);
             var root = document.RootElement;
             if (!root.TryGetProperty("id", out var responseId) || responseId.GetInt32() != id)
-                throw new InvalidDataException("Worker response id did not match the request.");
+            {
+                await FaultWorkerAsync().ConfigureAwait(false);
+                throw new InvalidDataException("Worker response id did not match the request; worker was terminated to prevent protocol desynchronisation.");
+            }
             if (root.TryGetProperty("error", out var error) && error.ValueKind != JsonValueKind.Null)
                 throw new InvalidOperationException(error.GetString() ?? "Worker operation failed.");
             if (!root.TryGetProperty("result", out var result))
-                throw new InvalidDataException("Worker response did not contain a result.");
+            {
+                await FaultWorkerAsync().ConfigureAwait(false);
+                throw new InvalidDataException("Worker response did not contain a result; worker was terminated.");
+            }
             return result.Deserialize<T>(_json) ?? throw new InvalidDataException("Worker returned an empty result.");
+        }
+        catch (OperationCanceledException) when (requestMayHaveBeenSent && cancellationToken.IsCancellationRequested)
+        {
+            await FaultWorkerAsync().ConfigureAwait(false);
+            throw;
+        }
+        catch (JsonException)
+        {
+            await FaultWorkerAsync().ConfigureAwait(false);
+            throw;
+        }
+        catch (EndOfStreamException)
+        {
+            await FaultWorkerAsync().ConfigureAwait(false);
+            throw;
         }
         finally
         {
@@ -75,7 +105,7 @@ internal sealed class JsonLineWorkerClient : IAsyncDisposable
     {
         try
         {
-            if (!_process.HasExited)
+            if (!_process.HasExited && !_faulted)
             {
                 using var shutdown = new CancellationTokenSource(TimeSpan.FromSeconds(5));
                 try
@@ -85,12 +115,12 @@ internal sealed class JsonLineWorkerClient : IAsyncDisposable
                 }
                 catch
                 {
-                    if (!_process.HasExited)
-                    {
-                        _process.Kill(entireProcessTree: true);
-                        await _process.WaitForExitAsync().ConfigureAwait(false);
-                    }
+                    await FaultWorkerAsync().ConfigureAwait(false);
                 }
+            }
+            else if (!_process.HasExited)
+            {
+                await FaultWorkerAsync().ConfigureAwait(false);
             }
         }
         finally
@@ -102,6 +132,17 @@ internal sealed class JsonLineWorkerClient : IAsyncDisposable
             _process.Dispose();
             _gate.Dispose();
         }
+    }
+
+    private async Task FaultWorkerAsync()
+    {
+        _faulted = true;
+        if (_process.HasExited)
+            return;
+        try { _process.Kill(entireProcessTree: true); }
+        catch { }
+        try { await _process.WaitForExitAsync().ConfigureAwait(false); }
+        catch { }
     }
 
     private async Task PumpStandardErrorAsync(CancellationToken cancellationToken)
