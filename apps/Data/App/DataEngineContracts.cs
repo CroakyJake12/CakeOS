@@ -8,6 +8,7 @@ public sealed record DataSheetSummary(string Name, int Index);
 public sealed record DataWorkbookHandle(string Id, string Path, bool ReadOnly);
 public sealed record DataNamedRangeSummary(string Name, DataRangeRequest Range);
 public sealed record DataListValidationState(DataRangeRequest Range, bool Enabled, IReadOnlyList<string> Values, bool AllowBlank);
+public sealed record DataSortResult(DataRangeRequest Range, int KeyColumnOffset, bool Ascending, bool ContainsHeader, DataRangeSnapshot Snapshot);
 public sealed record DataTableSnapshot(string Name, IReadOnlyList<string> Columns, IReadOnlyList<IReadOnlyList<string>> Rows);
 public sealed record DataPublishedTable(string Name, IReadOnlyList<string> Columns, int RowCount, DataRangeRequest SourceRange);
 public sealed record DataQueryResult(IReadOnlyList<string> Columns, IReadOnlyList<IReadOnlyList<string>> Rows, bool Truncated);
@@ -26,6 +27,7 @@ public interface IDataSpreadsheetEngine : IAsyncDisposable
     Task<DataListValidationState> GetListValidationAsync(string workbookId, DataRangeRequest range, CancellationToken cancellationToken = default);
     Task<DataListValidationState> ApplyListValidationAsync(string workbookId, DataRangeRequest range, IReadOnlyList<string> values, bool allowBlank = true, CancellationToken cancellationToken = default);
     Task<DataListValidationState> ClearValidationAsync(string workbookId, DataRangeRequest range, CancellationToken cancellationToken = default);
+    Task<DataSortResult> SortRangeAsync(string workbookId, DataRangeRequest range, int keyColumnOffset, bool ascending = true, bool containsHeader = true, CancellationToken cancellationToken = default);
     Task InsertRowsAsync(string workbookId, string sheet, int index, int count, CancellationToken cancellationToken = default);
     Task DeleteRowsAsync(string workbookId, string sheet, int index, int count, CancellationToken cancellationToken = default);
     Task InsertColumnsAsync(string workbookId, string sheet, int index, int count, CancellationToken cancellationToken = default);
