@@ -9,6 +9,7 @@ stage="$(mktemp -d)"
 trap 'rm -rf "$stage"' EXIT
 
 command -v dpkg-deb >/dev/null || { echo "dpkg-deb is required" >&2; exit 2; }
+[[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+([+~.-][A-Za-z0-9.+~-]+)?$ ]] || { echo "Invalid Debian preview version: $version" >&2; exit 2; }
 [[ -x "$publish/cakeos-hui-preview" ]] || { echo "Build HUI preview before packaging" >&2; exit 2; }
 
 mkdir -p "$stage/DEBIAN" "$stage/usr/lib/cakeos/hui-preview" "$stage/usr/bin" "$out"
@@ -22,7 +23,7 @@ chmod 0755 "$stage/usr/bin/cakeos-hui-preview"
 cat > "$stage/DEBIAN/control" <<EOF
 Package: haven-hui-preview
 Version: $version
-Section: x11
+Section: utils
 Priority: optional
 Architecture: amd64
 Depends: dotnet-runtime-10.0
