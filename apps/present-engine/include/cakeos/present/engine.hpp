@@ -33,13 +33,24 @@ struct TileRequest {
 struct RenderedTile {
     int pixelWidth{};
     int pixelHeight{};
-    int tileMode{};
+    int pixelFormat{};
     std::vector<std::uint8_t> pixels;
 };
 
 struct EngineEvent {
-    int type{};
+    int upstreamType{};
     std::string payload;
+};
+
+enum class KeyEventType {
+    Input,
+    Up
+};
+
+enum class MouseEventType {
+    ButtonDown,
+    ButtonUp,
+    Move
 };
 
 using EventCallback = std::function<void(const EngineEvent&)>;
@@ -64,8 +75,8 @@ public:
 
     [[nodiscard]] RenderedTile renderTile(const TileRequest& request);
 
-    void postKeyEvent(int type, int charCode, int keyCode);
-    void postMouseEvent(int type, int xTwips, int yTwips, int clickCount, int buttons, int modifiers);
+    void postKeyEvent(KeyEventType type, int charCode, int keyCode);
+    void postMouseEvent(MouseEventType type, int xTwips, int yTwips, int clickCount, int buttons, int modifiers);
     void postUnoCommand(std::string_view command, std::string_view jsonArguments = {}, bool notifyWhenFinished = false);
 
     void saveAs(std::string_view destinationPathOrUrl, std::string_view format = {}, std::string_view filterOptions = {});
