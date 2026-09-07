@@ -83,9 +83,7 @@ public sealed class DataGridSession : IAsyncDisposable
         CancellationToken cancellationToken = default)
     {
         ThrowIfDisposed();
-        var workbook = EnsureOpen();
-        if (workbook.ReadOnly)
-            throw new InvalidOperationException("The workbook is open read-only.");
+        var workbook = EnsureEditable();
         ValidateVisibleCell(row, column);
 
         var address = new DataCellAddress(_sheets[_activeSheetIndex].Name, row, column);
@@ -93,6 +91,18 @@ public sealed class DataGridSession : IAsyncDisposable
         await _spreadsheet.RecalculateAsync(workbook.Id, cancellationToken).ConfigureAwait(false);
         return await RefreshAsync(cancellationToken).ConfigureAwait(false);
     }
+
+    public Task<DataGridSessionSnapshot> InsertRowsAsync(int index, int count = 1, CancellationToken cancellationToken = default) =>
+        MutateStructureAsync(rows: true, insert: true, index, count, cancellationToken);
+
+    public Task<DataGridSessionSnapshot> DeleteRowsAsync(int index, int count = 1, CancellationToken cancellationToken = default) =>
+        MutateStructureAsync(rows: true, insert: false, index, count, cancellationToken);
+
+    public Task<DataGridSessionSnapshot> InsertColumnsAsync(int index, int count = 1, CancellationToken cancellationToken = default) =>
+        MutateStructureAsync(rows: false, insert: true, index, count, cancellationToken);
+
+    public Task<DataGridSessionSnapshot> DeleteColumnsAsync(int index, int count = 1, CancellationToken cancellationToken = default) =>
+        MutateStructureAsync(rows: false, insert: false, index, count, cancellationToken);
 
     public async Task<DataGridSessionSnapshot> RefreshAsync(CancellationToken cancellationToken = default)
     {
@@ -113,9 +123,7 @@ public sealed class DataGridSession : IAsyncDisposable
     public Task SaveAsAsync(string destinationPath, CancellationToken cancellationToken = default)
     {
         ThrowIfDisposed();
-        var workbook = EnsureOpen();
-        if (workbook.ReadOnly)
-            throw new InvalidOperationException("The workbook is open read-only.");
+        var workbook = EnsureEditable();
         ArgumentException.ThrowIfNullOrWhiteSpace(destinationPath);
         return _spreadsheet.SaveAsync(workbook.Id, destinationPath, cancellationToken);
     }
@@ -127,10 +135,10 @@ public sealed class DataGridSession : IAsyncDisposable
             return;
 
         var id = _workbook.Id;
+        await _spreadsheet.CloseAsync(id, cancellationToken).ConfigureAwait(false);
         _workbook = null;
         _sheets = [];
         _activeSheetIndex = 0;
-        await _spreadsheet.CloseAsync(id, cancellationToken).ConfigureAwait(false);
     }
 
     public async ValueTask DisposeAsync()
@@ -150,8 +158,50 @@ public sealed class DataGridSession : IAsyncDisposable
         }
     }
 
+    private async Task<DataGridSessionSnapshot> MutateStructureAsync(
+        bool rows,
+        bool insert,
+        int index,
+        int count,
+        CancellationToken cancellationToken)
+    {
+        ThrowIfDisposed();
+        var workbook = EnsureEditable();
+        var visibleCount = rows ? VisibleRows : VisibleColumns;
+        if (index < 0 || index >= visibleCount)
+            throw new ArgumentOutOfRangeException(nameof(index), $"First-slice structural edits must start inside the visible {(rows ? "row" : "column")} range 0-{visibleCount - 1}.");
+        if (count < 1 || count > visibleCount)
+            throw new ArgumentOutOfRangeException(nameof(count), $"First-slice structural edits can affect 1-{visibleCount} {(rows ? "rows" : "columns")} at a time.");
+
+        var sheet = _sheets[_activeSheetIndex].Name;
+        if (rows)
+        {
+            if (insert)
+                await _spreadsheet.InsertRowsAsync(workbook.Id, sheet, index, count, cancellationToken).ConfigureAwait(false);
+            else
+                await _spreadsheet.DeleteRowsAsync(workbook.Id, sheet, index, count, cancellationToken).ConfigureAwait(false);
+        }
+        else
+        {
+            if (insert)
+                await _spreadsheet.InsertColumnsAsync(workbook.Id, sheet, index, count, cancellationToken).ConfigureAwait(false);
+            else
+                await _spreadsheet.DeleteColumnsAsync(workbook.Id, sheet, index, count, cancellationToken).ConfigureAwait(false);
+        }
+
+        return await RefreshAsync(cancellationToken).ConfigureAwait(false);
+    }
+
     private DataWorkbookHandle EnsureOpen() =>
         _workbook ?? throw new InvalidOperationException("No workbook is open in this Data grid session.");
+
+    private DataWorkbookHandle EnsureEditable()
+    {
+        var workbook = EnsureOpen();
+        if (workbook.ReadOnly)
+            throw new InvalidOperationException("The workbook is open read-only.");
+        return workbook;
+    }
 
     private static void ValidateVisibleCell(int row, int column)
     {
