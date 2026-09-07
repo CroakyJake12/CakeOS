@@ -1,4 +1,6 @@
+import json
 import os
+import stat
 import tempfile
 import unittest
 from pathlib import Path
@@ -8,6 +10,7 @@ from compatibility.wine.haven_compat.audit import evaluate_preflight
 from compatibility.wine.haven_compat.broker import CompatibilityBroker, CompatibilityError
 from compatibility.wine.haven_compat.lifecycle import UnitStatus, UserSystemdSupervisor, unit_name
 from compatibility.wine.haven_compat.manifest import AppManifest, ManifestError
+from compatibility.wine.haven_compat.registry import AppRegistry, RegistryError
 
 
 class FakeSupervisor:
@@ -42,6 +45,18 @@ class FakeSupervisor:
         return f"{unit_name(app_id)}:{lines}"
 
 
+def example_manifest(display_name: str | None = None) -> AppManifest:
+    value = {
+        "id": "safe.app",
+        "backend": "wine",
+        "runtime": "wine-11.0",
+        "entrypoint": "app.exe",
+    }
+    if display_name is not None:
+        value["displayName"] = display_name
+    return AppManifest.from_dict(value)
+
+
 class ManifestTests(unittest.TestCase):
     def test_rejects_broad_host_mount(self):
         with self.assertRaises(ManifestError):
@@ -73,19 +88,60 @@ class ManifestTests(unittest.TestCase):
             })
 
     def test_defaults_to_no_network(self):
-        manifest = AppManifest.from_dict({
-            "id": "safe.app",
-            "backend": "wine",
-            "runtime": "wine-11.0",
-            "entrypoint": "app.exe",
-        })
+        manifest = example_manifest()
         self.assertEqual("none", manifest.network)
         self.assertFalse(manifest.clipboard)
         self.assertEqual("none", manifest.gpu)
 
+    def test_manifest_round_trips_hui_metadata(self):
+        manifest = AppManifest.from_dict({
+            "id": "safe.app",
+            "displayName": "Safe App",
+            "backend": "wine",
+            "runtime": "wine-11.0",
+            "entrypoint": "app.exe",
+            "mounts": [{"source": "/home/user/Documents/App", "target": "/mnt/haven-share/documents", "mode": "ro"}],
+        })
+        self.assertEqual(manifest, AppManifest.from_dict(manifest.to_dict()))
+
+
+class RegistryTests(unittest.TestCase):
+    def test_registry_round_trip_is_private_and_hash_addressed(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary) / "registry"
+            registry = AppRegistry(root)
+            manifest = example_manifest("Safe App")
+            registry.register(manifest)
+            self.assertEqual(manifest, registry.get("safe.app"))
+            records = list(root.glob("*.json"))
+            self.assertEqual(1, len(records))
+            self.assertNotIn("safe.app", records[0].name)
+            self.assertEqual(0o600, stat.S_IMODE(records[0].stat().st_mode))
+            self.assertEqual(0o700, stat.S_IMODE(root.stat().st_mode))
+
+    def test_register_replaces_existing_record_without_temp_leaks(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary) / "registry"
+            registry = AppRegistry(root)
+            registry.register(example_manifest("First Name"))
+            registry.register(example_manifest("Second Name"))
+            self.assertEqual("Second Name", registry.get("safe.app").display_name)
+            self.assertEqual([], list(root.glob("*.tmp")))
+            self.assertEqual(1, len(list(root.glob("*.json"))))
+
+    def test_corrupt_registry_record_fails_closed(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary) / "registry"
+            registry = AppRegistry(root)
+            registry.register(example_manifest())
+            record = next(root.glob("*.json"))
+            record.write_text(json.dumps({"schemaVersion": 1, "manifest": {"id": "tampered"}}), encoding="utf-8")
+            with self.assertRaises(RegistryError):
+                registry.list()
+
 
 class BrokerTests(unittest.TestCase):
-    def _fixture(self, supervisor=None):
+    def _fixture(self, supervisor=None, registry=None):
         temp = tempfile.TemporaryDirectory()
         root = Path(temp.name)
         runtime_root = root / "runtimes"
@@ -96,13 +152,15 @@ class BrokerTests(unittest.TestCase):
         socket = root / "runtime" / "wayland-0"
         socket.parent.mkdir(parents=True)
         socket.touch()
-        broker = CompatibilityBroker(state_root=state_root, runtime_root=runtime_root, supervisor=supervisor)
-        manifest = AppManifest.from_dict({
-            "id": "safe.app",
-            "backend": "wine",
-            "runtime": "wine-11.0",
-            "entrypoint": "app.exe",
-        })
+        if registry is None:
+            registry = AppRegistry(root / "registry")
+        broker = CompatibilityBroker(
+            state_root=state_root,
+            runtime_root=runtime_root,
+            supervisor=supervisor,
+            registry=registry,
+        )
+        manifest = example_manifest()
         return temp, root, broker, manifest
 
     def test_refuses_unsandboxed_execution(self):
@@ -201,6 +259,24 @@ class BrokerTests(unittest.TestCase):
         wine = broker.capabilities()["providers"]["wine"]
         self.assertEqual(["none"], wine["network"])
         self.assertFalse(wine["clipboard"])
+
+    def test_registered_app_operations_use_stable_id(self):
+        supervisor = FakeSupervisor()
+        temp, root, broker, manifest = self._fixture(supervisor=supervisor)
+        self.addCleanup(temp.cleanup)
+        summary = broker.register_app(example_manifest("Safe App"))
+        self.assertEqual("Safe App", summary["displayName"])
+        self.assertEqual("safe.app", broker.list_apps()[0]["id"])
+        self.assertEqual(unit_name("safe.app"), broker.status_registered("safe.app").unit)
+
+    def test_unregister_refuses_running_application(self):
+        supervisor = FakeSupervisor(running=True)
+        temp, root, broker, manifest = self._fixture(supervisor=supervisor)
+        self.addCleanup(temp.cleanup)
+        broker.register_app(manifest)
+        with self.assertRaisesRegex(CompatibilityError, "stop it first"):
+            broker.unregister_app("safe.app")
+        self.assertEqual("safe.app", broker.list_apps()[0]["id"])
 
 
 class LifecycleTests(unittest.TestCase):
