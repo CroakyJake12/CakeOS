@@ -21,8 +21,8 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Install Rust 1.89
-        uses: dtolnay/rust-toolchain@1.89.0
+      - name: Install Rust 1.92
+        uses: dtolnay/rust-toolchain@1.92.0
 
       - name: Install native core dependencies
         run: |
