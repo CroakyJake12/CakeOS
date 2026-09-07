@@ -10,6 +10,7 @@ from typing import Any, Iterable
 from .audit import audit_environment
 from .lifecycle import LifecycleError, UnitStatus, UserSystemdSupervisor, unit_name
 from .manifest import AppManifest
+from .registry import AppRegistry, RegistryError
 
 
 class CompatibilityError(RuntimeError):
@@ -32,11 +33,13 @@ class CompatibilityBroker:
         state_root: Path | None = None,
         runtime_root: Path | None = None,
         supervisor: UserSystemdSupervisor | None = None,
+        registry: AppRegistry | None = None,
     ):
         data_home = Path(os.environ.get("XDG_DATA_HOME", Path.home() / ".local" / "share"))
         self.state_root = state_root or data_home / "haven" / "compat" / "wine" / "apps"
         self.runtime_root = runtime_root or data_home / "haven" / "compat" / "wine" / "runtimes"
         self.supervisor = supervisor or UserSystemdSupervisor()
+        self.registry = registry or AppRegistry(data_home / "haven" / "compat" / "registry")
 
     def capabilities(self) -> dict[str, Any]:
         return {
@@ -69,6 +72,43 @@ class CompatibilityBroker:
                 "type": "systemd-user",
                 "available": self.supervisor.available,
             },
+        }
+
+    def register_app(self, manifest: AppManifest) -> dict[str, Any]:
+        try:
+            self.registry.register(manifest)
+        except RegistryError as exc:
+            raise CompatibilityError(str(exc)) from exc
+        return self._app_summary(manifest)
+
+    def list_apps(self) -> list[dict[str, Any]]:
+        try:
+            manifests = self.registry.list()
+        except RegistryError as exc:
+            raise CompatibilityError(str(exc)) from exc
+        return [self._app_summary(manifest) for manifest in manifests]
+
+    def get_registered_app(self, app_id: str) -> AppManifest:
+        try:
+            return self.registry.get(app_id)
+        except RegistryError as exc:
+            raise CompatibilityError(str(exc)) from exc
+
+    def unregister_app(self, app_id: str, delete_state: bool = False) -> dict[str, Any]:
+        manifest = self.get_registered_app(app_id)
+        current = self.status(manifest)
+        if current.running:
+            raise CompatibilityError("refusing to unregister a running compatibility application; stop it first")
+        if delete_state:
+            self.reset(manifest)
+        try:
+            self.registry.remove(app_id)
+        except RegistryError as exc:
+            raise CompatibilityError(str(exc)) from exc
+        return {
+            "id": app_id,
+            "unregistered": True,
+            "stateDeleted": delete_state,
         }
 
     def plan(self, manifest: AppManifest) -> LaunchPlan:
@@ -123,8 +163,6 @@ class CompatibilityBroker:
             "--ro-bind", wayland_socket, wayland_socket,
         ]
 
-        # Runtime binaries can require the host dynamic loader/system libraries.
-        # These are deliberately read-only and contain no user document data.
         for host_path in ("/usr", "/lib", "/lib64"):
             if Path(host_path).exists():
                 argv.extend(["--ro-bind", host_path, host_path])
@@ -169,11 +207,17 @@ class CompatibilityBroker:
         except LifecycleError as exc:
             raise CompatibilityError(str(exc)) from exc
 
+    def launch_registered(self, app_id: str) -> UnitStatus:
+        return self.launch(self.get_registered_app(app_id))
+
     def status(self, manifest: AppManifest) -> UnitStatus:
         try:
             return self.supervisor.status(manifest.app_id)
         except LifecycleError as exc:
             raise CompatibilityError(str(exc)) from exc
+
+    def status_registered(self, app_id: str) -> UnitStatus:
+        return self.status(self.get_registered_app(app_id))
 
     def stop(self, manifest: AppManifest) -> UnitStatus:
         try:
@@ -181,13 +225,21 @@ class CompatibilityBroker:
         except LifecycleError as exc:
             raise CompatibilityError(str(exc)) from exc
 
+    def stop_registered(self, app_id: str) -> UnitStatus:
+        return self.stop(self.get_registered_app(app_id))
+
     def logs(self, manifest: AppManifest, lines: int = 200) -> str:
         try:
             return self.supervisor.logs(manifest.app_id, lines)
         except LifecycleError as exc:
             raise CompatibilityError(str(exc)) from exc
 
+    def logs_registered(self, app_id: str, lines: int = 200) -> str:
+        return self.logs(self.get_registered_app(app_id), lines)
+
     def reset(self, manifest: AppManifest) -> None:
+        if manifest.backend != "wine":
+            raise CompatibilityError("environment reset is only implemented for the Wine provider")
         try:
             current = self.supervisor.status(manifest.app_id)
         except LifecycleError as exc:
@@ -201,8 +253,29 @@ class CompatibilityBroker:
         if app_root.exists():
             shutil.rmtree(app_root)
 
+    def reset_registered(self, app_id: str) -> None:
+        self.reset(self.get_registered_app(app_id))
+
     def lifecycle_unit(self, manifest: AppManifest) -> str:
         return unit_name(manifest.app_id)
+
+    def _app_summary(self, manifest: AppManifest) -> dict[str, Any]:
+        return {
+            "id": manifest.app_id,
+            "displayName": manifest.display_name or manifest.app_id,
+            "backend": manifest.backend,
+            "runtime": manifest.runtime,
+            "entrypoint": manifest.entrypoint,
+            "unit": unit_name(manifest.app_id),
+            "permissions": {
+                "network": manifest.network,
+                "clipboard": manifest.clipboard,
+                "audioOutput": manifest.audio_output,
+                "microphone": manifest.microphone,
+                "gpu": manifest.gpu,
+                "mounts": [mount.to_dict() for mount in manifest.mounts],
+            },
+        }
 
     def _validated_mount_source(self, source: Path) -> Path:
         try:
