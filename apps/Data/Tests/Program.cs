@@ -56,7 +56,52 @@ await using (var session = new DataGridSession(fake))
 }
 await fakeDatabase.CloseAsync();
 
-Console.WriteLine("Haven Data contract, grid-session and database-bridge smoke checks passed.");
+await using var querySpreadsheet = new FakeSpreadsheetEngine();
+await using var queryDatabase = new FakeDatabaseEngine();
+var queryWorkbook = await querySpreadsheet.OpenAsync("query-fixture.ods", readOnly: false);
+await querySpreadsheet.SetCellAsync(queryWorkbook.Id, new DataCellAddress("Sheet 1", 0, 0), "Name");
+await querySpreadsheet.SetCellAsync(queryWorkbook.Id, new DataCellAddress("Sheet 1", 0, 1), "Score");
+await querySpreadsheet.SetCellAsync(queryWorkbook.Id, new DataCellAddress("Sheet 1", 1, 0), "Ada");
+await querySpreadsheet.SetCellAsync(queryWorkbook.Id, new DataCellAddress("Sheet 1", 1, 1), "42");
+
+await using (var querySession = new DataQuerySession(querySpreadsheet, queryDatabase))
+{
+    var openedQuery = await querySession.OpenAsync("query.duckdb");
+    Assert(openedQuery.DatabasePath == "query.duckdb", "Query session did not retain its database path.");
+    Assert(openedQuery.PublishedTables.Count == 0 && openedQuery.RecentQueries.Count == 0, "New query session was not empty.");
+
+    var published = await querySession.PublishRangeAsync(
+        queryWorkbook.Id,
+        new DataRangeRequest("Sheet 1", 0, 0, 2, 2),
+        "Scores",
+        firstRowIsHeaders: true);
+    Assert(published.Name == "Scores", "Query session changed the published table name.");
+    Assert(published.Columns.SequenceEqual(["Name", "Score"]), "Query session did not preserve safe spreadsheet headers.");
+    Assert(published.RowCount == 1, "Query session published the header row as data.");
+
+    for (var index = 0; index < 22; index++)
+    {
+        var sql = $"SELECT {index} AS value";
+        var execution = await querySession.ExecuteAsync(sql, maxRows: 25);
+        Assert(execution.Sql == sql, "Query session did not retain normalized SQL text.");
+        Assert(execution.MaxRows == 25, "Query session changed the requested row cap.");
+        Assert(execution.Result.Rows.Count == 1, "Query session did not expose the database result.");
+    }
+
+    var querySnapshot = querySession.Snapshot();
+    Assert(querySnapshot.PublishedTables.Count == 1, "Query session did not track published tables.");
+    Assert(querySnapshot.RecentQueries.Count == 20, "Query session did not cap recent query history at 20.");
+    Assert(querySnapshot.RecentQueries[0].Sql == "SELECT 21 AS value", "Query history is not newest-first.");
+    Assert(querySnapshot.RecentQueries[^1].Sql == "SELECT 2 AS value", "Query history did not discard the oldest entries.");
+    Assert(queryDatabase.QueryCalls == 22, "Query session did not delegate every query exactly once.");
+
+    await querySession.CloseAsync();
+    Assert(!querySession.IsOpen, "Query session remained open after a successful close.");
+    Assert(queryDatabase.CloseCalls == 1, "Query session did not close the database exactly once.");
+}
+await querySpreadsheet.CloseAsync(queryWorkbook.Id);
+
+Console.WriteLine("Haven Data contract, grid-session, database-bridge and query-session smoke checks passed.");
 
 internal sealed class FakeSpreadsheetEngine : IDataSpreadsheetEngine
 {
@@ -149,6 +194,8 @@ internal sealed class FakeDatabaseEngine : IDataDatabaseEngine
     private bool _open;
 
     public DataTableSnapshot? LastTable { get; private set; }
+    public int QueryCalls { get; private set; }
+    public int CloseCalls { get; private set; }
 
     public Task OpenAsync(string databasePath, CancellationToken cancellationToken = default)
     {
@@ -170,12 +217,15 @@ internal sealed class FakeDatabaseEngine : IDataDatabaseEngine
     {
         cancellationToken.ThrowIfCancellationRequested();
         EnsureOpen();
-        return Task.FromResult(new DataQueryResult([], [], false));
+        QueryCalls++;
+        return Task.FromResult(new DataQueryResult(["sql"], [[sql.Trim()]], false));
     }
 
     public Task CloseAsync(CancellationToken cancellationToken = default)
     {
         cancellationToken.ThrowIfCancellationRequested();
+        EnsureOpen();
+        CloseCalls++;
         _open = false;
         return Task.CompletedTask;
     }
