@@ -6,7 +6,40 @@ from unittest.mock import patch
 
 from compatibility.wine.haven_compat.audit import evaluate_preflight
 from compatibility.wine.haven_compat.broker import CompatibilityBroker, CompatibilityError
+from compatibility.wine.haven_compat.lifecycle import UnitStatus, UserSystemdSupervisor, unit_name
 from compatibility.wine.haven_compat.manifest import AppManifest, ManifestError
+
+
+class FakeSupervisor:
+    def __init__(self, running: bool = False):
+        self.available = True
+        self.running = running
+        self.started = None
+
+    def _status(self, app_id: str) -> UnitStatus:
+        return UnitStatus(
+            unit=unit_name(app_id),
+            load_state="loaded" if self.running else "not-found",
+            active_state="active" if self.running else "inactive",
+            sub_state="running" if self.running else "dead",
+            result=None,
+            main_pid=1234 if self.running else None,
+        )
+
+    def start(self, app_id: str, launch_argv: tuple[str, ...], service_env: dict[str, str]) -> UnitStatus:
+        self.started = (app_id, launch_argv, service_env)
+        self.running = True
+        return self._status(app_id)
+
+    def status(self, app_id: str) -> UnitStatus:
+        return self._status(app_id)
+
+    def stop(self, app_id: str) -> UnitStatus:
+        self.running = False
+        return self._status(app_id)
+
+    def logs(self, app_id: str, lines: int = 200) -> str:
+        return f"{unit_name(app_id)}:{lines}"
 
 
 class ManifestTests(unittest.TestCase):
@@ -52,7 +85,7 @@ class ManifestTests(unittest.TestCase):
 
 
 class BrokerTests(unittest.TestCase):
-    def _fixture(self):
+    def _fixture(self, supervisor=None):
         temp = tempfile.TemporaryDirectory()
         root = Path(temp.name)
         runtime_root = root / "runtimes"
@@ -63,7 +96,7 @@ class BrokerTests(unittest.TestCase):
         socket = root / "runtime" / "wayland-0"
         socket.parent.mkdir(parents=True)
         socket.touch()
-        broker = CompatibilityBroker(state_root=state_root, runtime_root=runtime_root)
+        broker = CompatibilityBroker(state_root=state_root, runtime_root=runtime_root, supervisor=supervisor)
         manifest = AppManifest.from_dict({
             "id": "safe.app",
             "backend": "wine",
@@ -144,29 +177,95 @@ class BrokerTests(unittest.TestCase):
         with self.assertRaisesRegex(CompatibilityError, "PipeWire media permissions"):
             broker.plan(manifest)
 
+    def test_launch_delegates_to_supervisor(self):
+        supervisor = FakeSupervisor()
+        temp, root, broker, manifest = self._fixture(supervisor=supervisor)
+        self.addCleanup(temp.cleanup)
+        env = {"XDG_RUNTIME_DIR": str(root / "runtime"), "WAYLAND_DISPLAY": "wayland-0"}
+        with patch.dict(os.environ, env, clear=False), patch("shutil.which", return_value="/usr/bin/bwrap"):
+            status = broker.launch(manifest)
+        self.assertTrue(status.running)
+        self.assertIsNotNone(supervisor.started)
+        self.assertIn("--unshare-all", supervisor.started[1])
+
+    def test_reset_refuses_running_application(self):
+        supervisor = FakeSupervisor(running=True)
+        temp, root, broker, manifest = self._fixture(supervisor=supervisor)
+        self.addCleanup(temp.cleanup)
+        with self.assertRaisesRegex(CompatibilityError, "stop it first"):
+            broker.reset(manifest)
+
+    def test_capabilities_advertise_only_enforced_network_policy(self):
+        temp, root, broker, manifest = self._fixture(supervisor=FakeSupervisor())
+        self.addCleanup(temp.cleanup)
+        wine = broker.capabilities()["providers"]["wine"]
+        self.assertEqual(["none"], wine["network"])
+        self.assertFalse(wine["clipboard"])
+
+
+class LifecycleTests(unittest.TestCase):
+    def test_unit_name_is_stable_and_does_not_embed_app_id(self):
+        first = unit_name("safe.app")
+        self.assertEqual(first, unit_name("safe.app"))
+        self.assertTrue(first.startswith("haven-compat-"))
+        self.assertTrue(first.endswith(".service"))
+        self.assertNotIn("safe.app", first)
+
+    def test_start_command_clears_environment_and_owns_control_group(self):
+        supervisor = UserSystemdSupervisor(
+            systemd_run="/usr/bin/systemd-run",
+            systemctl="/usr/bin/systemctl",
+            env_bin="/usr/bin/env",
+            journalctl="/usr/bin/journalctl",
+        )
+        command = supervisor.build_start_argv(
+            "safe.app",
+            ("/usr/bin/bwrap", "--unshare-all", "/opt/haven-wine/bin/wine", "app.exe"),
+            {"PATH": "/usr/bin:/bin", "LANG": "C.UTF-8", "SECRET": "must-not-leak"},
+        )
+        self.assertIn("--property=KillMode=control-group", command)
+        self.assertIn("--collect", command)
+        self.assertIn("/usr/bin/env", command)
+        self.assertIn("-i", command)
+        self.assertNotIn("SECRET=must-not-leak", command)
+        self.assertIn("/usr/bin/bwrap", command)
+
 
 class AuditTests(unittest.TestCase):
-    def test_wine_preflight_requires_managed_runtime(self):
-        facts = {
+    def _wine_ready_facts(self):
+        return {
             "platform": {"system": "Linux", "machine": "x86_64"},
-            "commands": {"bwrap": "/usr/bin/bwrap", "podman": None, "docker": None, "freerdp": None},
-            "session": {"waylandSocketExists": True},
+            "commands": {
+                "bwrap": "/usr/bin/bwrap",
+                "systemd-run": "/usr/bin/systemd-run",
+                "systemctl": "/usr/bin/systemctl",
+                "journalctl": "/usr/bin/journalctl",
+                "env": "/usr/bin/env",
+                "podman": None,
+                "docker": None,
+                "freerdp": None,
+            },
+            "session": {"waylandSocketExists": True, "systemdUserReachable": True},
             "devices": {"kvmExists": False, "kvmReadable": False, "kvmWritable": False},
-            "managedWineRuntimes": [],
+            "managedWineRuntimes": [{"id": "wine-11.0"}],
         }
+
+    def test_wine_preflight_requires_managed_runtime(self):
+        facts = self._wine_ready_facts()
+        facts["managedWineRuntimes"] = []
         preflight = evaluate_preflight(facts)
         self.assertFalse(preflight["wineSlice1"]["prerequisitesPresent"])
         self.assertIn("managed-wine-runtime", preflight["wineSlice1"]["missing"])
 
-    def test_wine_preflight_can_be_ready_without_winboat(self):
-        facts = {
-            "platform": {"system": "Linux", "machine": "x86_64"},
-            "commands": {"bwrap": "/usr/bin/bwrap", "podman": None, "docker": None, "freerdp": None},
-            "session": {"waylandSocketExists": True},
-            "devices": {"kvmExists": False, "kvmReadable": False, "kvmWritable": False},
-            "managedWineRuntimes": [{"id": "wine-11.0"}],
-        }
+    def test_wine_preflight_requires_user_systemd_manager(self):
+        facts = self._wine_ready_facts()
+        facts["session"]["systemdUserReachable"] = False
         preflight = evaluate_preflight(facts)
+        self.assertFalse(preflight["wineSlice1"]["prerequisitesPresent"])
+        self.assertIn("systemd-user-manager", preflight["wineSlice1"]["missing"])
+
+    def test_wine_preflight_can_be_ready_without_winboat(self):
+        preflight = evaluate_preflight(self._wine_ready_facts())
         self.assertTrue(preflight["wineSlice1"]["prerequisitesPresent"])
         self.assertFalse(preflight["winboatFuture"]["prerequisitesPresent"])
 
