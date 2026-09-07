@@ -84,10 +84,6 @@ public:
     void setCurrentSlide(int slideIndex);
     [[nodiscard]] SlideExtent slideExtent(int slideIndex) const;
 
-    // Internal semantic read model source. The worker normalizes this upstream
-    // JSON before anything crosses the HUI protocol boundary.
-    [[nodiscard]] std::string documentStructureJson() const;
-
     // CakeOS-owned semantic slide operations. These deliberately avoid
     // exposing LibreOffice command names or selection mechanics to HUI/GenUI.
     void addSlideAfter(int slideIndex);
