@@ -16,7 +16,7 @@ function Read-KeyValueFile([string] $Path) {
         if ([string]::IsNullOrWhiteSpace($line)) { continue }
         $index = $line.IndexOf('=')
         if ($index -lt 1) {
-            throw "Malformed key/value line in $Path: $line"
+            throw "Malformed key/value line in ${Path}: $line"
         }
         $key = $line.Substring(0, $index)
         $value = $line.Substring($index + 1)
@@ -65,7 +65,7 @@ function Validate-EvidenceDirectory([System.IO.DirectoryInfo] $Directory, [strin
 
     $version = (Get-Content -LiteralPath $versionPath -Raw).Trim()
     if ($version -ne $ExpectedVersion) {
-        throw "Expected-version evidence mismatch in $versionPath: $version"
+        throw "Expected-version evidence mismatch in ${versionPath}: $version"
     }
 
     $hashLine = (Get-Content -LiteralPath $packageHashPath -Raw).Trim()
@@ -107,7 +107,7 @@ function Validate-EvidenceDirectory([System.IO.DirectoryInfo] $Directory, [strin
 
     $exported = (Get-Content -LiteralPath $exportPath -Raw).Trim()
     if ($exported -notmatch '/cakeos-gate4-evidence/' -or $exported -notlike "*/$($Directory.Name)") {
-        throw "Export-path evidence is inconsistent in $exportPath: $exported"
+        throw "Export-path evidence is inconsistent in ${exportPath}: $exported"
     }
 
     return [pscustomobject]@{
