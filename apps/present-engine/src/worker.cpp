@@ -1,13 +1,17 @@
 #include "cakeos/present/engine.hpp"
 
+#include <LibreOfficeKit/LibreOfficeKitEnums.h>
 #include <nlohmann/json.hpp>
 
 #include <array>
+#include <charconv>
 #include <cstdint>
 #include <iostream>
 #include <limits>
+#include <optional>
 #include <stdexcept>
 #include <string>
+#include <string_view>
 #include <vector>
 
 namespace {
@@ -19,10 +23,16 @@ constexpr std::uint32_t MaxMetadataBytes = 1024U * 1024U;
 constexpr std::uint32_t MaxPayloadBytes = 64U * 1024U * 1024U;
 constexpr int MaxRenderDimension = 4096;
 constexpr std::uint64_t MaxRenderPixels = 16U * 1024U * 1024U;
+constexpr std::size_t MaxQueuedEvents = 256U;
 
 struct Frame {
     std::string metadata;
     std::vector<std::uint8_t> payload;
+};
+
+struct EventQueue {
+    std::vector<Json> events;
+    bool overflowed{false};
 };
 
 std::uint32_t decodeU32Le(const std::array<std::uint8_t, 8>& header, std::size_t offset)
@@ -77,10 +87,7 @@ bool readFrame(std::istream& input, Frame& frame)
     readExact(input, frame.metadata.data(), frame.metadata.size());
     frame.payload.resize(payloadSize);
     if (!frame.payload.empty()) {
-        readExact(
-            input,
-            reinterpret_cast<char*>(frame.payload.data()),
-            frame.payload.size());
+        readExact(input, reinterpret_cast<char*>(frame.payload.data()), frame.payload.size());
     }
     return true;
 }
@@ -98,9 +105,7 @@ void writeFrame(std::ostream& output, const Json& metadata, const std::vector<st
     output.write(reinterpret_cast<const char*>(header.data()), static_cast<std::streamsize>(header.size()));
     output.write(serialized.data(), static_cast<std::streamsize>(serialized.size()));
     if (!payload.empty()) {
-        output.write(
-            reinterpret_cast<const char*>(payload.data()),
-            static_cast<std::streamsize>(payload.size()));
+        output.write(reinterpret_cast<const char*>(payload.data()), static_cast<std::streamsize>(payload.size()));
     }
     output.flush();
     if (!output) {
@@ -125,6 +130,158 @@ Json failure(const Json& id, const std::string& message)
     Json response = responseBase(id, false);
     response["error"] = Json{{"code", "operation_failed"}, {"message", message}};
     return response;
+}
+
+Json eventEnvelope(std::string_view name, Json data = Json::object())
+{
+    return Json{
+        {"event", name},
+        {"protocolVersion", ProtocolVersion},
+        {"data", std::move(data)}
+    };
+}
+
+void queueEvent(EventQueue& queue, Json event)
+{
+    if (queue.events.size() >= MaxQueuedEvents) {
+        queue.overflowed = true;
+        return;
+    }
+    queue.events.push_back(std::move(event));
+}
+
+std::optional<long> parseLong(std::string_view value)
+{
+    while (!value.empty() && value.front() == ' ') {
+        value.remove_prefix(1U);
+    }
+    while (!value.empty() && value.back() == ' ') {
+        value.remove_suffix(1U);
+    }
+    if (value.empty()) {
+        return std::nullopt;
+    }
+
+    long parsed = 0;
+    const auto result = std::from_chars(value.data(), value.data() + value.size(), parsed);
+    if (result.ec != std::errc{} || result.ptr != value.data() + value.size()) {
+        return std::nullopt;
+    }
+    return parsed;
+}
+
+std::vector<long> parseCommaSeparatedLongs(std::string_view payload)
+{
+    std::vector<long> values;
+    std::size_t offset = 0U;
+    while (offset <= payload.size()) {
+        const auto comma = payload.find(',', offset);
+        const auto end = comma == std::string_view::npos ? payload.size() : comma;
+        const auto parsed = parseLong(payload.substr(offset, end - offset));
+        if (!parsed.has_value()) {
+            return {};
+        }
+        values.push_back(*parsed);
+        if (comma == std::string_view::npos) {
+            break;
+        }
+        offset = comma + 1U;
+    }
+    return values;
+}
+
+std::optional<Json> mapLibreOfficeEvent(const cakeos::present::EngineEvent& event)
+{
+    switch (event.upstreamType) {
+    case LOK_CALLBACK_INVALIDATE_TILES: {
+        if (event.payload == "EMPTY" || event.payload.empty()) {
+            return eventEnvelope("canvasInvalidated", Json{{"all", true}, {"source", "libreoffice"}});
+        }
+        const auto values = parseCommaSeparatedLongs(event.payload);
+        if (values.size() < 4U) {
+            return eventEnvelope("canvasInvalidated", Json{{"all", true}, {"source", "libreoffice"}});
+        }
+        return eventEnvelope("canvasInvalidated", Json{
+            {"all", false},
+            {"source", "libreoffice"},
+            {"rectTwips", Json{
+                {"x", values[0]},
+                {"y", values[1]},
+                {"width", values[2]},
+                {"height", values[3]}
+            }}
+        });
+    }
+    case LOK_CALLBACK_SET_PART: {
+        const auto slideIndex = parseLong(event.payload);
+        if (!slideIndex.has_value() || *slideIndex < 0 || *slideIndex > std::numeric_limits<int>::max()) {
+            return std::nullopt;
+        }
+        return eventEnvelope("slideChanged", Json{{"slideIndex", static_cast<int>(*slideIndex)}});
+    }
+    case LOK_CALLBACK_CONTEXT_CHANGED: {
+        const auto separator = event.payload.find(' ');
+        const std::string context = separator == std::string::npos
+            ? event.payload
+            : event.payload.substr(separator + 1U);
+        if (context.empty()) {
+            return std::nullopt;
+        }
+        return eventEnvelope("editingContextChanged", Json{{"context", context}});
+    }
+    case LOK_CALLBACK_ERROR: {
+        Json data{{"classification", "error"}, {"message", "LibreOffice reported an error"}};
+        try {
+            const Json upstream = Json::parse(event.payload);
+            if (upstream.contains("classification") && upstream.at("classification").is_string()) {
+                data["classification"] = upstream.at("classification");
+            }
+            if (upstream.contains("kind") && upstream.at("kind").is_string()) {
+                data["kind"] = upstream.at("kind");
+            }
+            if (upstream.contains("code") && upstream.at("code").is_number_integer()) {
+                data["code"] = upstream.at("code");
+            }
+            if (upstream.contains("message") && upstream.at("message").is_string()) {
+                data["message"] = upstream.at("message");
+            }
+        } catch (const Json::exception&) {
+            // Keep the stable fallback instead of leaking an unparsed upstream payload.
+        }
+        return eventEnvelope("engineError", std::move(data));
+    }
+    default:
+        return std::nullopt;
+    }
+}
+
+void queueMutationEvents(EventQueue& queue, const cakeos::present::PresentEngine& engine, std::string_view reason)
+{
+    Json changed{{"reason", reason}};
+    Json repaint{{"all", true}, {"source", "semantic"}, {"reason", reason}};
+    if (engine.isOpen()) {
+        const int slideIndex = engine.currentSlide();
+        changed["slideIndex"] = slideIndex;
+        repaint["slideIndex"] = slideIndex;
+    }
+    queueEvent(queue, eventEnvelope("documentChanged", std::move(changed)));
+    queueEvent(queue, eventEnvelope("canvasInvalidated", std::move(repaint)));
+}
+
+void flushEvents(std::ostream& output, EventQueue& queue)
+{
+    if (queue.overflowed) {
+        writeFrame(output, eventEnvelope("canvasInvalidated", Json{
+            {"all", true},
+            {"source", "worker"},
+            {"reason", "eventQueueOverflow"}
+        }));
+    }
+    for (const auto& event : queue.events) {
+        writeFrame(output, event);
+    }
+    queue.events.clear();
+    queue.overflowed = false;
 }
 
 int checkedSlideTwips(long value)
@@ -166,6 +323,14 @@ Json helloResult()
         {"protocolVersion", ProtocolVersion},
         {"framing", "u32le-json-length,u32le-binary-length,json,binary"},
         {"pixelTransport", "inline-binary-v1"},
+        {"eventTransport", "framed-json-v1"},
+        {"events", Json::array({
+            "canvasInvalidated",
+            "documentChanged",
+            "slideChanged",
+            "editingContextChanged",
+            "engineError"
+        })},
         {"capabilities", Json::array({
             "open",
             "close",
@@ -188,8 +353,14 @@ int main()
 {
     try {
         cakeos::present::PresentEngine engine;
-        Frame frame;
+        EventQueue eventQueue;
+        engine.setEventCallback([&eventQueue](const cakeos::present::EngineEvent& event) {
+            if (const auto mapped = mapLibreOfficeEvent(event); mapped.has_value()) {
+                queueEvent(eventQueue, *mapped);
+            }
+        });
 
+        Frame frame;
         while (readFrame(std::cin, frame)) {
             Json id = nullptr;
             bool shouldQuit = false;
@@ -252,18 +423,23 @@ int main()
                 } else if (operation == "addSlideAfter") {
                     engine.addSlideAfter(request.at("slideIndex").get<int>());
                     writeFrame(std::cout, success(id, slideListResult(engine)));
+                    queueMutationEvents(eventQueue, engine, operation);
                 } else if (operation == "duplicateSlide") {
                     engine.duplicateSlide(request.at("slideIndex").get<int>());
                     writeFrame(std::cout, success(id, slideListResult(engine)));
+                    queueMutationEvents(eventQueue, engine, operation);
                 } else if (operation == "deleteSlide") {
                     engine.deleteSlide(request.at("slideIndex").get<int>());
                     writeFrame(std::cout, success(id, slideListResult(engine)));
+                    queueMutationEvents(eventQueue, engine, operation);
                 } else if (operation == "undo") {
                     engine.undo();
                     writeFrame(std::cout, success(id, slideListResult(engine)));
+                    queueMutationEvents(eventQueue, engine, operation);
                 } else if (operation == "redo") {
                     engine.redo();
                     writeFrame(std::cout, success(id, slideListResult(engine)));
+                    queueMutationEvents(eventQueue, engine, operation);
                 } else if (operation == "saveAs") {
                     engine.saveAs(
                         request.at("path").get<std::string>(),
@@ -280,6 +456,7 @@ int main()
                 writeFrame(std::cout, failure(id, error.what()));
             }
 
+            flushEvents(std::cout, eventQueue);
             if (shouldQuit) {
                 break;
             }
