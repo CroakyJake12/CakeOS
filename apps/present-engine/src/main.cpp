@@ -4,8 +4,10 @@
 #include <cstdint>
 #include <fstream>
 #include <iostream>
+#include <limits>
 #include <stdexcept>
 #include <string>
+#include <utility>
 
 namespace {
 
@@ -48,6 +50,14 @@ int parseSlideIndex(const char* value)
     return index;
 }
 
+int checkedTwips(long value)
+{
+    if (value <= 0 || value > std::numeric_limits<int>::max()) {
+        throw std::overflow_error("presentation extent cannot be represented by the tiled-rendering API");
+    }
+    return static_cast<int>(value);
+}
+
 } // namespace
 
 int main(int argc, char** argv)
@@ -86,8 +96,8 @@ int main(int argc, char** argv)
         request.slideIndex = slideIndex;
         request.pixelWidth = 1280;
         request.pixelHeight = 720;
-        request.tileWidthTwips = static_cast<int>(extent.widthTwips);
-        request.tileHeightTwips = static_cast<int>(extent.heightTwips);
+        request.tileWidthTwips = checkedTwips(extent.widthTwips);
+        request.tileHeightTwips = checkedTwips(extent.heightTwips);
 
         const auto tile = engine.renderTile(request);
         writePpm(argv[2], tile);
@@ -97,7 +107,6 @@ int main(int argc, char** argv)
         std::cout << "slide_name=" << slideList[static_cast<std::size_t>(slideIndex)].name << '\n';
         std::cout << "extent_twips=" << extent.widthTwips << 'x' << extent.heightTwips << '\n';
         std::cout << "pixels=" << tile.pixelWidth << 'x' << tile.pixelHeight << '\n';
-        std::cout << "presentation_info=" << engine.presentationInfo() << '\n';
         return 0;
     } catch (const std::exception& error) {
         std::cerr << "present-engine smoke failed: " << error.what() << '\n';
