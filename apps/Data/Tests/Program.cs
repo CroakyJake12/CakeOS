@@ -33,6 +33,14 @@ await using (var session = new DataGridSession(fake))
     var afterDeleteName = await session.DeleteNamedRangeAsync("gridinput");
     Assert(afterDeleteName.Count == 0, "Grid session did not delete a range-backed name case-insensitively.");
 
+    var validation = await session.ApplyListValidationAsync(1, 2, 2, 1, ["Open", "Closed"], allowBlank: false);
+    Assert(validation.Enabled && validation.Values.SequenceEqual(["Open", "Closed"]) && !validation.AllowBlank,
+        "Grid session did not apply the requested literal list validation.");
+    var validationRead = await session.GetListValidationAsync(1, 2, 2, 1);
+    Assert(validationRead == validation, "Grid session did not read back the applied validation state.");
+    var clearedValidation = await session.ClearValidationAsync(1, 2, 2, 1);
+    Assert(!clearedValidation.Enabled && clearedValidation.Values.Count == 0, "Grid session did not clear list validation.");
+
     _ = await session.InsertRowsAsync(1);
     _ = await session.DeleteRowsAsync(1);
     _ = await session.InsertColumnsAsync(1);
@@ -106,13 +114,14 @@ await using (var querySession = new DataQuerySession(querySpreadsheet, queryData
 }
 await querySpreadsheet.CloseAsync(queryWorkbook.Id);
 
-Console.WriteLine("Haven Data contract, grid-session, named-range, structural-edit, database-bridge, query-session and materialisation smoke checks passed.");
+Console.WriteLine("Haven Data contract, grid-session, named-range, list-validation, structural-edit, database-bridge, query-session and materialisation smoke checks passed.");
 
 internal sealed class FakeSpreadsheetEngine : IDataSpreadsheetEngine
 {
     private readonly Dictionary<(string Sheet, int Row, int Column), string> _values = new();
     private readonly List<string> _sheets = ["Sheet 1", "Summary"];
     private readonly Dictionary<string, DataNamedRangeSummary> _namedRanges = new(StringComparer.OrdinalIgnoreCase);
+    private readonly Dictionary<DataRangeRequest, DataListValidationState> _validations = new();
     private DataWorkbookHandle? _open;
 
     public int RecalculateCalls { get; private set; }
@@ -207,6 +216,35 @@ internal sealed class FakeSpreadsheetEngine : IDataSpreadsheetEngine
         EnsureOpen(workbookId);
         if (!_namedRanges.Remove(name)) throw new InvalidOperationException("Fake named range does not exist.");
         return Task.CompletedTask;
+    }
+
+    public Task<DataListValidationState> GetListValidationAsync(string workbookId, DataRangeRequest range, CancellationToken cancellationToken = default)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        EnsureOpen(workbookId);
+        return Task.FromResult(_validations.GetValueOrDefault(range, new DataListValidationState(range, false, [], true)));
+    }
+
+    public Task<DataListValidationState> ApplyListValidationAsync(
+        string workbookId,
+        DataRangeRequest range,
+        IReadOnlyList<string> values,
+        bool allowBlank = true,
+        CancellationToken cancellationToken = default)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        EnsureOpen(workbookId);
+        var state = new DataListValidationState(range, true, values.ToArray(), allowBlank);
+        _validations[range] = state;
+        return Task.FromResult(state);
+    }
+
+    public Task<DataListValidationState> ClearValidationAsync(string workbookId, DataRangeRequest range, CancellationToken cancellationToken = default)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        EnsureOpen(workbookId);
+        _validations.Remove(range);
+        return Task.FromResult(new DataListValidationState(range, false, [], true));
     }
 
     public Task InsertRowsAsync(string workbookId, string sheet, int index, int count, CancellationToken cancellationToken = default)
