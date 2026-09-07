@@ -84,6 +84,14 @@ public:
     void setCurrentSlide(int slideIndex);
     [[nodiscard]] SlideExtent slideExtent(int slideIndex) const;
 
+    // CakeOS-owned semantic slide operations. These deliberately avoid
+    // exposing LibreOffice command names to HUI/GenUI callers.
+    void addSlideAfter(int slideIndex);
+    void duplicateSlide(int slideIndex);
+    void deleteSlide(int slideIndex);
+    void undo();
+    void redo();
+
     [[nodiscard]] RenderedTile renderTile(const TileRequest& request);
 
     void postKeyEvent(KeyEventType type, int charCode, int keyCode);
