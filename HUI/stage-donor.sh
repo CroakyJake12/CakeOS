@@ -31,6 +31,15 @@ actual="$(git -C "$tmp" rev-parse HEAD)"
 rm -rf "$dest"
 mkdir -p "$dest"
 cp -R "$tmp/$path/." "$dest/"
+
+# The pinned donor currently contains tracked build-output trees such as obj-hui.
+# Generated output is not source and must never cross the CakeOS migration boundary.
+find "$dest" -type d \( -name obj -o -name 'obj-*' -o -name bin -o -name 'bin-*' \) -prune -exec rm -rf {} +
+if find "$dest" -type d \( -name obj -o -name 'obj-*' -o -name bin -o -name 'bin-*' \) -print -quit | grep -q .; then
+  echo "Generated build-output directory remained after donor staging" >&2
+  exit 1
+fi
+
 printf '%s\n' "$rev" > "$root/HUI/vendor/.donor-revision"
 
-echo "Staged $repo@$rev:$path into HUI/vendor/Haven.UI"
+echo "Staged source-only $repo@$rev:$path into HUI/vendor/Haven.UI"
