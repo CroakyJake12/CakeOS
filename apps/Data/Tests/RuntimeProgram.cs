@@ -87,25 +87,37 @@ try
     var formula = await grid.EditCellAsync(3, 1, string.Empty, "=SUM(B2:B3)");
     Assert(formula.Grid.Values[3][1] == "62", $"Calc formula recalculation through .NET returned '{formula.Grid.Values[3][1]}' instead of 62.");
 
-    var rowInserted = await grid.InsertRowsAsync(1);
+    var named = await grid.CreateNamedRangeAsync("ScoresRange", 1, 0, 2, 2);
+    Assert(named.Range is { StartRow: 1, StartColumn: 0, RowCount: 2, ColumnCount: 2 }, "DataGridSession created the wrong range-backed name.");
+    Assert((await grid.ListNamedRangesAsync()).Any(item => item.Name == "ScoresRange"), "DataGridSession did not list its created named range.");
+
+    var rowInserted = await grid.InsertRowsAsync(0);
     Assert(rowInserted.Grid.Values[2][0] == "Ada" && rowInserted.Grid.Values[4][1] == "62",
         "DataGridSession row insertion did not shift workbook cells/formula through Calc.");
+    var shiftedNamedRow = (await grid.ListNamedRangesAsync()).Single(item => item.Name == "ScoresRange");
+    Assert(shiftedNamedRow.Range.StartRow == 2, "Calc did not shift the named range when a row was inserted before it.");
     var shiftedRowEdit = await grid.EditCellAsync(2, 1, "43");
     Assert(shiftedRowEdit.Grid.Values[4][1] == "63", "Shifted formula did not continue tracking its row dependency after insertion.");
-    var rowDeleted = await grid.DeleteRowsAsync(1);
+    var rowDeleted = await grid.DeleteRowsAsync(0);
     Assert(rowDeleted.Grid.Values[1][0] == "Ada" && rowDeleted.Grid.Values[3][1] == "63",
         "DataGridSession row deletion did not restore the shifted data/formula positions.");
+    Assert((await grid.ListNamedRangesAsync()).Single(item => item.Name == "ScoresRange").Range.StartRow == 1,
+        "Calc did not restore the named range position after row deletion.");
     var restoredRowValue = await grid.EditCellAsync(1, 1, "42");
     Assert(restoredRowValue.Grid.Values[3][1] == "62", "Formula relationship was lost after row insert/delete round trip.");
 
-    var columnInserted = await grid.InsertColumnsAsync(1);
+    var columnInserted = await grid.InsertColumnsAsync(0);
     Assert(columnInserted.Grid.Values[1][2] == "42" && columnInserted.Grid.Values[3][2] == "62",
         "DataGridSession column insertion did not shift workbook cells/formula through Calc.");
+    var shiftedNamedColumn = (await grid.ListNamedRangesAsync()).Single(item => item.Name == "ScoresRange");
+    Assert(shiftedNamedColumn.Range.StartColumn == 1, "Calc did not shift the named range when a column was inserted before it.");
     var shiftedColumnEdit = await grid.EditCellAsync(1, 2, "44");
     Assert(shiftedColumnEdit.Grid.Values[3][2] == "64", "Shifted formula did not continue tracking its column dependency after insertion.");
-    var columnDeleted = await grid.DeleteColumnsAsync(1);
+    var columnDeleted = await grid.DeleteColumnsAsync(0);
     Assert(columnDeleted.Grid.Values[1][1] == "44" && columnDeleted.Grid.Values[3][1] == "64",
         "DataGridSession column deletion did not restore the shifted data/formula positions.");
+    Assert((await grid.ListNamedRangesAsync()).Single(item => item.Name == "ScoresRange").Range.StartColumn == 0,
+        "Calc did not restore the named range position after column deletion.");
     var restoredColumnValue = await grid.EditCellAsync(1, 1, "42");
     Assert(restoredColumnValue.Grid.Values[3][1] == "62", "Formula relationship was lost after column insert/delete round trip.");
 
@@ -141,6 +153,8 @@ try
 
     var reopened = await grid.OpenAsync(savedOds, readOnly: true);
     Assert(reopened.Grid.Values[3][0] == "Total" && reopened.Grid.Values[3][1] == "62", "Saved ODS did not preserve the .NET-edited formula after reopen.");
+    var reopenedNamed = (await grid.ListNamedRangesAsync()).Single(item => item.Name == "ScoresRange");
+    Assert(reopenedNamed.Range is { StartRow: 1, StartColumn: 0, RowCount: 2, ColumnCount: 2 }, "Saved ODS did not preserve the named range.");
     var reopenedSheets = await spreadsheet.ListSheetsAsync(reopened.Workbook.Id);
     Assert(reopenedSheets.Any(sheet => sheet.Name == "Query Result") && reopenedSheets.Any(sheet => sheet.Name == "Literal Result"),
         "Saved ODS did not preserve materialized query-result sheets.");
@@ -154,7 +168,7 @@ try
     Assert(reopenedLiteral.Values[1][0] == "=1+1", "Saved ODS converted literal query output into a formula.");
     await grid.CloseAsync();
 
-    Console.WriteLine("Haven Data .NET-to-worker structural and bidirectional runtime integration checks passed.");
+    Console.WriteLine("Haven Data .NET-to-worker named-range, structural and bidirectional runtime integration checks passed.");
 }
 finally
 {
