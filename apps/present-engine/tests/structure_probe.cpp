@@ -1,7 +1,6 @@
 #include "cakeos/present/engine.hpp"
 
 #include <LibreOfficeKit/LibreOfficeKit.hxx>
-#include <LibreOfficeKit/LibreOfficeKitEnums.h>
 #include <nlohmann/json.hpp>
 
 #include <filesystem>
@@ -9,6 +8,10 @@
 #include <memory>
 #include <stdexcept>
 #include <string>
+
+#ifndef CAKEOS_PRESENT_HAS_STRUCTURE_REQUEST
+#define CAKEOS_PRESENT_HAS_STRUCTURE_REQUEST 0
+#endif
 
 namespace {
 
@@ -36,17 +39,6 @@ bool containsString(const Json& value, const std::string& expected)
     return false;
 }
 
-std::string takeCommandValues(lok::Office& office, lok::Document& document, const char* command)
-{
-    char* raw = document.getCommandValues(command);
-    if (raw == nullptr) {
-        return {};
-    }
-    std::string result(raw);
-    office.freeError(raw);
-    return result;
-}
-
 } // namespace
 
 int main(int argc, char** argv)
@@ -56,6 +48,10 @@ int main(int argc, char** argv)
         return 2;
     }
 
+#if !CAKEOS_PRESENT_HAS_STRUCTURE_REQUEST
+    std::cout << "structure_request=unavailable\n";
+    return 0;
+#else
     try {
         const auto profile = std::filesystem::temp_directory_path() / "cakeos-present-structure-probe-profile";
         std::error_code ignored;
@@ -70,26 +66,15 @@ int main(int argc, char** argv)
             throw std::runtime_error("failed to initialise LibreOfficeKit");
         }
 
-        const std::string documentUrl = cakeos::present::PresentEngine::pathToFileUrl(argv[1]);
-        std::unique_ptr<lok::Document> document(office->documentLoad(documentUrl.c_str()));
-        if (!document || document->getDocumentType() != LOK_DOCTYPE_PRESENTATION) {
-            throw std::runtime_error("failed to open presentation through LibreOfficeKit");
+        char* raw = office->extractDocumentStructureRequest(argv[1], "slides");
+        if (raw == nullptr || *raw == '\0') {
+            if (raw != nullptr) {
+                office->freeError(raw);
+            }
+            throw std::runtime_error("dedicated structure request returned no data");
         }
-        document->initializeForRendering();
-        document->setPartMode(LOK_PARTMODE_SLIDES);
-
-        std::string structureText = takeCommandValues(
-            *office,
-            *document,
-            ".uno:ExtractDocumentStructure?filter=slides");
-        std::string commandVariant = "filtered";
-        if (structureText.empty()) {
-            structureText = takeCommandValues(*office, *document, ".uno:ExtractDocumentStructure");
-            commandVariant = "unfiltered";
-        }
-        if (structureText.empty()) {
-            throw std::runtime_error("ExtractDocumentStructure returned no data through LibreOfficeKit");
-        }
+        const std::string structureText(raw);
+        office->freeError(raw);
 
         const Json structure = Json::parse(structureText);
         if (!structure.contains("Slides") || !structure.at("Slides").is_object()) {
@@ -111,12 +96,11 @@ int main(int argc, char** argv)
             throw std::runtime_error("semantic object inventory does not expose the Alpha title text");
         }
 
+        std::cout << "structure_request=dedicated-office-api\n";
         std::cout << "structure_inventory=passed\n";
-        std::cout << "structure_command_variant=" << commandVariant << '\n';
         std::cout << "structure_slide0_objects=" << objectCount << '\n';
         std::cout << "structure_text=Alpha\n";
 
-        document.reset();
         office.reset();
         std::filesystem::remove_all(profile, ignored);
         return 0;
@@ -124,4 +108,5 @@ int main(int argc, char** argv)
         std::cerr << "present structure probe failed: " << error.what() << '\n';
         return 1;
     }
+#endif
 }
