@@ -1,0 +1,30 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+lock="$root/havenos.lock"
+packages="$root/platform/ubuntu/packages/havenos-desktop.list"
+
+command -v jq >/dev/null || { echo "jq is required" >&2; exit 2; }
+
+rev="$(jq -r '.components.HUI.migrationDonor.revision' "$lock")"
+[[ "$rev" =~ ^[0-9a-f]{40}$ ]] || { echo "HUI donor revision is not a full SHA" >&2; exit 1; }
+
+if grep -Eq '^\*\*\* |^#!/bin/sh$|^lb config ' "$packages"; then
+  echo "Ubuntu package manifest still contains patch/script residue" >&2
+  exit 1
+fi
+
+expected=(ubuntu-desktop-minimal gnome-shell mutter gdm3 network-manager pipewire wireplumber systemd live-build debootstrap dpkg-dev)
+for package in "${expected[@]}"; do
+  grep -Fxq "$package" "$packages" || { echo "Missing desktop package: $package" >&2; exit 1; }
+done
+
+if [[ -d "$root/HUI/vendor/Haven.UI" ]]; then
+  if grep -RIl --include='*.cs' --include='*.csproj' 'Avalonia' "$root/HUI/vendor/Haven.UI" | grep -q .; then
+    echo "Staged HUI core unexpectedly references Avalonia" >&2
+    exit 1
+  fi
+fi
+
+echo "HUI preview provenance and package-manifest validation passed."
