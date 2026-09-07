@@ -18,6 +18,10 @@ public interface IDataSpreadsheetEngine : IAsyncDisposable
     Task<DataRangeSnapshot> ReadRangeAsync(string workbookId, DataRangeRequest range, CancellationToken cancellationToken = default);
     Task<DataCellSnapshot> SetCellAsync(string workbookId, DataCellAddress address, string? value, string? formula = null, CancellationToken cancellationToken = default);
     Task<DataRangeSnapshot> CreateSheetWithValuesAsync(string workbookId, string sheetName, IReadOnlyList<IReadOnlyList<string>> values, CancellationToken cancellationToken = default);
+    Task InsertRowsAsync(string workbookId, string sheet, int index, int count, CancellationToken cancellationToken = default);
+    Task DeleteRowsAsync(string workbookId, string sheet, int index, int count, CancellationToken cancellationToken = default);
+    Task InsertColumnsAsync(string workbookId, string sheet, int index, int count, CancellationToken cancellationToken = default);
+    Task DeleteColumnsAsync(string workbookId, string sheet, int index, int count, CancellationToken cancellationToken = default);
     Task RecalculateAsync(string workbookId, CancellationToken cancellationToken = default);
     Task SaveAsync(string workbookId, string destinationPath, CancellationToken cancellationToken = default);
     Task CloseAsync(string workbookId, CancellationToken cancellationToken = default);
