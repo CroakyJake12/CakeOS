@@ -87,8 +87,7 @@ public static class HavenBoardReducer
                 {
                     var moved = groups[moveGroup.FromIndex];
                     groups.RemoveAt(moveGroup.FromIndex);
-                    var adjusted = Math.Clamp(moveGroup.ToIndex, 0, groups.Count);
-                    groups.Insert(adjusted, moved);
+                    groups.Insert(Math.Clamp(moveGroup.ToIndex, 0, groups.Count), moved);
                 }
                 break;
             }
@@ -100,11 +99,7 @@ public static class HavenBoardReducer
 
                 var card = source.Cards[moveCard.FromIndex];
                 source.Cards.RemoveAt(moveCard.FromIndex);
-
-                var targetIndex = Math.Clamp(moveCard.ToIndex, 0, target.Cards.Count);
-                if (ReferenceEquals(source, target) && moveCard.FromIndex < targetIndex)
-                    targetIndex--;
-                target.Cards.Insert(Math.Clamp(targetIndex, 0, target.Cards.Count), card);
+                target.Cards.Insert(Math.Clamp(moveCard.ToIndex, 0, target.Cards.Count), card);
                 break;
             }
             default:
