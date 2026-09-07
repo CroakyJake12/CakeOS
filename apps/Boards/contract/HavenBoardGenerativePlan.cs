@@ -39,10 +39,15 @@ public static class HavenBoardGenerativePlanner
             preview = HavenBoardReducer.Apply(preview, command);
         }
 
+        // Never expose the mutable array retained by a prepared plan. The coordinator returns the
+        // plan to untrusted provider/UI code for review, so the registered command sequence must not
+        // be replaceable after that review has happened.
+        IReadOnlyList<HavenBoardCommand> frozenCommands = Array.AsReadOnly(materialized);
+
         return new HavenBoardGenerativePlan(
             Guid.NewGuid(),
             snapshot.Version,
-            materialized,
+            frozenCommands,
             preview);
     }
 
