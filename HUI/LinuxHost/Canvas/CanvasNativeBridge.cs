@@ -23,13 +23,18 @@ internal sealed class CanvasNativeSession : IDisposable
 
     public CanvasNativeSession()
     {
-        var abi = Native.cake_canvas_abi_version();
-        if (abi != ExpectedAbiVersion)
-            throw new InvalidOperationException($"Canvas native ABI mismatch. Expected {ExpectedAbiVersion}, got {abi}.");
-
+        ValidateAbi();
         _handle = Native.cake_canvas_engine_new();
         if (_handle == IntPtr.Zero)
             throw new InvalidOperationException("Canvas native engine creation failed.");
+    }
+
+    private CanvasNativeSession(IntPtr handle)
+    {
+        ValidateAbi();
+        if (handle == IntPtr.Zero)
+            throw new InvalidOperationException("Canvas native engine restore returned a null handle.");
+        _handle = handle;
     }
 
     ~CanvasNativeSession() => Dispose(disposing: false);
@@ -50,6 +55,21 @@ internal sealed class CanvasNativeSession : IDisposable
             ThrowIfDisposed();
             return Native.cake_canvas_can_redo(_handle) != 0;
         }
+    }
+
+    public static CanvasNativeSession FromRnote(byte[] bytes)
+    {
+        ArgumentNullException.ThrowIfNull(bytes);
+        if (bytes.Length == 0)
+            throw new ArgumentException("Canvas Rnote payload must not be empty.", nameof(bytes));
+
+        ValidateAbi();
+        var status = Native.cake_canvas_engine_from_rnote(bytes, (nuint)bytes.Length, out var handle);
+        EnsureOk(status, "restore Rnote payload");
+        if (handle == IntPtr.Zero)
+            throw new InvalidOperationException("Canvas native Rnote restore succeeded without returning an engine handle.");
+
+        return new CanvasNativeSession(handle);
     }
 
     public void SetTool(CanvasStrokeTool tool)
@@ -121,6 +141,29 @@ internal sealed class CanvasNativeSession : IDisposable
         }
     }
 
+    public byte[] SaveRnote()
+    {
+        ThrowIfDisposed();
+        var status = Native.cake_canvas_save_rnote(_handle, out var buffer);
+        EnsureOk(status, "save Rnote payload");
+
+        try
+        {
+            if (buffer.Data == IntPtr.Zero || buffer.Length == 0)
+                throw new InvalidOperationException("Canvas native bridge returned an empty Rnote payload.");
+            if (buffer.Length > int.MaxValue)
+                throw new InvalidOperationException("Canvas Rnote payload is too large for the managed preview boundary.");
+
+            var bytes = new byte[(int)buffer.Length];
+            Marshal.Copy(buffer.Data, bytes, 0, bytes.Length);
+            return bytes;
+        }
+        finally
+        {
+            Native.cake_canvas_buffer_release(ref buffer);
+        }
+    }
+
     public void Dispose()
     {
         Dispose(disposing: true);
@@ -139,6 +182,13 @@ internal sealed class CanvasNativeSession : IDisposable
     private void ThrowIfDisposed()
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
+    }
+
+    private static void ValidateAbi()
+    {
+        var abi = Native.cake_canvas_abi_version();
+        if (abi != ExpectedAbiVersion)
+            throw new InvalidOperationException($"Canvas native ABI mismatch. Expected {ExpectedAbiVersion}, got {abi}.");
     }
 
     private static NativePointerSample Sample(double x, double y, double pressure, double tiltX, double tiltY) => new()
@@ -186,6 +236,13 @@ internal sealed class CanvasNativeSession : IDisposable
         public nuint Length;
     }
 
+    [StructLayout(LayoutKind.Sequential)]
+    private struct NativeBuffer
+    {
+        public IntPtr Data;
+        public nuint Length;
+    }
+
     private enum CanvasStatus : int
     {
         Ok = 0,
@@ -209,6 +266,12 @@ internal sealed class CanvasNativeSession : IDisposable
 
         [DllImport(Library, CallingConvention = CallingConvention.Cdecl)]
         internal static extern void cake_canvas_engine_free(IntPtr handle);
+
+        [DllImport(Library, CallingConvention = CallingConvention.Cdecl)]
+        internal static extern CanvasStatus cake_canvas_engine_from_rnote(
+            [In] byte[] data,
+            nuint len,
+            out IntPtr outHandle);
 
         [DllImport(Library, CallingConvention = CallingConvention.Cdecl)]
         internal static extern CanvasStatus cake_canvas_set_stroke_tool(IntPtr handle, uint tool);
@@ -239,5 +302,11 @@ internal sealed class CanvasNativeSession : IDisposable
 
         [DllImport(Library, CallingConvention = CallingConvention.Cdecl)]
         internal static extern void cake_canvas_render_frame_release(ref NativeRenderFrame frame);
+
+        [DllImport(Library, CallingConvention = CallingConvention.Cdecl)]
+        internal static extern CanvasStatus cake_canvas_save_rnote(IntPtr handle, out NativeBuffer buffer);
+
+        [DllImport(Library, CallingConvention = CallingConvention.Cdecl)]
+        internal static extern void cake_canvas_buffer_release(ref NativeBuffer buffer);
     }
 }
