@@ -11,6 +11,7 @@ trap 'rm -rf "$stage"' EXIT
 command -v dpkg-deb >/dev/null || { echo "dpkg-deb is required" >&2; exit 2; }
 [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+([+~.-][A-Za-z0-9.+~-]+)?$ ]] || { echo "Invalid Debian preview version: $version" >&2; exit 2; }
 [[ -x "$publish/cakeos-hui-linux-preview" ]] || { echo "Build graphical HUI Linux host before packaging" >&2; exit 2; }
+[[ ! -e "$publish/libcoreclrtraceptprovider.so" ]] || { echo "Optional obsolete LTTng provider must not be packaged" >&2; exit 2; }
 
 source_date_epoch="${SOURCE_DATE_EPOCH:-$(git -C "$root" show -s --format=%ct HEAD)}"
 [[ "$source_date_epoch" =~ ^[0-9]+$ ]] || { echo "Invalid SOURCE_DATE_EPOCH: $source_date_epoch" >&2; exit 2; }
@@ -46,7 +47,7 @@ Version: $version
 Section: utils
 Priority: optional
 Architecture: amd64
-Depends: libc6, libgcc-s1, libstdc++6, liblttng-ust1t64, zlib1g
+Depends: libc6, libgcc-s1, libstdc++6, zlib1g
 Maintainer: CakeOS Platform <noreply@cakeos.local>
 Description: CakeOS HUI graphical Linux preview
  Self-contained graphical preview package for validating the pinned HUI core on Linux.
