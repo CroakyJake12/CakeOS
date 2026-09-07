@@ -214,6 +214,14 @@ jobs:
           grep -q '^worker_slide_order=Beta,Gamma,Alpha$' /tmp/present-worker.log
           grep -q '^worker_saved_slides=2$' /tmp/present-worker.log
 
+          python3 apps/present-engine/tests/worker_text_smoke.py \
+            build/present-engine/cakeos-present-worker \
+            /tmp/cakeos-present-normalized/cakeos-present-reorder-source.odp \
+            /tmp/cakeos-present-worker-text | tee /tmp/present-worker-text.log
+          grep -q '^worker_text_replace=passed$' /tmp/present-worker-text.log
+          grep -q '^worker_text_history=passed$' /tmp/present-worker-text.log
+          grep -q '^worker_text_persistence=passed$' /tmp/present-worker-text.log
+
       - name: Record runtime versions
         if: always()
         run: |
