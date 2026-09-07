@@ -6,6 +6,7 @@ from pathlib import Path
 
 from .audit import audit_environment
 from .broker import CompatibilityBroker, load_manifest
+from .daemon import serve_forever
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -14,6 +15,9 @@ def main(argv: list[str] | None = None) -> int:
 
     audit_parser = subparsers.add_parser("audit", help="read-only runtime prerequisite audit")
     audit_parser.add_argument("--runtime-root", type=Path)
+
+    daemon_parser = subparsers.add_parser("daemon", help="run the same-user HUI compatibility broker")
+    daemon_parser.add_argument("--socket", type=Path)
 
     subparsers.add_parser("capabilities", help="report the stable HUI-facing capability surface")
     subparsers.add_parser("list-apps", help="list registered Windows compatibility applications")
@@ -48,6 +52,10 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.action == "audit":
         print(json.dumps(audit_environment(args.runtime_root), indent=2))
+        return 0
+
+    if args.action == "daemon":
+        serve_forever(args.socket)
         return 0
 
     if args.action == "capabilities":
