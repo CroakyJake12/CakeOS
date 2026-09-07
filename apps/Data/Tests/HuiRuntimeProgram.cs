@@ -160,7 +160,7 @@ try
 
     LayoutAndRequireRender(scene, layout, renderer, measure);
     Assert(scene.CellButton(2, 1).Content == "3", "HUI scene did not refresh from the reopened workbook snapshot.");
-    Assert(scene.StatusText.Accessibility.AccessibleName.Contains("selected", StringComparison.OrdinalIgnoreCase), "HUI status text did not expose an accessible selected-cell summary.");
+    Assert((scene.StatusText.Accessibility.AccessibleName ?? string.Empty).Contains("selected", StringComparison.OrdinalIgnoreCase), "HUI status text did not expose an accessible selected-cell summary.");
 
     await session.CloseAsync();
     Console.WriteLine("Haven Data HUI contract edit/recalc/sort/save-reopen runtime checks passed.");
