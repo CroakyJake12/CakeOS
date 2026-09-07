@@ -4,12 +4,14 @@ public sealed record DataCellAddress(string Sheet, int Row, int Column);
 public sealed record DataCellSnapshot(DataCellAddress Address, string Value, string Formula = "");
 public sealed record DataRangeRequest(string Sheet, int StartRow, int StartColumn, int RowCount, int ColumnCount);
 public sealed record DataRangeSnapshot(string Sheet, int StartRow, int StartColumn, IReadOnlyList<IReadOnlyList<string>> Values);
+public sealed record DataSheetSummary(string Name, int Index);
 public sealed record DataWorkbookHandle(string Id, string Path, bool ReadOnly);
 public sealed record DataQueryResult(IReadOnlyList<string> Columns, IReadOnlyList<IReadOnlyList<string>> Rows, bool Truncated);
 
 public interface IDataSpreadsheetEngine : IAsyncDisposable
 {
     Task<DataWorkbookHandle> OpenAsync(string path, bool readOnly, CancellationToken cancellationToken = default);
+    Task<IReadOnlyList<DataSheetSummary>> ListSheetsAsync(string workbookId, CancellationToken cancellationToken = default);
     Task<DataRangeSnapshot> ReadRangeAsync(string workbookId, DataRangeRequest range, CancellationToken cancellationToken = default);
     Task<DataCellSnapshot> SetCellAsync(string workbookId, DataCellAddress address, string? value, string? formula = null, CancellationToken cancellationToken = default);
     Task RecalculateAsync(string workbookId, CancellationToken cancellationToken = default);
