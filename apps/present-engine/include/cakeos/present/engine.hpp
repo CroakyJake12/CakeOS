@@ -101,11 +101,12 @@ public:
         std::string_view documentPathOrUrl,
         int slideIndex) const;
 
-    // Whole-object plain-text replacement. The saved snapshot is used to
-    // verify that objectIndex still identifies exactly one text value before
-    // the live document is mutated. Rich/multi-part text is deliberately not
-    // flattened by this first semantic write operation.
-    void replaceElementText(
+    // Whole-object single-line plain-text replacement. The saved snapshot is
+    // used to verify that objectIndex still identifies exactly one text value
+    // before the live document is mutated. Rich/multi-part/multiline text is
+    // deliberately not flattened by this first semantic write operation.
+    // Returns false when the requested text already matches the snapshot.
+    [[nodiscard]] bool replaceElementText(
         std::string_view snapshotPathOrUrl,
         int slideIndex,
         int objectIndex,
