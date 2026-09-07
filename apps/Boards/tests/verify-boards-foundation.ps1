@@ -9,15 +9,18 @@ $contractProject = Join-Path $boards 'contract/CakeOS.Apps.Boards.Contract.cspro
 $store = Join-Path $boards 'contract/JsonFileHavenBoardStore.cs'
 $attachmentStore = Join-Path $boards 'contract/ContentAddressedHavenBoardAttachmentStore.cs'
 $hui = Join-Path $boards 'hui/HavenBoardsHuiScene.cs'
+$freeformHui = Join-Path $boards 'hui/HavenBoardsFreeformHuiScene.cs'
 $huiSession = Join-Path $boards 'hui/HavenBoardsHuiSession.cs'
 $huiProject = Join-Path $boards 'hui/CakeOS.Apps.Boards.Hui.csproj'
 $huiTestProject = Join-Path $boards 'hui-tests/CakeOS.Apps.Boards.Hui.Tests.csproj'
 $huiTests = Join-Path $boards 'hui-tests/HavenBoardsHuiSceneTests.cs'
 $hierarchyHuiTests = Join-Path $boards 'hui-tests/HavenBoardsHierarchyHuiTests.cs'
+$freeformHuiTests = Join-Path $boards 'hui-tests/HavenBoardsFreeformHuiSceneTests.cs'
 $harness = Join-Path $boards 'appflowy_poc/lib/main.dart'
 $flutterTests = Join-Path $boards 'appflowy_poc/test/appflowy_board_poc_test.dart'
 $testProject = Join-Path $boards 'tests/CakeOS.Apps.Boards.Tests.csproj'
 $contractTests = Join-Path $boards 'tests/HavenBoardContractTests.cs'
+$freeformContractTests = Join-Path $boards 'tests/HavenBoardFreeformContractTests.cs'
 
 $required = @(
     $pubspec,
@@ -27,15 +30,18 @@ $required = @(
     $store,
     $attachmentStore,
     $hui,
+    $freeformHui,
     $huiSession,
     $huiProject,
     $huiTestProject,
     $huiTests,
     $hierarchyHuiTests,
+    $freeformHuiTests,
     $harness,
     $flutterTests,
     $testProject,
-    $contractTests
+    $contractTests,
+    $freeformContractTests
 )
 $missing = $required | Where-Object { -not (Test-Path -LiteralPath $_) }
 if ($missing) { throw "Missing Haven Boards foundation files: $($missing -join ', ')" }
@@ -71,6 +77,18 @@ if ($contractText -notmatch 'cardsById\.TryAdd' -or
     $contractText -notmatch 'hierarchy contains a cycle') {
     throw 'Hierarchy validation must reject duplicate IDs, missing parents, and cycles.'
 }
+if ($contractText -notmatch 'HavenBoardFreeformLayout' -or
+    $contractText -notmatch 'SetFreeformCardFrameCommand' -or
+    $contractText -notmatch 'RemoveFreeformCardFrameCommand' -or
+    $contractText -notmatch 'ValidateFreeformItem') {
+    throw 'Neutral Haven board contract must retain renderer-independent freeform layout and typed frame commands.'
+}
+if ($contractText -notmatch 'FreeformCoordinateLimit' -or
+    $contractText -notmatch 'FreeformMaxDimension' -or
+    $contractText -notmatch 'Freeform layout references missing card' -or
+    $contractText -notmatch 'duplicate frame') {
+    throw 'Freeform validation must retain bounded geometry and card/frame identity checks.'
+}
 
 $huiText = Get-Content -LiteralPath $hui -Raw
 if ($huiText -match '(?mi)^\s*using\s+(AppFlowy|Avalonia)\b|package:(appflowy_board|flutter)') {
@@ -90,6 +108,25 @@ if ($huiText -notmatch 'Nested card') {
     throw 'HUI board scene must preserve hierarchy presentation for nested cards.'
 }
 
+$freeformHuiText = Get-Content -LiteralPath $freeformHui -Raw
+if ($freeformHuiText -match '(?mi)^\s*using\s+(AppFlowy|Avalonia)\b|package:(appflowy_board|flutter)') {
+    throw 'Freeform HUI scene crossed the renderer/vendor import boundary.'
+}
+if ($freeformHuiText -notmatch '(?m)^using Haven\.UI;' -or
+    $freeformHuiText -notmatch 'HavenCanvas = Haven\.UI\.Components\.Canvas') {
+    throw 'Freeform board must render through the real HUI Canvas primitive.'
+}
+if ($freeformHuiText -notmatch 'SetFreeformCardFrameCommand' -or
+    $freeformHuiText -notmatch 'NudgeDistance' -or
+    $freeformHuiText -notmatch 'HavenProperties\.Left' -or
+    $freeformHuiText -notmatch 'HavenProperties\.Top') {
+    throw 'Freeform HUI must project spatial geometry and emit typed nudge commands.'
+}
+if ($freeformHuiText -notmatch 'SetState\(HavenElementState\.Disabled,\s*!enabled\)' -or
+    $freeformHuiText -notmatch 'Accessibility\.Enabled\s*=\s*enabled') {
+    throw 'Freeform HUI nudge controls must synchronize Enabled, accessibility, and Disabled state.'
+}
+
 $huiSessionText = Get-Content -LiteralPath $huiSession -Raw
 if ($huiSessionText -match 'HttpClient|WebSocket|https?://') {
     throw 'Composed HUI session must remain local-only and contain no network dependency.'
@@ -99,13 +136,21 @@ if ($huiSessionText -notmatch 'Scene\.CommandRequested \+= OnSceneCommandRequest
     $huiSessionText -notmatch 'Snapshot = updated') {
     throw 'Composed HUI session must bind typed scene commands through durable storage.'
 }
+if ($huiSessionText -notmatch 'FreeformScene\.CommandRequested \+= OnSceneCommandRequested' -or
+    $huiSessionText -notmatch 'FreeformScene\.SetSnapshot\(updated\)') {
+    throw 'Composed HUI session must route freeform HUI commands through the same durable snapshot boundary.'
+}
 if ($huiSessionText -notmatch 'HavenBoardReducer\.Validate\(snapshot\)') {
-    throw 'Composed HUI session must validate persisted board hierarchy before rendering.'
+    throw 'Composed HUI session must validate persisted board hierarchy/freeform state before rendering.'
 }
 $sessionSaveIndex = $huiSessionText.IndexOf('await _store.SaveAsync(updated', [System.StringComparison]::Ordinal)
 $sessionPublishIndex = $huiSessionText.IndexOf('Snapshot = updated', [System.StringComparison]::Ordinal)
+$sessionFreeformPublishIndex = $huiSessionText.IndexOf('FreeformScene.SetSnapshot(updated)', [System.StringComparison]::Ordinal)
 if ($sessionSaveIndex -lt 0 -or $sessionPublishIndex -lt 0 -or $sessionSaveIndex -gt $sessionPublishIndex) {
     throw 'Composed HUI session must persist a mutation before publishing it as the visible snapshot.'
+}
+if ($sessionFreeformPublishIndex -lt 0 -or $sessionSaveIndex -gt $sessionFreeformPublishIndex) {
+    throw 'Composed HUI session must persist a mutation before publishing it to the freeform projection.'
 }
 
 $huiProjectText = Get-Content -LiteralPath $huiProject -Raw
@@ -141,6 +186,14 @@ $hierarchyHuiTestsText = Get-Content -LiteralPath $hierarchyHuiTests -Raw
 if ($hierarchyHuiTestsText -notmatch 'Hierarchy_parent_and_nested_marker_survive_move_and_reopen' -or
     $hierarchyHuiTestsText -notmatch 'Session_open_rejects_persisted_missing_parent_before_render') {
     throw 'HUI tests must cover durable hierarchy/move presentation and fail-closed malformed hierarchy open.'
+}
+
+$freeformHuiTestsText = Get-Content -LiteralPath $freeformHuiTests -Raw
+if ($freeformHuiTestsText -notmatch 'Explicit_freeform_frame_is_projected_to_real_hui_canvas_geometry' -or
+    $freeformHuiTestsText -notmatch 'Keyboard_nudge_emits_typed_neutral_frame_command' -or
+    $freeformHuiTestsText -notmatch 'Nudge_beyond_coordinate_limit_is_disabled_for_keyboard_and_accessibility' -or
+    $freeformHuiTestsText -notmatch 'Freeform_keyboard_nudge_flushes_to_disk_and_survives_reopen') {
+    throw 'HUI tests must cover exact freeform geometry, keyboard commands, boundary disablement, and durable reopen.'
 }
 
 $storeText = Get-Content -LiteralPath $store -Raw
@@ -196,6 +249,14 @@ if ($contractTestsText -notmatch 'Parent_cycle_is_rejected_without_publishing_mu
     $contractTestsText -notmatch 'Moving_nested_card_between_groups_preserves_parent_identity' -or
     $contractTestsText -notmatch 'Snapshot_validator_rejects_missing_parent_existing_cycle_and_duplicate_ids') {
     throw 'Contract tests must cover hierarchy cycle rejection, move preservation, and malformed snapshot validation.'
+}
+
+$freeformContractTestsText = Get-Content -LiteralPath $freeformContractTests -Raw
+if ($freeformContractTestsText -notmatch 'Freeform_frame_can_be_added_replaced_and_removed' -or
+    $freeformContractTestsText -notmatch 'Freeform_layout_rejects_missing_cards_duplicate_frames_and_non_finite_or_unsafe_geometry' -or
+    $freeformContractTestsText -notmatch 'Lane_moves_and_hierarchy_changes_preserve_freeform_geometry' -or
+    $freeformContractTestsText -notmatch 'Freeform_layout_round_trips_through_local_store') {
+    throw 'Contract tests must cover freeform lifecycle, validation, structured-move preservation, and local persistence.'
 }
 
 Write-Host 'Haven Boards AppFlowy foundation static checks passed.'
