@@ -65,7 +65,10 @@ class ModelLease:
 
 def _acquire(path: pathlib.Path, *, exclusive: bool, blocking: bool) -> ModelLease:
     ensure_private_directory(path.parent)
-    fd = _open_lock(path)
+    try:
+        fd = _open_lock(path)
+    except OSError as exc:
+        raise ModelLeaseError(f"cannot open lifecycle lease safely: {path}: {exc}") from exc
     operation = fcntl.LOCK_EX if exclusive else fcntl.LOCK_SH
     if not blocking:
         operation |= fcntl.LOCK_NB

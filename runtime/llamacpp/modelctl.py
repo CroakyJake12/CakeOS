@@ -18,7 +18,7 @@ import tempfile
 from typing import Any, Iterable
 
 from gguf import GgufValidationError, read_gguf_version
-from model_lease import ModelLeaseBusy, acquire_model_lease, acquire_store_lease, ensure_private_directory
+from model_lease import ModelLeaseBusy, ModelLeaseError, acquire_model_lease, acquire_store_lease, ensure_private_directory
 
 MODEL_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$")
 CAPABILITY_RE = re.compile(r"^[a-z0-9][a-z0-9._-]{0,63}$")
@@ -125,12 +125,15 @@ class ModelManager:
         self.staging_root = self.model_root / ".staging"
 
     def _ensure_store(self) -> None:
-        ensure_private_directory(self.model_root)
-        ensure_private_directory(self.manifest_root)
-        ensure_private_directory(self.model_root / "blobs")
-        ensure_private_directory(self.blob_root)
-        ensure_private_directory(self.staging_root)
-        ensure_private_directory(self.runtime_dir)
+        try:
+            ensure_private_directory(self.model_root)
+            ensure_private_directory(self.manifest_root)
+            ensure_private_directory(self.model_root / "blobs")
+            ensure_private_directory(self.blob_root)
+            ensure_private_directory(self.staging_root)
+            ensure_private_directory(self.runtime_dir)
+        except ModelLeaseError as exc:
+            raise ModelManagerError(str(exc)) from exc
 
     def _manifest_path(self, model_id: str) -> pathlib.Path:
         return self.manifest_root / f"{_validate_model_id(model_id)}.json"
@@ -227,28 +230,26 @@ class ModelManager:
             raise ModelManagerError(f"cannot import source safely: {source_path}: {exc}") from exc
         try:
             temp_fd, temp_name = tempfile.mkstemp(prefix="import-", suffix=".gguf.tmp", dir=self.staging_root)
-        except BaseException:
-            os.close(source_fd)
-            raise
-        temp_path = pathlib.Path(temp_name)
-        os.fchmod(temp_fd, 0o600)
-        digest = hashlib.sha256()
-        total = 0
-        try:
-            while True:
-                chunk = os.read(source_fd, 1024 * 1024)
-                if not chunk:
-                    break
-                digest.update(chunk)
-                total += len(chunk)
-                _write_all(temp_fd, chunk)
-            os.fsync(temp_fd)
-        except BaseException:
-            temp_path.unlink(missing_ok=True)
-            raise
+            temp_path = pathlib.Path(temp_name)
+            try:
+                os.fchmod(temp_fd, 0o600)
+                digest = hashlib.sha256()
+                total = 0
+                while True:
+                    chunk = os.read(source_fd, 1024 * 1024)
+                    if not chunk:
+                        break
+                    digest.update(chunk)
+                    total += len(chunk)
+                    _write_all(temp_fd, chunk)
+                os.fsync(temp_fd)
+            except BaseException:
+                temp_path.unlink(missing_ok=True)
+                raise
+            finally:
+                os.close(temp_fd)
         finally:
             os.close(source_fd)
-            os.close(temp_fd)
         try:
             version = read_gguf_version(temp_path)
         except (OSError, GgufValidationError) as exc:
@@ -284,10 +285,10 @@ class ModelManager:
             raise ModelManagerError(f"model id is already installed: {manifest['id']}")
         fd, temp_name = tempfile.mkstemp(prefix=f".{manifest['id']}.", suffix=".json.tmp", dir=self.manifest_root)
         temp = pathlib.Path(temp_name)
-        os.fchmod(fd, 0o600)
         payload = (json.dumps(manifest, indent=2, sort_keys=True) + "\n").encode("utf-8")
         try:
             try:
+                os.fchmod(fd, 0o600)
                 _write_all(fd, payload)
                 os.fsync(fd)
             finally:
@@ -325,13 +326,13 @@ class ModelManager:
         self._ensure_store()
         try:
             store_lease = acquire_store_lease(self.runtime_dir, blocking=False)
-        except ModelLeaseBusy as exc:
-            raise ModelManagerError("model store is busy with another mutation") from exc
+        except (ModelLeaseBusy, ModelLeaseError) as exc:
+            raise ModelManagerError(f"cannot acquire model-store mutation lease: {exc}") from exc
         with store_lease:
             try:
                 model_lease = acquire_model_lease(self.runtime_dir, model_id, exclusive=True, blocking=False)
-            except ModelLeaseBusy as exc:
-                raise ModelManagerError(f"model is currently loaded or being changed: {model_id}") from exc
+            except (ModelLeaseBusy, ModelLeaseError) as exc:
+                raise ModelManagerError(f"model is currently loaded or cannot be leased safely: {model_id}: {exc}") from exc
             with model_lease:
                 target_manifest = self._manifest_path(model_id)
                 if target_manifest.exists() and not replace:
@@ -366,13 +367,13 @@ class ModelManager:
         self._ensure_store()
         try:
             store_lease = acquire_store_lease(self.runtime_dir, blocking=False)
-        except ModelLeaseBusy as exc:
-            raise ModelManagerError("model store is busy with another mutation") from exc
+        except (ModelLeaseBusy, ModelLeaseError) as exc:
+            raise ModelManagerError(f"cannot acquire model-store mutation lease: {exc}") from exc
         with store_lease:
             try:
                 model_lease = acquire_model_lease(self.runtime_dir, model_id, exclusive=True, blocking=False)
-            except ModelLeaseBusy as exc:
-                raise ModelManagerError(f"model is currently loaded or being changed: {model_id}") from exc
+            except (ModelLeaseBusy, ModelLeaseError) as exc:
+                raise ModelManagerError(f"model is currently loaded or cannot be leased safely: {model_id}: {exc}") from exc
             with model_lease:
                 manifest = self._read_manifest(model_id)
                 digest = str(manifest["sha256"]).lower()
@@ -463,7 +464,7 @@ def main(argv: list[str] | None = None) -> int:
             value = {"status": "imported", "model": manifest}
         else:
             value = {"status": "deleted", **manager.delete_model(args.model_id, purge_blob=args.purge_blob)}
-    except (ModelManagerError, OSError, ValueError) as exc:
+    except (ModelManagerError, ModelLeaseError, OSError, ValueError) as exc:
         print(json.dumps({"error": "model_manager_error", "detail": str(exc)}, separators=(",", ":")), file=os.sys.stderr)
         return 2
     print(json.dumps(value, indent=2, sort_keys=True))

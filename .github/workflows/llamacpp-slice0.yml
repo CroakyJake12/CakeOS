@@ -5,6 +5,7 @@ on:
     paths:
       - 'runtime/llamacpp/**'
       - 'packaging/systemd/user/haven-inference-broker.service'
+      - 'packaging/bin/haven-modelctl'
       - '.github/workflows/llamacpp-slice0.yml'
       - 'havenos.lock'
   workflow_dispatch:
@@ -53,6 +54,8 @@ jobs:
           PY
       - name: Validate shell recipe syntax
         run: sh -n runtime/llamacpp/build-cpu.sh
+      - name: Validate model-manager wrapper syntax
+        run: sh -n packaging/bin/haven-modelctl
 
   build-pinned-llamacpp-cpu:
     runs-on: ubuntu-latest
@@ -61,7 +64,26 @@ jobs:
         uses: actions/checkout@v4
         with:
           path: cakeos
+          fetch-depth: 0
+      - name: Determine whether pinned build inputs changed
+        id: build_scope
+        shell: bash
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
+            echo 'required=true' >> "$GITHUB_OUTPUT"
+          elif git -C cakeos diff --quiet "$BASE_SHA" "$HEAD_SHA" -- \
+              runtime/llamacpp/build-cpu.sh \
+              runtime/llamacpp/upstream.lock.json; then
+            echo 'required=false' >> "$GITHUB_OUTPUT"
+            echo 'Pinned llama.cpp build inputs are unchanged; reusing the base branch build evidence.'
+          else
+            echo 'required=true' >> "$GITHUB_OUTPUT"
+          fi
       - name: Checkout pinned upstream llama.cpp
+        if: steps.build_scope.outputs.required == 'true'
         uses: actions/checkout@v4
         with:
           repository: ggml-org/llama.cpp
@@ -69,14 +91,17 @@ jobs:
           path: llama-src
           fetch-depth: 1
       - name: Verify exact upstream commit
+        if: steps.build_scope.outputs.required == 'true'
         run: test "$(git -C llama-src rev-parse HEAD)" = '5266f24da75dc449bd56cbed7addb9c8e4a6a73e'
       - name: Build and smoke-test CPU runtime
+        if: steps.build_scope.outputs.required == 'true'
         env:
           LLAMA_SOURCE: ${{ github.workspace }}/llama-src
           LLAMA_BUILD_DIR: ${{ github.workspace }}/llama-build
           LLAMA_BUILD_PARALLEL: '2'
         run: sh cakeos/runtime/llamacpp/build-cpu.sh
       - name: Record binary provenance
+        if: steps.build_scope.outputs.required == 'true'
         run: |
           test -x llama-build/bin/llama-server
           llama-build/bin/llama-server --version

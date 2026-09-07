@@ -270,7 +270,6 @@ class Worker:
         with self._lock:
             if self.ready and self._model and self._model.model_id == manifest.model_id:
                 return
-            self._stop_locked()
             try:
                 lease = acquire_model_lease(RUNTIME_DIR, manifest.model_id, exclusive=False, blocking=False)
             except (ModelLeaseBusy, ModelLeaseError) as exc:
@@ -279,6 +278,7 @@ class Worker:
                 model_path = verify_blob(manifest)
                 if not LLAMA_SERVER.is_file():
                     raise BrokerError(f"llama-server is unavailable at {LLAMA_SERVER}")
+                self._stop_locked()
                 WORKER_SOCKET.unlink(missing_ok=True)
                 ensure_private_directory(WORKER_HOME)
                 self._process = subprocess.Popen(
