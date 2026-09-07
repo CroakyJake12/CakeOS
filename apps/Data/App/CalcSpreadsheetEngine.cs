@@ -5,6 +5,7 @@ public sealed class CalcSpreadsheetEngine : IDataSpreadsheetEngine
     private const int MaximumMaterializedRows = 1000;
     private const int MaximumMaterializedColumns = 256;
     private const int MaximumStructuralMutationCount = 100;
+    private const int MaximumNamedRangeNameLength = 64;
 
     private readonly JsonLineWorkerClient _worker;
 
@@ -69,6 +70,37 @@ public sealed class CalcSpreadsheetEngine : IDataSpreadsheetEngine
             cancellationToken);
     }
 
+    public Task<IReadOnlyList<DataNamedRangeSummary>> ListNamedRangesAsync(string workbookId, CancellationToken cancellationToken = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(workbookId);
+        return _worker.CallAsync<IReadOnlyList<DataNamedRangeSummary>>("listNamedRanges", new { workbookId }, cancellationToken);
+    }
+
+    public Task<DataNamedRangeSummary> CreateNamedRangeAsync(
+        string workbookId,
+        string name,
+        DataRangeRequest range,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(workbookId);
+        ValidateNamedRangeName(name);
+        ValidateNamedRangeRequest(range);
+        return _worker.CallAsync<DataNamedRangeSummary>(
+            "createNamedRange",
+            new { workbookId, name = name.Trim(), range },
+            cancellationToken);
+    }
+
+    public async Task DeleteNamedRangeAsync(string workbookId, string name, CancellationToken cancellationToken = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(workbookId);
+        ValidateNamedRangeName(name);
+        _ = await _worker.CallAsync<WorkerAck>(
+            "deleteNamedRange",
+            new { workbookId, name = name.Trim() },
+            cancellationToken).ConfigureAwait(false);
+    }
+
     public Task InsertRowsAsync(string workbookId, string sheet, int index, int count, CancellationToken cancellationToken = default) =>
         MutateStructureAsync("insertRows", workbookId, sheet, index, count, cancellationToken);
 
@@ -121,6 +153,29 @@ public sealed class CalcSpreadsheetEngine : IDataSpreadsheetEngine
             method,
             new { workbookId, sheet, index, count },
             cancellationToken).ConfigureAwait(false);
+    }
+
+    private static void ValidateNamedRangeRequest(DataRangeRequest range)
+    {
+        ArgumentNullException.ThrowIfNull(range);
+        ArgumentException.ThrowIfNullOrWhiteSpace(range.Sheet);
+        if (range.StartRow < 0 || range.StartColumn < 0)
+            throw new ArgumentOutOfRangeException(nameof(range), "Named range coordinates cannot be negative.");
+        if (range.RowCount is < 1 or > MaximumMaterializedRows)
+            throw new ArgumentOutOfRangeException(nameof(range), $"Named ranges can contain 1-{MaximumMaterializedRows} rows in this slice.");
+        if (range.ColumnCount is < 1 or > MaximumMaterializedColumns)
+            throw new ArgumentOutOfRangeException(nameof(range), $"Named ranges can contain 1-{MaximumMaterializedColumns} columns in this slice.");
+    }
+
+    private static void ValidateNamedRangeName(string name)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(name);
+        var trimmed = name.Trim();
+        if (trimmed.Length > MaximumNamedRangeNameLength)
+            throw new ArgumentException($"Named range names must be at most {MaximumNamedRangeNameLength} characters in this slice.", nameof(name));
+        if (!(char.IsLetter(trimmed[0]) || trimmed[0] == '_') ||
+            trimmed.Skip(1).Any(character => !(char.IsLetterOrDigit(character) || character is '_' or '.')))
+            throw new ArgumentException("Named range names must start with a letter or underscore and then contain only letters, digits, underscores or periods.", nameof(name));
     }
 
     private static void ValidatePortableSheetName(string sheetName)
