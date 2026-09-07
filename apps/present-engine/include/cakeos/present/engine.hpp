@@ -25,6 +25,15 @@ struct SlideExtent {
     long heightTwips{};
 };
 
+// A semantic object discovered from a saved presentation snapshot. objectIndex
+// is only meaningful for that exact snapshot and must not be treated as a
+// persistent document identity by HUI/GenUI.
+struct ElementSnapshot {
+    int slideIndex{};
+    int objectIndex{};
+    std::vector<std::string> text;
+};
+
 enum class PixelFormat {
     Rgba,
     Bgra
@@ -83,6 +92,14 @@ public:
     [[nodiscard]] int currentSlide() const;
     void setCurrentSlide(int slideIndex);
     [[nodiscard]] SlideExtent slideExtent(int slideIndex) const;
+
+    // Snapshot-only semantic discovery. This reads the saved file supplied by
+    // the caller; it does not inspect unsaved in-memory edits. Callers must
+    // invalidate any returned objectIndex values after document mutation.
+    [[nodiscard]] bool supportsElementSnapshots() const noexcept;
+    [[nodiscard]] std::vector<ElementSnapshot> elementSnapshot(
+        std::string_view documentPathOrUrl,
+        int slideIndex) const;
 
     // CakeOS-owned semantic slide operations. These deliberately avoid
     // exposing LibreOffice command names or selection mechanics to HUI/GenUI.
