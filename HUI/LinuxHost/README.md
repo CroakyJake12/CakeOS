@@ -13,6 +13,8 @@ The automated graphical gate must:
 5. capture the displayed window to a PNG;
 6. preserve logs and screenshot as CI evidence.
 
+Text measurement is performed through Avalonia's real `FormattedText` metrics so HUI layout receives the same wrapped text height that the Linux renderer will draw. This is part of the graphical acceptance boundary: a screenshot with overlapping wrapped text is a failed visual QA result even if the process exits successfully.
+
 The CI screenshot is evidence that a real Linux window was rendered in the runner's virtual display; it is not evidence that the approved CakeOS VM has displayed the same window.
 
 Passing that gate is graphical Linux-host evidence, not approved-VM visual proof. Approved-VM installation and observation remain a later acceptance gate.
