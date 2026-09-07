@@ -6,7 +6,8 @@ public sealed record HavenBoardSnapshot(
     string Id,
     string Title,
     long Version,
-    IReadOnlyList<HavenBoardGroup> Groups)
+    IReadOnlyList<HavenBoardGroup> Groups,
+    HavenBoardFreeformLayout? Freeform = null)
 {
     public static HavenBoardSnapshot CreateDefault() => new(
         Id: "board-main",
@@ -37,6 +38,16 @@ public sealed record HavenBoardAttachment(
     string LocalReference,
     HavenBoardAttachmentAvailability Availability = HavenBoardAttachmentAvailability.Available);
 
+public sealed record HavenBoardFreeformLayout(IReadOnlyList<HavenBoardFreeformItem> Items);
+
+public sealed record HavenBoardFreeformItem(
+    string CardId,
+    double X,
+    double Y,
+    double Width = 280,
+    double Height = 160,
+    int ZIndex = 0);
+
 [JsonConverter(typeof(JsonStringEnumConverter))]
 public enum HavenBoardAttachmentAvailability
 {
@@ -52,11 +63,25 @@ public sealed record RenameGroupCommand(string GroupId, string Title) : HavenBoa
 public sealed record MoveGroupCommand(int FromIndex, int ToIndex) : HavenBoardCommand;
 public sealed record MoveCardCommand(string FromGroupId, int FromIndex, string ToGroupId, int ToIndex) : HavenBoardCommand;
 public sealed record SetCardParentCommand(string CardId, string? ParentCardId) : HavenBoardCommand;
+public sealed record SetFreeformCardFrameCommand(
+    string CardId,
+    double X,
+    double Y,
+    double Width = 280,
+    double Height = 160,
+    int ZIndex = 0) : HavenBoardCommand;
+public sealed record RemoveFreeformCardFrameCommand(string CardId) : HavenBoardCommand;
 public sealed record AddAttachmentCommand(string CardId, HavenBoardAttachment Attachment) : HavenBoardCommand;
 public sealed record RemoveAttachmentCommand(string CardId, string AttachmentId) : HavenBoardCommand;
 
 public static class HavenBoardReducer
 {
+    public const double FreeformCoordinateLimit = 1_000_000;
+    public const double FreeformMinWidth = 120;
+    public const double FreeformMinHeight = 80;
+    public const double FreeformMaxDimension = 4_000;
+    public const int FreeformZIndexLimit = 1_000_000;
+
     public static HavenBoardSnapshot Apply(HavenBoardSnapshot snapshot, HavenBoardCommand command)
     {
         ArgumentNullException.ThrowIfNull(snapshot);
@@ -66,6 +91,7 @@ public static class HavenBoardReducer
         var groups = snapshot.Groups
             .Select(group => new MutableGroup(group.Id, group.Title, group.Cards.ToList()))
             .ToList();
+        var freeformItems = (snapshot.Freeform?.Items ?? []).ToList();
 
         switch (command)
         {
@@ -115,6 +141,36 @@ public static class HavenBoardReducer
                 located.Group.Cards[located.Index] = located.Card with { ParentCardId = setParent.ParentCardId };
                 break;
             }
+            case SetFreeformCardFrameCommand setFrame:
+            {
+                _ = FindCard(groups, setFrame.CardId);
+                var item = new HavenBoardFreeformItem(
+                    setFrame.CardId,
+                    setFrame.X,
+                    setFrame.Y,
+                    setFrame.Width,
+                    setFrame.Height,
+                    setFrame.ZIndex);
+                ValidateFreeformItem(item);
+
+                var existingIndex = freeformItems.FindIndex(existing =>
+                    string.Equals(existing.CardId, setFrame.CardId, StringComparison.Ordinal));
+                if (existingIndex >= 0)
+                    freeformItems[existingIndex] = item;
+                else
+                    freeformItems.Add(item);
+                break;
+            }
+            case RemoveFreeformCardFrameCommand removeFrame:
+            {
+                _ = FindCard(groups, removeFrame.CardId);
+                var removed = freeformItems.RemoveAll(item =>
+                    string.Equals(item.CardId, removeFrame.CardId, StringComparison.Ordinal));
+                if (removed == 0)
+                    throw new InvalidOperationException(
+                        $"Card '{removeFrame.CardId}' does not have a freeform frame.");
+                break;
+            }
             case AddAttachmentCommand addAttachment:
             {
                 ArgumentNullException.ThrowIfNull(addAttachment.Attachment);
@@ -153,7 +209,10 @@ public static class HavenBoardReducer
         var updated = snapshot with
         {
             Version = checked(snapshot.Version + 1),
-            Groups = groups.Select(group => new HavenBoardGroup(group.Id, group.Title, group.Cards.ToArray())).ToArray()
+            Groups = groups.Select(group => new HavenBoardGroup(group.Id, group.Title, group.Cards.ToArray())).ToArray(),
+            Freeform = snapshot.Freeform is null && freeformItems.Count == 0
+                ? null
+                : new HavenBoardFreeformLayout(freeformItems.ToArray())
         };
         Validate(updated);
         return updated;
@@ -177,6 +236,21 @@ public static class HavenBoardReducer
             if (card.ParentCardId is null)
                 continue;
             ValidateParentChain(cardsById, card.Id, card.ParentCardId);
+        }
+
+        if (snapshot.Freeform is not null)
+        {
+            var positionedCards = new HashSet<string>(StringComparer.Ordinal);
+            foreach (var item in snapshot.Freeform.Items)
+            {
+                ValidateFreeformItem(item);
+                if (!cardsById.ContainsKey(item.CardId))
+                    throw new InvalidOperationException(
+                        $"Freeform layout references missing card '{item.CardId}'.");
+                if (!positionedCards.Add(item.CardId))
+                    throw new InvalidOperationException(
+                        $"Freeform layout contains duplicate frame for card '{item.CardId}'.");
+            }
         }
     }
 
@@ -239,6 +313,21 @@ public static class HavenBoardReducer
 
             currentId = current.ParentCardId;
         }
+    }
+
+    private static void ValidateFreeformItem(HavenBoardFreeformItem item)
+    {
+        if (string.IsNullOrWhiteSpace(item.CardId))
+            throw new InvalidOperationException("Freeform frames must reference a card ID.");
+        if (!double.IsFinite(item.X) || !double.IsFinite(item.Y) ||
+            Math.Abs(item.X) > FreeformCoordinateLimit || Math.Abs(item.Y) > FreeformCoordinateLimit)
+            throw new InvalidOperationException("Freeform card coordinates are outside the supported finite range.");
+        if (!double.IsFinite(item.Width) || !double.IsFinite(item.Height) ||
+            item.Width < FreeformMinWidth || item.Height < FreeformMinHeight ||
+            item.Width > FreeformMaxDimension || item.Height > FreeformMaxDimension)
+            throw new InvalidOperationException("Freeform card dimensions are outside the supported range.");
+        if (Math.Abs((long)item.ZIndex) > FreeformZIndexLimit)
+            throw new InvalidOperationException("Freeform card z-index is outside the supported range.");
     }
 
     private static void RequireIndex(int index, int count, string name)
