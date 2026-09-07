@@ -25,8 +25,9 @@ except Exception as exc:  # pragma: no cover - runtime dependency gate
     raise SystemExit(78)
 
 
-MAX_MATERIALIZED_ROWS = 1001
+MAX_MATERIALIZED_ROWS = 1000
 MAX_MATERIALIZED_COLUMNS = 256
+MAX_STRUCTURAL_MUTATION_COUNT = 100
 PORTABLE_SHEET_FORBIDDEN = set("[]:*?/\\")
 
 
@@ -256,6 +257,40 @@ class CalcRuntime:
                     pass
             raise
 
+    def mutate_structure(self, workbook_id: str, sheet_name: object, axis: str, operation: str, index: object, count: object) -> dict:
+        document = self._doc(workbook_id)
+        if bool(document.isReadonly()):
+            raise PermissionError("Workbook was opened read-only.")
+        name = str(sheet_name or "").strip()
+        if not name:
+            raise ValueError("sheet is required.")
+        mutation_index = int(index)
+        mutation_count = int(count)
+        if mutation_index < 0:
+            raise ValueError("Structural mutation index cannot be negative.")
+        if not 1 <= mutation_count <= MAX_STRUCTURAL_MUTATION_COUNT:
+            raise ValueError(f"Structural mutations must affect 1-{MAX_STRUCTURAL_MUTATION_COUNT} rows or columns at a time.")
+
+        sheet = self._sheet(document, name)
+        if axis == "rows":
+            collection = sheet.getRows()
+        elif axis == "columns":
+            collection = sheet.getColumns()
+        else:
+            raise ValueError(f"Unsupported structural axis '{axis}'.")
+
+        capacity = int(collection.getCount())
+        if mutation_index >= capacity or mutation_index + mutation_count > capacity:
+            raise ValueError(f"Structural mutation exceeds the sheet {axis} bounds.")
+        if operation == "insert":
+            collection.insertByIndex(mutation_index, mutation_count)
+        elif operation == "delete":
+            collection.removeByIndex(mutation_index, mutation_count)
+        else:
+            raise ValueError(f"Unsupported structural operation '{operation}'.")
+        document.calculateAll()
+        return {"ok": True}
+
     def recalculate(self, workbook_id: str) -> dict:
         document = self._doc(workbook_id)
         document.calculateAll()
@@ -358,6 +393,14 @@ def serve() -> int:
                     result = runtime.set_cell(params["workbookId"], params["address"], params.get("value", ""), params.get("formula", ""))
                 elif method == "createSheetWithValues":
                     result = runtime.create_sheet_with_values(params["workbookId"], params["sheetName"], params["values"])
+                elif method == "insertRows":
+                    result = runtime.mutate_structure(params["workbookId"], params["sheet"], "rows", "insert", params["index"], params["count"])
+                elif method == "deleteRows":
+                    result = runtime.mutate_structure(params["workbookId"], params["sheet"], "rows", "delete", params["index"], params["count"])
+                elif method == "insertColumns":
+                    result = runtime.mutate_structure(params["workbookId"], params["sheet"], "columns", "insert", params["index"], params["count"])
+                elif method == "deleteColumns":
+                    result = runtime.mutate_structure(params["workbookId"], params["sheet"], "columns", "delete", params["index"], params["count"])
                 elif method == "recalculate":
                     result = runtime.recalculate(params["workbookId"])
                 elif method == "save":
