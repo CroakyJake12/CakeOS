@@ -13,6 +13,7 @@
 #define CAKEOS_PRESENT_HAS_STRUCTURE_REQUEST 0
 #endif
 
+#if CAKEOS_PRESENT_HAS_STRUCTURE_REQUEST
 namespace {
 
 using Json = nlohmann::json;
@@ -82,6 +83,7 @@ std::string rootShape(const Json& value)
 }
 
 } // namespace
+#endif
 
 int main(int argc, char** argv)
 {
