@@ -21,6 +21,7 @@ This file records what has actually been executed for the `boards-appflowy-found
 - JSON local-first store with durable temp write and backup recovery: **IMPLEMENTED, BUILT, TESTED**.
 - HUI structured-board projection: **IMPLEMENTED, BUILT, TESTED AGAINST REAL PINNED HUI DONOR API**.
 - HUI disabled controls synchronize visual property, accessibility state, and `HavenElementState.Disabled`: **IMPLEMENTED, TESTED**.
+- Composed HUI application session (`HavenBoardsHuiSession`) binding scene commands to durable store writes: **IMPLEMENTED, BUILT, TESTED**.
 - Flutter/AppFlowy bounded proof harness: **IMPLEMENTED, ANALYZED, TESTED**.
 - Explicit non-drag group/card movement controls: **IMPLEMENTED, TESTED IN FLUTTER; HUI KEYBOARD COMMAND PATH TESTED**.
 - Hierarchy and attachment metadata in neutral card schema: **IMPLEMENTED IN SCHEMA / PERSISTENCE**, not yet final attachment file-store runtime.
@@ -55,7 +56,9 @@ Executed positive evidence:
 8. Deterministic AppFlowy widget/accessibility test with filesystem persistence explicitly disabled: **PASSED, exit 0**.
 9. Complete corrected `flutter test` suite: **PASSED, exit 0**.
 10. `apps/Boards/tests/verify-hui-compatibility.ps1` against the real pinned donor `src/Haven.UI/Haven.UI.csproj`: **PASSED, exit 0**. This compiled the CakeOS Boards HUI project against the actual donor HUI project and ran the HUI scene tests.
-11. Repository hygiene inspection after testing identified only generated Flutter state. `.dart_tool` is now explicitly ignored and `pubspec.lock` is committed for proof-harness reproducibility; the resulting local commit reported **no remaining changes** before push.
+11. Composed local-first HUI lifecycle tests were then added and the same real-HUI compatibility runner was executed again: **PASSED, exit 0**. The tests cover direct command/save/dispose/reopen and a keyboard-originated HUI move command followed by queue flush, disposal, fresh store/session reopen, and verification of the moved card state.
+12. The composed session persists the updated snapshot before assigning it as the visible/current snapshot; the strengthened static gate checks this ordering and the absence of network primitives in the store/session: **PASSED, exit 0**.
+13. Repository hygiene inspection after Flutter testing identified only generated Flutter state. `.dart_tool` is explicitly ignored and `pubspec.lock` is committed for proof-harness reproducibility; the resulting local dependency-pin commit reported **no remaining changes** before push.
 
 ## Negative evidence retained
 
@@ -69,10 +72,10 @@ Executed positive evidence:
 
 The following must not be described as proven yet:
 
-- HUI scene compilation against a CakeOS-owned shared HUI runtime after that runtime is permanently landed in CakeOS; current proof uses the exact real CakeAI donor HUI project through a fail-closed compatibility reference;
+- HUI scene/session compilation against a CakeOS-owned shared HUI runtime after that runtime is permanently landed in CakeOS; current proof uses the exact real CakeAI donor HUI project through a fail-closed compatibility reference;
 - approved Ubuntu VM execution;
 - Linux package installation/runtime;
-- complete offline terminate/reopen acceptance using the final composed CakeOS Boards app rather than the store in isolation;
+- packaged-process offline terminate/reopen on CakeOS/Ubuntu. The composed desktop component lifecycle is tested and contains no network dependency, but that is not the same as final packaged offline runtime proof;
 - pointer drag interoperability in final HUI rendering;
 - assistive-technology runtime accessibility with a screen reader or other AT;
 - final attachment file-store migration;
@@ -81,4 +84,4 @@ The following must not be described as proven yet:
 
 ## Acceptance rule
 
-Only promote evidence states after directly running the matching stage. Source presence is not build evidence; build success is not runtime proof; desktop proof is not approved-VM/Linux proof.
+Only promote evidence states after directly running the matching stage. Source presence is not build evidence; build success is not runtime proof; desktop component proof is not packaged-process or approved-VM/Linux proof.
