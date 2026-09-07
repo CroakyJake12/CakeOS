@@ -51,6 +51,7 @@ public sealed record CreateCardCommand(string GroupId, string CardId, string Tit
 public sealed record RenameGroupCommand(string GroupId, string Title) : HavenBoardCommand;
 public sealed record MoveGroupCommand(int FromIndex, int ToIndex) : HavenBoardCommand;
 public sealed record MoveCardCommand(string FromGroupId, int FromIndex, string ToGroupId, int ToIndex) : HavenBoardCommand;
+public sealed record SetCardParentCommand(string CardId, string? ParentCardId) : HavenBoardCommand;
 public sealed record AddAttachmentCommand(string CardId, HavenBoardAttachment Attachment) : HavenBoardCommand;
 public sealed record RemoveAttachmentCommand(string CardId, string AttachmentId) : HavenBoardCommand;
 
@@ -102,6 +103,15 @@ public static class HavenBoardReducer
                 var card = source.Cards[moveCard.FromIndex];
                 source.Cards.RemoveAt(moveCard.FromIndex);
                 target.Cards.Insert(Math.Clamp(moveCard.ToIndex, 0, target.Cards.Count), card);
+                break;
+            }
+            case SetCardParentCommand setParent:
+            {
+                var located = FindCard(groups, setParent.CardId);
+                if (setParent.ParentCardId is not null)
+                    EnsureValidParentAssignment(groups, setParent.CardId, setParent.ParentCardId);
+
+                located.Group.Cards[located.Index] = located.Card with { ParentCardId = setParent.ParentCardId };
                 break;
             }
             case AddAttachmentCommand addAttachment:
@@ -160,6 +170,27 @@ public static class HavenBoardReducer
         }
 
         throw new InvalidOperationException($"Board card '{cardId}' does not exist.");
+    }
+
+    private static void EnsureValidParentAssignment(
+        IReadOnlyList<MutableGroup> groups,
+        string cardId,
+        string proposedParentId)
+    {
+        if (string.Equals(cardId, proposedParentId, StringComparison.Ordinal))
+            throw new InvalidOperationException("A card cannot be its own parent.");
+
+        var visited = new HashSet<string>(StringComparer.Ordinal);
+        string? currentId = proposedParentId;
+        while (currentId is not null)
+        {
+            if (string.Equals(currentId, cardId, StringComparison.Ordinal))
+                throw new InvalidOperationException("Card hierarchy cannot contain cycles.");
+            if (!visited.Add(currentId))
+                throw new InvalidOperationException("The existing card hierarchy contains a cycle.");
+
+            currentId = FindCard(groups, currentId).Card.ParentCardId;
+        }
     }
 
     private static void RequireIndex(int index, int count, string name)
