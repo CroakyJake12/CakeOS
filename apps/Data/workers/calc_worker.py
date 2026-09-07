@@ -35,6 +35,8 @@ def prop(name: str, value):
 class CalcRuntime:
     def __init__(self) -> None:
         self.profile_dir = tempfile.mkdtemp(prefix="haven-data-lo-")
+        self.stderr_path = Path(self.profile_dir) / "soffice.stderr.log"
+        self.stderr_file = open(self.stderr_path, "w+", encoding="utf-8")
         self.pipe_name = f"haven_data_{uuid.uuid4().hex}"
         profile_url = uno.systemPathToFileUrl(self.profile_dir)
         accept = f"--accept=pipe,name={self.pipe_name};urp;StarOffice.ComponentContext"
@@ -51,14 +53,23 @@ class CalcRuntime:
             ],
             stdin=subprocess.DEVNULL,
             stdout=subprocess.DEVNULL,
-            stderr=subprocess.PIPE,
+            stderr=self.stderr_file,
             text=True,
         )
-        self.context = self._connect()
-        self.smgr = self.context.ServiceManager
-        self.desktop = self.smgr.createInstanceWithContext("com.sun.star.frame.Desktop", self.context)
+        self.context = None
+        self.smgr = None
+        self.desktop = None
         self.documents: dict[str, object] = {}
         self.paths: dict[str, str] = {}
+        try:
+            self.context = self._connect()
+            self.smgr = self.context.ServiceManager
+            self.desktop = self.smgr.createInstanceWithContext("com.sun.star.frame.Desktop", self.context)
+        except Exception:
+            self._stop_process()
+            self._close_stderr()
+            shutil.rmtree(self.profile_dir, ignore_errors=True)
+            raise
 
     def _connect(self):
         local = uno.getComponentContext()
@@ -67,16 +78,19 @@ class CalcRuntime:
         last_error: Exception | None = None
         for _ in range(80):
             if self.process.poll() is not None:
-                stderr = self.process.stderr.read() if self.process.stderr else ""
-                raise RuntimeError(f"LibreOffice exited during startup ({self.process.returncode}): {stderr}")
+                raise RuntimeError(
+                    f"LibreOffice exited during startup ({self.process.returncode}).{self._stderr_suffix()}"
+                )
             try:
                 return resolver.resolve(target)
             except Exception as exc:  # UNO raises bridge-specific exceptions
                 last_error = exc
                 time.sleep(0.1)
-        raise RuntimeError(f"Timed out connecting to LibreOffice UNO pipe: {last_error}")
+        raise RuntimeError(f"Timed out connecting to LibreOffice UNO pipe: {last_error}.{self._stderr_suffix()}")
 
     def open(self, path: str, read_only: bool) -> dict:
+        if self.desktop is None:
+            raise RuntimeError("LibreOffice desktop service is unavailable.")
         full = str(Path(path).expanduser().resolve())
         if not os.path.isfile(full):
             raise FileNotFoundError(full)
@@ -93,6 +107,11 @@ class CalcRuntime:
         )
         if document is None:
             raise RuntimeError("LibreOffice did not return a spreadsheet document.")
+        if not document.supportsService("com.sun.star.sheet.SpreadsheetDocument"):
+            try:
+                document.close(True)
+            finally:
+                raise ValueError("The selected document is not a Calc spreadsheet.")
         workbook_id = uuid.uuid4().hex
         self.documents[workbook_id] = document
         self.paths[workbook_id] = full
@@ -104,11 +123,17 @@ class CalcRuntime:
         except KeyError as exc:
             raise KeyError(f"Unknown workbook '{workbook_id}'.") from exc
 
-    def _sheet(self, document, name: str):
+    @staticmethod
+    def _sheet(document, name: str):
         sheets = document.getSheets()
         if not sheets.hasByName(name):
             raise KeyError(f"Workbook does not contain sheet '{name}'.")
         return sheets.getByName(name)
+
+    def list_sheets(self, workbook_id: str) -> list[dict]:
+        document = self._doc(workbook_id)
+        names = document.getSheets().getElementNames()
+        return [{"name": str(name), "index": index} for index, name in enumerate(names)]
 
     def read_range(self, workbook_id: str, request: dict) -> dict:
         document = self._doc(workbook_id)
@@ -155,10 +180,11 @@ class CalcRuntime:
                 cell.setString("" if value is None else str(value))
             else:
                 cell.setValue(number)
+        cell_formula = cell.getFormula()
         return {
             "address": {"sheet": sheet_name, "row": row, "column": column},
             "value": cell.getString(),
-            "formula": cell.getFormula() if cell.getFormula().startswith("=") else "",
+            "formula": cell_formula if cell_formula.startswith("=") else "",
         }
 
     def recalculate(self, workbook_id: str) -> dict:
@@ -168,7 +194,12 @@ class CalcRuntime:
 
     def save(self, workbook_id: str, destination_path: str) -> dict:
         document = self._doc(workbook_id)
+        if bool(document.isReadonly()):
+            raise PermissionError("Workbook was opened read-only.")
         destination = str(Path(destination_path).expanduser().resolve())
+        source = self.paths[workbook_id]
+        if os.path.normcase(destination) == os.path.normcase(source):
+            raise PermissionError("The first slice only permits save-as to a new path; in-place overwrite is disabled.")
         Path(destination).parent.mkdir(parents=True, exist_ok=True)
         extension = Path(destination).suffix.lower()
         filters = {".ods": "calc8", ".xlsx": "Calc MS Excel 2007 XML"}
@@ -178,6 +209,8 @@ class CalcRuntime:
             uno.systemPathToFileUrl(destination),
             (prop("FilterName", filters[extension]), prop("Overwrite", True)),
         )
+        if not os.path.isfile(destination) or os.path.getsize(destination) == 0:
+            raise IOError("LibreOffice did not produce a non-empty saved workbook.")
         self.paths[workbook_id] = destination
         return {"ok": True}
 
@@ -196,16 +229,39 @@ class CalcRuntime:
                 self.close(workbook_id)
             except Exception:
                 pass
-        try:
-            self.desktop.terminate()
-        except Exception:
-            pass
+        if self.desktop is not None:
+            try:
+                self.desktop.terminate()
+            except Exception:
+                pass
+        self._stop_process()
+        self._close_stderr()
+        shutil.rmtree(self.profile_dir, ignore_errors=True)
+
+    def _stop_process(self) -> None:
+        if self.process.poll() is not None:
+            return
         try:
             self.process.wait(timeout=3)
         except subprocess.TimeoutExpired:
             self.process.kill()
             self.process.wait(timeout=3)
-        shutil.rmtree(self.profile_dir, ignore_errors=True)
+
+    def _stderr_suffix(self) -> str:
+        try:
+            self.stderr_file.flush()
+            self.stderr_file.seek(0)
+            text = self.stderr_file.read().strip()
+            self.stderr_file.seek(0, os.SEEK_END)
+        except Exception:
+            return ""
+        return f" LibreOffice stderr: {text[-4096:]}" if text else ""
+
+    def _close_stderr(self) -> None:
+        try:
+            self.stderr_file.close()
+        except Exception:
+            pass
 
 
 def serve() -> int:
@@ -225,6 +281,8 @@ def serve() -> int:
                     return 0
                 if method == "open":
                     result = runtime.open(params["path"], bool(params.get("readOnly", False)))
+                elif method == "listSheets":
+                    result = runtime.list_sheets(params["workbookId"])
                 elif method == "readRange":
                     result = runtime.read_range(params["workbookId"], params["range"])
                 elif method == "setCell":
