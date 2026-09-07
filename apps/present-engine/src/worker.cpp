@@ -35,6 +35,17 @@ struct EventQueue {
     bool overflowed{false};
 };
 
+struct ElementSnapshotState {
+    std::string path;
+    bool fresh{false};
+
+    void reset()
+    {
+        path.clear();
+        fresh = false;
+    }
+};
+
 std::uint32_t decodeU32Le(const std::array<std::uint8_t, 8>& header, std::size_t offset)
 {
     return static_cast<std::uint32_t>(header[offset]) |
@@ -316,8 +327,64 @@ Json slideListResult(const cakeos::present::PresentEngine& engine)
     return Json{{"slides", std::move(slides)}};
 }
 
-Json helloResult()
+Json elementListResult(
+    const cakeos::present::PresentEngine& engine,
+    const ElementSnapshotState& snapshot,
+    int slideIndex)
 {
+    if (!engine.isOpen()) {
+        throw std::logic_error("no presentation is open");
+    }
+    if (!engine.supportsElementSnapshots()) {
+        throw std::runtime_error(
+            "this LibreOfficeKit runtime does not support semantic element snapshots");
+    }
+    if (!snapshot.fresh || snapshot.path.empty()) {
+        throw std::runtime_error(
+            "element inventory is stale after unsaved mutations; save the presentation before requesting listElements");
+    }
+
+    // Validate against the live document as well as the saved snapshot.
+    (void)engine.slideExtent(slideIndex);
+    Json elements = Json::array();
+    for (const auto& element : engine.elementSnapshot(snapshot.path, slideIndex)) {
+        elements.push_back(Json{
+            {"ref", "slide:" + std::to_string(element.slideIndex) + "/object:" + std::to_string(element.objectIndex)},
+            {"slideIndex", element.slideIndex},
+            {"objectIndex", element.objectIndex},
+            {"referenceStability", "snapshot-only"},
+            {"text", element.text}
+        });
+    }
+
+    return Json{
+        {"slideIndex", slideIndex},
+        {"snapshotFresh", true},
+        {"referenceStability", "snapshot-only"},
+        {"elements", std::move(elements)}
+    };
+}
+
+Json helloResult(const cakeos::present::PresentEngine& engine)
+{
+    Json capabilities = Json::array({
+        "open",
+        "close",
+        "listSlides",
+        "slideExtent",
+        "renderSlide",
+        "addSlideAfter",
+        "duplicateSlide",
+        "deleteSlide",
+        "moveSlide",
+        "undo",
+        "redo",
+        "saveAs"
+    });
+    if (engine.supportsElementSnapshots()) {
+        capabilities.push_back("listElements");
+    }
+
     return Json{
         {"engine", "cakeos-present"},
         {"protocolVersion", ProtocolVersion},
@@ -331,20 +398,7 @@ Json helloResult()
             "editingContextChanged",
             "engineError"
         })},
-        {"capabilities", Json::array({
-            "open",
-            "close",
-            "listSlides",
-            "slideExtent",
-            "renderSlide",
-            "addSlideAfter",
-            "duplicateSlide",
-            "deleteSlide",
-            "moveSlide",
-            "undo",
-            "redo",
-            "saveAs"
-        })}
+        {"capabilities", std::move(capabilities)}
     };
 }
 
@@ -355,6 +409,7 @@ int main()
     try {
         cakeos::present::PresentEngine engine;
         EventQueue eventQueue;
+        ElementSnapshotState elementSnapshot;
         engine.setEventCallback([&eventQueue](const cakeos::present::EngineEvent& event) {
             if (const auto mapped = mapLibreOfficeEvent(event); mapped.has_value()) {
                 queueEvent(eventQueue, *mapped);
@@ -380,15 +435,24 @@ int main()
                 const std::string operation = request.at("op").get<std::string>();
 
                 if (operation == "hello") {
-                    writeFrame(std::cout, success(id, helloResult()));
+                    writeFrame(std::cout, success(id, helloResult(engine)));
                 } else if (operation == "open") {
-                    engine.open(request.at("path").get<std::string>());
+                    const std::string path = request.at("path").get<std::string>();
+                    engine.open(path);
+                    elementSnapshot.path = path;
+                    elementSnapshot.fresh = true;
                     writeFrame(std::cout, success(id, slideListResult(engine)));
                 } else if (operation == "close") {
                     engine.close();
+                    elementSnapshot.reset();
                     writeFrame(std::cout, success(id));
                 } else if (operation == "listSlides") {
                     writeFrame(std::cout, success(id, slideListResult(engine)));
+                } else if (operation == "listElements") {
+                    writeFrame(std::cout, success(id, elementListResult(
+                        engine,
+                        elementSnapshot,
+                        request.at("slideIndex").get<int>())));
                 } else if (operation == "slideExtent") {
                     const int slideIndex = request.at("slideIndex").get<int>();
                     const auto extent = engine.slideExtent(slideIndex);
@@ -423,35 +487,44 @@ int main()
                     }), tile.pixels);
                 } else if (operation == "addSlideAfter") {
                     engine.addSlideAfter(request.at("slideIndex").get<int>());
+                    elementSnapshot.fresh = false;
                     writeFrame(std::cout, success(id, slideListResult(engine)));
                     queueMutationEvents(eventQueue, engine, operation);
                 } else if (operation == "duplicateSlide") {
                     engine.duplicateSlide(request.at("slideIndex").get<int>());
+                    elementSnapshot.fresh = false;
                     writeFrame(std::cout, success(id, slideListResult(engine)));
                     queueMutationEvents(eventQueue, engine, operation);
                 } else if (operation == "deleteSlide") {
                     engine.deleteSlide(request.at("slideIndex").get<int>());
+                    elementSnapshot.fresh = false;
                     writeFrame(std::cout, success(id, slideListResult(engine)));
                     queueMutationEvents(eventQueue, engine, operation);
                 } else if (operation == "moveSlide") {
                     engine.moveSlide(
                         request.at("fromIndex").get<int>(),
                         request.at("toIndex").get<int>());
+                    elementSnapshot.fresh = false;
                     writeFrame(std::cout, success(id, slideListResult(engine)));
                     queueMutationEvents(eventQueue, engine, operation);
                 } else if (operation == "undo") {
                     engine.undo();
+                    elementSnapshot.fresh = false;
                     writeFrame(std::cout, success(id, slideListResult(engine)));
                     queueMutationEvents(eventQueue, engine, operation);
                 } else if (operation == "redo") {
                     engine.redo();
+                    elementSnapshot.fresh = false;
                     writeFrame(std::cout, success(id, slideListResult(engine)));
                     queueMutationEvents(eventQueue, engine, operation);
                 } else if (operation == "saveAs") {
+                    const std::string path = request.at("path").get<std::string>();
                     engine.saveAs(
-                        request.at("path").get<std::string>(),
+                        path,
                         request.value("format", std::string{}),
                         request.value("filterOptions", std::string{}));
+                    elementSnapshot.path = path;
+                    elementSnapshot.fresh = true;
                     writeFrame(std::cout, success(id));
                 } else if (operation == "quit") {
                     writeFrame(std::cout, success(id));
