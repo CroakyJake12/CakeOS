@@ -20,8 +20,8 @@ void requireSlideCount(const cakeos::present::PresentEngine& engine, std::size_t
 
 int main(int argc, char** argv)
 {
-    if (argc != 3) {
-        std::cerr << "Usage: cakeos-present-engine-lifecycle-smoke <input.odp> <output.odp>\n";
+    if (argc != 3 && argc != 4) {
+        std::cerr << "Usage: cakeos-present-engine-lifecycle-smoke <input.odp> <output.odp> [output.pptx]\n";
         return 2;
     }
 
@@ -49,7 +49,15 @@ int main(int argc, char** argv)
         engine.close();
 
         engine.open(argv[2]);
-        requireSlideCount(engine, 2U, "saved document reopen");
+        requireSlideCount(engine, 2U, "saved ODP reopen");
+
+        if (argc == 4) {
+            engine.saveAs(argv[3], "pptx");
+            engine.close();
+            engine.open(argv[3]);
+            requireSlideCount(engine, 2U, "saved PPTX reopen");
+            std::cout << "pptx_roundtrip=passed\n";
+        }
 
         std::cout << "semantic_lifecycle=passed\n";
         std::cout << "saved_slides=2\n";
