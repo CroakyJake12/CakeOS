@@ -53,7 +53,7 @@ int parseSlideIndex(const char* value)
 int checkedTwips(long value)
 {
     if (value <= 0 || value > std::numeric_limits<int>::max()) {
-        throw std::overflow_error("presentation extent cannot be represented by the tiled-rendering API");
+        throw std::overflow_error("slide extent cannot be represented by the tiled-rendering API");
     }
     return static_cast<int>(value);
 }
@@ -91,7 +91,7 @@ int main(int argc, char** argv)
             throw std::out_of_range("requested slide does not exist");
         }
 
-        const auto extent = engine.documentExtent();
+        const auto extent = engine.slideExtent(slideIndex);
         cakeos::present::TileRequest request;
         request.slideIndex = slideIndex;
         request.pixelWidth = 1280;
