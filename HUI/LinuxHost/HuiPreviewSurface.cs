@@ -45,29 +45,70 @@ public sealed class HuiPreviewSurface : Control, IHavenMeasureContext
     public override void Render(DrawingContext context)
     {
         base.Render(context);
-        foreach (var command in _renderer.Render(_root))
+        var scopes = new Stack<IDisposable>();
+        try
         {
-            switch (command)
+            foreach (var command in _renderer.Render(_root))
             {
-                case HavenFillRoundedRectCommand fill:
-                    context.DrawRectangle(Brush(fill.Brush, fill.Opacity), null, Rect(fill.Rect), fill.Radius, fill.Radius);
-                    break;
-                case HavenStrokeRoundedRectCommand stroke:
-                    context.DrawRectangle(null, Pen(stroke.Pen, stroke.Opacity), Rect(stroke.Rect), stroke.Radius, stroke.Radius);
-                    break;
-                case HavenTextCommand text:
-                    var formatted = Text(text.Layout, Brush(text.Brush, text.Opacity));
-                    context.DrawText(formatted, new Point(text.Rect.X, text.Rect.Y));
-                    break;
-                case HavenLineCommand line:
-                    context.DrawLine(Pen(line.Pen, line.Opacity), Point(line.Start), Point(line.End));
-                    break;
-                case HavenEllipseCommand ellipse:
-                    context.DrawEllipse(Brush(ellipse.Brush, ellipse.Opacity), ellipse.Pen is null ? null : Pen(ellipse.Pen, ellipse.Opacity), Rect(ellipse.Rect));
-                    break;
-                default:
-                    throw new NotSupportedException($"Graphical preview backend does not yet support {command.GetType().Name}.");
+                switch (command)
+                {
+                    case HavenPushTransformCommand push:
+                    {
+                        var transform = Matrix.CreateTranslation(-push.Origin.X, -push.Origin.Y)
+                            * Matrix.CreateScale(push.Transform.ScaleX, push.Transform.ScaleY)
+                            * Matrix.CreateRotation(push.Transform.RotationDegrees * Math.PI / 180d)
+                            * Matrix.CreateTranslation(
+                                push.Origin.X + push.Transform.TranslateX,
+                                push.Origin.Y + push.Transform.TranslateY);
+                        scopes.Push(context.PushTransform(transform));
+                        continue;
+                    }
+                    case HavenPushClipCommand clip:
+                        scopes.Push(context.PushClip(Rect(clip.Rect)));
+                        continue;
+                    case HavenPopTransformCommand or HavenPopClipCommand:
+                        if (scopes.Count == 0)
+                            throw new InvalidOperationException("HUI renderer emitted an unbalanced transform/clip pop.");
+                        scopes.Pop().Dispose();
+                        continue;
+                    case HavenFillRoundedRectCommand fill:
+                        context.DrawRectangle(Brush(fill.Brush, fill.Opacity), null, Rect(fill.Rect), fill.Radius, fill.Radius);
+                        break;
+                    case HavenStrokeRoundedRectCommand stroke:
+                        context.DrawRectangle(null, Pen(stroke.Pen, stroke.Opacity), Rect(stroke.Rect), stroke.Radius, stroke.Radius);
+                        break;
+                    case HavenTextCommand text:
+                    {
+                        var formatted = Text(text.Layout, Brush(text.Brush, text.Opacity));
+                        var y = text.Layout.CenterVertically
+                            ? text.Rect.Y + Math.Max(0d, (text.Rect.Height - formatted.Height) / 2d)
+                            : text.Rect.Y;
+                        context.DrawText(formatted, new Point(text.Rect.X, y));
+                        break;
+                    }
+                    case HavenLineCommand line:
+                        context.DrawLine(Pen(line.Pen, line.Opacity), Point(line.Start), Point(line.End));
+                        break;
+                    case HavenEllipseCommand ellipse:
+                        context.DrawEllipse(Brush(ellipse.Brush, ellipse.Opacity), ellipse.Pen is null ? null : Pen(ellipse.Pen, ellipse.Opacity), Rect(ellipse.Rect));
+                        break;
+                    case HavenShadowCommand shadow:
+                        DrawEffect(context, shadow.Rect, shadow.Radius, shadow.Shadow.Brush, shadow.Shadow.OffsetX, shadow.Shadow.OffsetY, shadow.Shadow.Blur, shadow.Shadow.Spread, shadow.Opacity);
+                        break;
+                    case HavenGlowCommand glow:
+                        DrawEffect(context, glow.Rect, glow.Radius, glow.Glow.Brush, 0d, 0d, glow.Glow.Blur, 0d, glow.Opacity);
+                        break;
+                    default:
+                        throw new NotSupportedException($"Graphical preview backend does not yet support {command.GetType().Name}.");
+                }
             }
+
+            if (scopes.Count != 0)
+                throw new InvalidOperationException("HUI renderer emitted unbalanced transform/clip pushes.");
+        }
+        finally
+        {
+            while (scopes.Count > 0) scopes.Pop().Dispose();
         }
     }
 
@@ -228,19 +269,46 @@ public sealed class HuiPreviewSurface : Control, IHavenMeasureContext
         _ => FontWeight.Normal,
     };
 
-    private static IBrush Brush(HavenBrush brush, double opacity)
+    private static IBrush Brush(HavenBrush brush, double opacity) =>
+        new SolidColorBrush(ApplyOpacity(ColorFor(brush), opacity));
+
+    private static Color ColorFor(HavenBrush brush) => brush switch
     {
-        Color color = brush switch
+        HavenSolidBrush solid => Color.FromArgb(solid.A, solid.R, solid.G, solid.B),
+        HavenTokenBrush token when token.Token.Contains("Accent", StringComparison.OrdinalIgnoreCase) => Color.Parse("#8A7CFF"),
+        HavenTokenBrush token when token.Token.Contains("Secondary", StringComparison.OrdinalIgnoreCase) => Color.Parse("#A8AFBD"),
+        HavenTokenBrush token when token.Token.Contains("Text", StringComparison.OrdinalIgnoreCase) => Color.Parse("#F5F7FB"),
+        HavenTokenBrush token when token.Token.Contains("Transparent", StringComparison.OrdinalIgnoreCase) => Colors.Transparent,
+        HavenTokenBrush => Color.Parse("#242834"),
+        _ => Color.Parse("#242834"),
+    };
+
+    private static Color ApplyOpacity(Color color, double opacity)
+    {
+        var alpha = (byte)Math.Clamp(Math.Round(color.A * opacity), 0d, 255d);
+        return Color.FromArgb(alpha, color.R, color.G, color.B);
+    }
+
+    private static void DrawEffect(
+        DrawingContext context,
+        HavenRect bounds,
+        double radius,
+        HavenBrush brush,
+        double offsetX,
+        double offsetY,
+        double blur,
+        double spread,
+        double opacity)
+    {
+        var shadows = new BoxShadows(new BoxShadow
         {
-            HavenSolidBrush solid => Color.FromArgb(solid.A, solid.R, solid.G, solid.B),
-            HavenTokenBrush token when token.Token.Contains("Accent", StringComparison.OrdinalIgnoreCase) => Color.Parse("#8A7CFF"),
-            HavenTokenBrush token when token.Token.Contains("Secondary", StringComparison.OrdinalIgnoreCase) => Color.Parse("#A8AFBD"),
-            HavenTokenBrush token when token.Token.Contains("Text", StringComparison.OrdinalIgnoreCase) => Color.Parse("#F5F7FB"),
-            HavenTokenBrush => Color.Parse("#242834"),
-            _ => Color.Parse("#242834"),
-        };
-        var alpha = (byte)Math.Clamp(Math.Round(color.A * opacity), 0, 255);
-        return new SolidColorBrush(Color.FromArgb(alpha, color.R, color.G, color.B));
+            OffsetX = offsetX,
+            OffsetY = offsetY,
+            Blur = Math.Max(0d, blur),
+            Spread = spread,
+            Color = ApplyOpacity(ColorFor(brush), opacity),
+        });
+        context.DrawRectangle(Brushes.Transparent, null, Rect(bounds), radius, radius, shadows);
     }
 
     private static IPen Pen(HavenPen pen, double opacity) => new Pen(Brush(pen.Brush, opacity), pen.Thickness);
