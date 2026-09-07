@@ -151,6 +151,39 @@ def require_semantic_mutation_events(events: list[dict[str, Any]], reason: str) 
         raise RuntimeError(f"{reason} did not emit the stable semantic mutation contract")
 
 
+def element_text(result: dict[str, Any]) -> list[str]:
+    output: list[str] = []
+    for element in result["elements"]:
+        output.extend(str(value) for value in element.get("text", []))
+    return output
+
+
+def require_element_inventory(
+    response: dict[str, Any],
+    *,
+    slide_index: int,
+    expected_text: str,
+) -> None:
+    result = response["result"]
+    if result.get("slideIndex") != slide_index or result.get("snapshotFresh") is not True:
+        raise RuntimeError(f"element inventory has invalid snapshot metadata: {result}")
+    if result.get("referenceStability") != "snapshot-only":
+        raise RuntimeError(f"element inventory overstates identity stability: {result}")
+    elements = result.get("elements")
+    if not isinstance(elements, list) or not elements:
+        raise RuntimeError(f"element inventory is empty: {result}")
+    for element in elements:
+        if element.get("referenceStability") != "snapshot-only":
+            raise RuntimeError(f"element overstates identity stability: {element}")
+        expected_ref = f"slide:{element['slideIndex']}/object:{element['objectIndex']}"
+        if element.get("ref") != expected_ref:
+            raise RuntimeError(f"element ref is not the normalized CakeOS form: {element}")
+    if expected_text not in element_text(result):
+        raise RuntimeError(
+            f"element inventory did not expose {expected_text!r}: {element_text(result)}"
+        )
+
+
 def main() -> int:
     if len(sys.argv) != 5:
         print(
@@ -177,6 +210,7 @@ def main() -> int:
         required_capabilities = {
             "open",
             "listSlides",
+            "listElements",
             "slideExtent",
             "renderSlide",
             "addSlideAfter",
@@ -276,6 +310,11 @@ def main() -> int:
         if slide_names(reorder_opened) != ["Alpha", "Beta", "Gamma"]:
             raise RuntimeError(f"unexpected reorder fixture: {slide_names(reorder_opened)}")
 
+        inventory, inventory_payload = client.require_ok("listElements", slideIndex=0)
+        if inventory_payload:
+            raise RuntimeError("listElements unexpectedly returned binary data")
+        require_element_inventory(inventory, slide_index=0, expected_text="Alpha")
+
         client.require_ok("listSlides")
         total_events += len(client.take_events())
 
@@ -283,8 +322,14 @@ def main() -> int:
         if slide_names(moved_down) != ["Beta", "Gamma", "Alpha"]:
             raise RuntimeError(f"worker downward reorder failed: {slide_names(moved_down)}")
 
-        # Pump moveSlide events and prove it uses the same typed mutation contract.
-        client.require_ok("listSlides")
+        # The next element query both pumps the move events and proves HUI can
+        # never unknowingly consume the old on-disk inventory after an edit.
+        stale_inventory, stale_payload = client.request("listElements", slideIndex=0)
+        if stale_inventory.get("ok") or stale_payload:
+            raise RuntimeError("worker returned an element inventory after unsaved mutation")
+        stale_message = str(stale_inventory.get("error", {}).get("message", ""))
+        if "stale" not in stale_message or "save" not in stale_message:
+            raise RuntimeError(f"worker did not explain stale element inventory: {stale_inventory}")
         move_events = client.take_events()
         total_events += len(move_events)
         require_semantic_mutation_events(move_events, "moveSlide")
@@ -308,6 +353,11 @@ def main() -> int:
                 f"worker reorder did not persist: {slide_names(reorder_reopened)}"
             )
 
+        persisted_inventory, persisted_payload = client.require_ok("listElements", slideIndex=0)
+        if persisted_payload:
+            raise RuntimeError("persisted listElements unexpectedly returned binary data")
+        require_element_inventory(persisted_inventory, slide_index=0, expected_text="Beta")
+
         # Pump any events left after the final open and confirm none escaped the
         # stable worker event vocabulary.
         client.require_ok("listSlides")
@@ -318,6 +368,8 @@ def main() -> int:
 
         print("worker_protocol=passed")
         print("worker_events=passed")
+        print("worker_element_inventory=passed")
+        print("worker_element_snapshot_staleness=passed")
         print("worker_slide_reorder=passed")
         print("worker_slide_order=Beta,Gamma,Alpha")
         print(f"worker_event_count={total_events}")
