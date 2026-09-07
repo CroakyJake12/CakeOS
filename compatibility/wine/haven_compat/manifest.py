@@ -13,6 +13,13 @@ _ALLOWED_BACKENDS = {"wine", "winboat"}
 _ALLOWED_NETWORK = {"none", "internet", "lan"}
 _ALLOWED_GPU = {"none", "render"}
 _ALLOWED_MOUNT_MODES = {"ro", "rw"}
+_SHARE_ROOT = PurePosixPath("/mnt/haven-share")
+
+
+def _is_safe_identifier(value: str) -> bool:
+    return bool(value) and all(
+        c in "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789._-" for c in value
+    ) and value not in {".", ".."}
 
 
 @dataclass(frozen=True)
@@ -23,6 +30,8 @@ class MountGrant:
 
     @classmethod
     def from_dict(cls, value: dict[str, Any]) -> "MountGrant":
+        if not isinstance(value, dict):
+            raise ManifestError("each mount grant must be an object")
         source = str(value.get("source", "")).strip()
         target = str(value.get("target", "")).strip()
         mode = str(value.get("mode", "ro")).lower()
@@ -32,10 +41,14 @@ class MountGrant:
             raise ManifestError("mount target must be an absolute sandbox path")
         if mode not in _ALLOWED_MOUNT_MODES:
             raise ManifestError(f"unsupported mount mode: {mode}")
-        if source in {"/", "/home", "/root"}:
+        if source in {"/", "/home", "/root", "/tmp"}:
             raise ManifestError("broad host filesystem mounts are forbidden")
-        if ".." in PurePosixPath(target).parts:
+
+        target_path = PurePosixPath(target)
+        if ".." in target_path.parts:
             raise ManifestError("mount target traversal is forbidden")
+        if target_path == _SHARE_ROOT or _SHARE_ROOT not in target_path.parents:
+            raise ManifestError("mount targets must be beneath /mnt/haven-share/<name>")
         return cls(source=source, target=target, mode=mode)
 
 
@@ -61,12 +74,12 @@ class AppManifest:
         network = str(value.get("network", "none")).lower()
         gpu = str(value.get("gpu", "none")).lower()
 
-        if not app_id or any(c not in "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789._-" for c in app_id):
-            raise ManifestError("id must contain only letters, digits, dot, underscore, or hyphen")
+        if not _is_safe_identifier(app_id):
+            raise ManifestError("id must be a simple non-traversing identifier")
         if backend not in _ALLOWED_BACKENDS:
             raise ManifestError(f"unsupported backend: {backend}")
-        if not runtime:
-            raise ManifestError("runtime is required")
+        if not _is_safe_identifier(runtime):
+            raise ManifestError("runtime must be a simple non-traversing identifier")
         if not entrypoint:
             raise ManifestError("entrypoint is required")
         if network not in _ALLOWED_NETWORK:
@@ -78,6 +91,9 @@ class AppManifest:
         if not isinstance(mounts_raw, list):
             raise ManifestError("mounts must be a list")
         mounts = tuple(MountGrant.from_dict(item) for item in mounts_raw)
+        targets = [mount.target for mount in mounts]
+        if len(targets) != len(set(targets)):
+            raise ManifestError("mount targets must be unique")
 
         return cls(
             app_id=app_id,
