@@ -88,6 +88,24 @@ def main() -> int:
             )
             require("sort key" in invalid_key.lower(), "Worker accepted a sort key outside the requested range.")
 
+            header_only = worker.expect_error(
+                "sortRange",
+                {
+                    "workbookId": workbook_id,
+                    "range": {
+                        "sheet": sheet,
+                        "startRow": 0,
+                        "startColumn": 0,
+                        "rowCount": 1,
+                        "columnCount": 2,
+                    },
+                    "keyColumnOffset": 1,
+                    "ascending": True,
+                    "containsHeader": True,
+                },
+            )
+            require("data row" in header_only.lower(), "Worker accepted a header-only sort range.")
+
             worker.call("save", {"workbookId": workbook_id, "destinationPath": str(saved)})
             worker.call("close", {"workbookId": workbook_id})
 
