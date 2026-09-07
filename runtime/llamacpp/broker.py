@@ -27,6 +27,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from gguf import GgufValidationError, read_gguf_version
+from model_lease import ModelLease, ModelLeaseBusy, ModelLeaseError, acquire_model_lease, ensure_private_directory
 
 
 class BrokerError(RuntimeError):
@@ -173,8 +174,8 @@ def load_manifests() -> dict[str, ModelManifest]:
 
 def verify_blob(manifest: ModelManifest) -> pathlib.Path:
     path = manifest.blob_path
-    if not path.is_file():
-        raise BrokerError("model blob is not installed")
+    if not path.is_file() or path.is_symlink():
+        raise BrokerError("model blob is not installed as a regular file")
     stat_result = path.stat()
     if stat_result.st_size != manifest.size:
         raise BrokerError("model size does not match its manifest")
@@ -252,6 +253,7 @@ class Worker:
     def __init__(self) -> None:
         self._process: subprocess.Popen[bytes] | None = None
         self._model: ModelManifest | None = None
+        self._lease: ModelLease | None = None
         self._lock = threading.RLock()
 
     @property
@@ -265,47 +267,63 @@ class Worker:
             return self._process is not None and self._process.poll() is None and WORKER_SOCKET.exists()
 
     def load(self, manifest: ModelManifest) -> None:
-        model_path = verify_blob(manifest)
         with self._lock:
             if self.ready and self._model and self._model.model_id == manifest.model_id:
                 return
-            self._stop_locked()
-            if not LLAMA_SERVER.is_file():
-                raise BrokerError(f"llama-server is unavailable at {LLAMA_SERVER}")
-            WORKER_SOCKET.unlink(missing_ok=True)
-            WORKER_HOME.mkdir(mode=0o700, parents=True, exist_ok=True)
-            os.chmod(WORKER_HOME, 0o700)
-            self._process = subprocess.Popen(
-                build_worker_args(manifest, model_path),
-                stdin=subprocess.DEVNULL,
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
-                env=worker_environment(),
-                close_fds=True,
-                start_new_session=True,
-            )
-            deadline = time.monotonic() + START_TIMEOUT_SECONDS
-            while time.monotonic() < deadline:
-                if self._process.poll() is not None:
-                    code = self._process.returncode
-                    self._process = None
-                    raise BrokerError(f"llama-server exited during startup with code {code}")
-                if WORKER_SOCKET.exists():
+            try:
+                lease = acquire_model_lease(RUNTIME_DIR, manifest.model_id, exclusive=False, blocking=False)
+            except (ModelLeaseBusy, ModelLeaseError) as exc:
+                raise BrokerError(f"model is being modified and cannot be loaded: {manifest.model_id}") from exc
+            try:
+                model_path = verify_blob(manifest)
+                if not LLAMA_SERVER.is_file():
+                    raise BrokerError(f"llama-server is unavailable at {LLAMA_SERVER}")
+                self._stop_locked()
+                WORKER_SOCKET.unlink(missing_ok=True)
+                ensure_private_directory(WORKER_HOME)
+                self._process = subprocess.Popen(
+                    build_worker_args(manifest, model_path),
+                    stdin=subprocess.DEVNULL,
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                    env=worker_environment(),
+                    close_fds=True,
+                    start_new_session=True,
+                )
+                self._lease = lease
+                lease = None
+                deadline = time.monotonic() + START_TIMEOUT_SECONDS
+                while time.monotonic() < deadline:
+                    if self._process.poll() is not None:
+                        code = self._process.returncode
+                        self._stop_locked()
+                        raise BrokerError(f"llama-server exited during startup with code {code}")
+                    if WORKER_SOCKET.exists():
+                        try:
+                            os.chmod(WORKER_SOCKET, 0o600)
+                            conn = UnixHTTPConnection(WORKER_SOCKET, timeout=1)
+                            conn.request("GET", "/health")
+                            response = conn.getresponse()
+                            response.read()
+                            conn.close()
+                            if 200 <= response.status < 300:
+                                self._model = manifest
+                                return
+                        except OSError:
+                            pass
+                    time.sleep(0.1)
+                self._stop_locked()
+                raise BrokerError("llama-server did not become healthy before the startup deadline")
+            except Exception as exc:
+                if self._process is not None or self._lease is not None:
                     try:
-                        os.chmod(WORKER_SOCKET, 0o600)
-                        conn = UnixHTTPConnection(WORKER_SOCKET, timeout=1)
-                        conn.request("GET", "/health")
-                        response = conn.getresponse()
-                        response.read()
-                        conn.close()
-                        if 200 <= response.status < 300:
-                            self._model = manifest
-                            return
-                    except OSError:
-                        pass
-                time.sleep(0.1)
-            self._stop_locked()
-            raise BrokerError("llama-server did not become healthy before the startup deadline")
+                        self._stop_locked()
+                    except BrokerError as cleanup_exc:
+                        raise BrokerError(f"worker startup failed and cleanup also failed: {cleanup_exc}") from exc
+                raise
+            finally:
+                if lease is not None:
+                    lease.release()
 
     def unload(self) -> None:
         with self._lock:
@@ -313,13 +331,13 @@ class Worker:
 
     def _stop_locked(self) -> None:
         process = self._process
-        self._process = None
-        self._model = None
         if process is not None and process.poll() is None:
             try:
                 os.killpg(process.pid, signal.SIGTERM)
                 process.wait(timeout=5)
-            except (ProcessLookupError, subprocess.TimeoutExpired):
+            except ProcessLookupError:
+                pass
+            except subprocess.TimeoutExpired:
                 if process.poll() is None:
                     try:
                         os.killpg(process.pid, signal.SIGKILL)
@@ -327,9 +345,19 @@ class Worker:
                         pass
                     try:
                         process.wait(timeout=2)
-                    except subprocess.TimeoutExpired:
-                        pass
-        WORKER_SOCKET.unlink(missing_ok=True)
+                    except subprocess.TimeoutExpired as exc:
+                        raise BrokerError("unable to stop llama-server; retaining model lifecycle lease") from exc
+        if process is not None and process.poll() is None:
+            raise BrokerError("llama-server remained alive after stop request; retaining model lifecycle lease")
+        self._process = None
+        self._model = None
+        lease = self._lease
+        self._lease = None
+        try:
+            WORKER_SOCKET.unlink(missing_ok=True)
+        finally:
+            if lease is not None:
+                lease.release()
 
 
 @dataclass
@@ -542,10 +570,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
 
 
 def main() -> int:
-    RUNTIME_DIR.mkdir(mode=0o700, parents=True, exist_ok=True)
-    os.chmod(RUNTIME_DIR, 0o700)
-    WORKER_HOME.mkdir(mode=0o700, parents=True, exist_ok=True)
-    os.chmod(WORKER_HOME, 0o700)
+    ensure_private_directory(RUNTIME_DIR)
+    ensure_private_directory(WORKER_HOME)
     server = ThreadingUnixServer(str(BROKER_SOCKET), Handler)
     try:
         server.serve_forever(poll_interval=0.25)

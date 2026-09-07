@@ -26,7 +26,11 @@
     "brokerCanWriteModelStore": false,
     "downloadInBroker": false,
     "deletionInBroker": false,
-    "managementBoundary": "A separate explicit user-action model manager owns verified import, update, and deletion."
+    "manager": "haven-modelctl",
+    "managerNetworkRequired": false,
+    "mutationSynchronization": "exclusive store flock plus exclusive per-model flock",
+    "loadedWorkerLease": "shared per-model flock held for worker lifetime",
+    "managementBoundary": "Explicit user-action model manager owns verified local import, replace/update, and deletion."
   },
   "coexistence": {
     "ollamaProcessOwnership": "external",
