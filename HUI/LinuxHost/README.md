@@ -1,0 +1,16 @@
+# CakeOS HUI Linux graphical preview host
+
+This is the first graphical Linux backend slice for HUI. It is intentionally a normal unprivileged desktop process: it does not replace GNOME Shell or Mutter, install a GDM session, or call privileged OS services.
+
+The host consumes the platform-neutral `Haven.UI` source pinned by `havenos.lock`. The initial renderer deliberately implements only the HUI draw-command subset used by this preview and throws on unsupported commands so a partial backend cannot be mistaken for full HUI compatibility.
+
+The automated graphical gate must:
+
+1. stage the exact pinned HUI source;
+2. compile a Linux-x64 Avalonia host;
+3. start a real window under Xvfb;
+4. exercise HUI pointer and keyboard activation through `HavenInputRouter`;
+5. capture the displayed window to a PNG;
+6. preserve logs and screenshot as CI evidence.
+
+Passing that gate is graphical Linux-host evidence, not approved-VM visual proof. Approved-VM installation and observation remain a later acceptance gate.
