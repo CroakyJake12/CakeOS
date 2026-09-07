@@ -11,6 +11,13 @@ from pathlib import Path
 from typing import Any, BinaryIO
 
 MAX_FRAME = 64 * 1024 * 1024
+ALLOWED_EVENTS = {
+    "canvasInvalidated",
+    "documentChanged",
+    "slideChanged",
+    "editingContextChanged",
+    "engineError",
+}
 
 
 def read_exact(stream: BinaryIO, size: int) -> bytes:
@@ -54,17 +61,33 @@ class WorkerClient:
         self.stdin = self.process.stdin
         self.stdout = self.process.stdout
         self.next_id = 1
+        self.events: list[dict[str, Any]] = []
 
     def request(self, op: str, **fields: Any) -> tuple[dict[str, Any], bytes]:
         request_id = self.next_id
         self.next_id += 1
         send_frame(self.stdin, {"id": request_id, "op": op, **fields})
-        response, payload = read_frame(self.stdout)
-        if response.get("id") != request_id:
-            raise RuntimeError(
-                f"response id mismatch: expected {request_id}, got {response.get('id')}"
-            )
-        return response, payload
+
+        while True:
+            response, payload = read_frame(self.stdout)
+            event_name = response.get("event")
+            if event_name is not None:
+                if payload:
+                    raise RuntimeError("worker event unexpectedly contained binary data")
+                if response.get("protocolVersion") != 1:
+                    raise RuntimeError(f"event used an unexpected protocol version: {response}")
+                if event_name not in ALLOWED_EVENTS:
+                    raise RuntimeError(f"worker leaked an unknown/raw event type: {event_name}")
+                if not isinstance(response.get("data"), dict):
+                    raise RuntimeError(f"worker event data is not an object: {response}")
+                self.events.append(response)
+                continue
+
+            if response.get("id") != request_id:
+                raise RuntimeError(
+                    f"response id mismatch: expected {request_id}, got {response.get('id')}"
+                )
+            return response, payload
 
     def require_ok(self, op: str, **fields: Any) -> tuple[dict[str, Any], bytes]:
         response, payload = self.request(op, **fields)
@@ -73,6 +96,11 @@ class WorkerClient:
         if response.get("protocolVersion") != 1:
             raise RuntimeError(f"unexpected protocol version: {response}")
         return response, payload
+
+    def take_events(self) -> list[dict[str, Any]]:
+        events = self.events
+        self.events = []
+        return events
 
     def close(self) -> None:
         if self.process.poll() is None:
@@ -90,6 +118,10 @@ def slide_count(response: dict[str, Any]) -> int:
     return len(response["result"]["slides"])
 
 
+def event_names(events: list[dict[str, Any]]) -> set[str]:
+    return {str(event["event"]) for event in events}
+
+
 def main() -> int:
     if len(sys.argv) != 4:
         print(
@@ -104,6 +136,7 @@ def main() -> int:
     output.unlink(missing_ok=True)
 
     client = WorkerClient(worker)
+    total_events = 0
     try:
         hello, payload = client.require_ok("hello")
         if payload:
@@ -126,6 +159,10 @@ def main() -> int:
             raise RuntimeError(f"worker is missing capabilities: {sorted(missing)}")
         if result["pixelTransport"] != "inline-binary-v1":
             raise RuntimeError(f"unexpected pixel transport: {result['pixelTransport']}")
+        if result["eventTransport"] != "framed-json-v1":
+            raise RuntimeError(f"unexpected event transport: {result['eventTransport']}")
+        if set(result["events"]) != ALLOWED_EVENTS:
+            raise RuntimeError(f"unexpected event vocabulary: {result['events']}")
 
         opened, _ = client.require_ok("open", path=str(source))
         if slide_count(opened) != 1:
@@ -156,9 +193,33 @@ def main() -> int:
         if rejected.get("ok") or rejected_payload:
             raise RuntimeError("worker did not reject an oversized render request")
 
+        # Clear any typed events emitted by open/render before testing the
+        # deterministic semantic-mutation contract.
+        client.require_ok("listSlides")
+        total_events += len(client.take_events())
+
         added, _ = client.require_ok("addSlideAfter", slideIndex=0)
         if slide_count(added) != 2:
             raise RuntimeError("worker addSlideAfter did not create a slide")
+
+        # Events are emitted after their originating response. The next request
+        # proves a HUI client can demultiplex queued events before its response.
+        listed, _ = client.require_ok("listSlides")
+        if slide_count(listed) != 2:
+            raise RuntimeError("worker listSlides changed state unexpectedly")
+        mutation_events = client.take_events()
+        total_events += len(mutation_events)
+        mutation_names = event_names(mutation_events)
+        if "documentChanged" not in mutation_names or "canvasInvalidated" not in mutation_names:
+            raise RuntimeError(f"missing mutation events: {sorted(mutation_names)}")
+        semantic_repaints = [
+            event for event in mutation_events
+            if event["event"] == "canvasInvalidated"
+            and event["data"].get("source") == "semantic"
+            and event["data"].get("all") is True
+        ]
+        if not semantic_repaints:
+            raise RuntimeError("semantic mutation did not emit a conservative full repaint event")
 
         undone, _ = client.require_ok("undo")
         if slide_count(undone) != 1:
@@ -185,7 +246,17 @@ def main() -> int:
         if slide_count(reopened) != 2:
             raise RuntimeError("worker output did not persist two slides")
 
+        # Pump any events left after the final open and confirm none escaped the
+        # stable worker event vocabulary.
+        client.require_ok("listSlides")
+        final_events = client.take_events()
+        total_events += len(final_events)
+        if not all(event["event"] in ALLOWED_EVENTS for event in final_events):
+            raise RuntimeError("raw LibreOffice callback escaped the worker boundary")
+
         print("worker_protocol=passed")
+        print("worker_events=passed")
+        print(f"worker_event_count={total_events}")
         print(f"worker_extent_twips={width}x{height}")
         print(f"worker_render_bytes={len(pixels)}")
         print("worker_saved_slides=2")
