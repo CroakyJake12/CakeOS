@@ -6,6 +6,9 @@ rust-version = "1.92"
 publish = false
 license = "GPL-3.0-or-later"
 
+[lib]
+crate-type = ["rlib", "cdylib"]
+
 [dependencies]
 anyhow = "1.0"
 futures = { version = "0.3", features = ["executor"] }
