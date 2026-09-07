@@ -3,6 +3,8 @@
 //! This crate deliberately depends on `rnote-engine` with default features disabled.
 //! It must not enable Rnote's `ui` feature or depend on GTK/Libadwaita.
 
+pub mod ffi;
+
 use std::collections::HashSet;
 use std::time::Instant;
 
