@@ -28,7 +28,7 @@ jobs:
           dotnet-version: 10.0.x
 
       - name: Install graphical validation tools
-        run: sudo apt-get update && sudo apt-get install -y jq xvfb imagemagick openbox xdotool x11-utils
+        run: sudo apt-get update && sudo apt-get install -y jq xvfb imagemagick openbox xdotool x11-utils file
 
       - name: Validate and stage pinned HUI source
         run: |
@@ -39,14 +39,31 @@ jobs:
       - name: Build graphical Linux host
         run: bash HUI/build-linux-host.sh
 
-      - name: Check Linux host native closure
+      - name: Check all shipped ELF native dependencies
         run: |
-          app=artifacts/hui-linux-host/publish/cakeos-hui-linux-preview
-          ldd "$app" | tee artifacts/hui-linux-host/native-dependencies.txt
-          if grep -q 'not found' artifacts/hui-linux-host/native-dependencies.txt; then
+          publish=artifacts/hui-linux-host/publish
+          report=artifacts/hui-linux-host/native-dependencies.txt
+          : > "$report"
+          unresolved=0
+          elf_count=0
+          while IFS= read -r -d '' candidate; do
+            if file -b "$candidate" | grep -q '^ELF '; then
+              elf_count=$((elf_count + 1))
+              printf '### %s\n' "$candidate" >> "$report"
+              deps="$(ldd "$candidate" 2>&1 || true)"
+              printf '%s\n\n' "$deps" >> "$report"
+              if grep -q 'not found' <<<"$deps"; then
+                unresolved=1
+              fi
+            fi
+          done < <(find "$publish" -type f -print0)
+          cat "$report"
+          test "$elf_count" -gt 0
+          if test "$unresolved" -ne 0; then
             echo 'Graphical HUI host has unresolved native dependencies' >&2
             exit 1
           fi
+          echo "Checked native closure for $elf_count shipped ELF files."
 
       - name: Run real window, exercise HUI input, and capture screenshot
         run: |
@@ -109,6 +126,30 @@ jobs:
           echo "Runtime status: $runtime_status"
           exit "$runtime_status"
 
+      - name: Build reproducible graphical Debian package
+        run: |
+          version="0.1.0+git${GITHUB_SHA::12}"
+          export CAKEOS_HUI_PREVIEW_VERSION="$version"
+          package="artifacts/packages/haven-hui-preview_${version}_amd64.deb"
+
+          bash packaging/haven-hui-preview/build-deb.sh
+          cp "$package" "$package.first"
+          bash packaging/haven-hui-preview/build-deb.sh
+          cmp "$package.first" "$package"
+          rm "$package.first"
+
+          sha256sum "$package" | tee artifacts/packages/graphical-package.sha256
+          dpkg-deb --info "$package" | tee artifacts/packages/graphical-package-info.txt
+          dpkg-deb --contents "$package" | tee artifacts/packages/graphical-package-contents.txt
+
+          rm -rf artifacts/packages/extracted
+          dpkg-deb -x "$package" artifacts/packages/extracted
+          test -x artifacts/packages/extracted/usr/lib/cakeos/hui-preview/cakeos-hui-linux-preview
+          test -x artifacts/packages/extracted/usr/bin/cakeos-hui-preview
+          grep -Fxq 'Name=CakeOS HUI Preview' artifacts/packages/extracted/usr/share/applications/cakeos-hui-preview.desktop
+          grep -Fxq 'Exec=cakeos-hui-preview' artifacts/packages/extracted/usr/share/applications/cakeos-hui-preview.desktop
+          echo 'Graphical Debian package is byte-reproducible from the same publish payload.'
+
       - name: Upload graphical evidence
         if: always()
         uses: actions/upload-artifact@v4
@@ -125,3 +166,14 @@ jobs:
             artifacts/hui-linux-host/app-exit-code.txt
             artifacts/hui-linux-host/screenshot-exit-code.txt
           if-no-files-found: warn
+
+      - name: Upload graphical Debian package
+        uses: actions/upload-artifact@v4
+        with:
+          name: hui-linux-graphical-package
+          path: |
+            artifacts/packages/haven-hui-preview_*.deb
+            artifacts/packages/graphical-package.sha256
+            artifacts/packages/graphical-package-info.txt
+            artifacts/packages/graphical-package-contents.txt
+          if-no-files-found: error
