@@ -1,0 +1,61 @@
+name: Haven Data first slice
+
+on:
+  push:
+    branches:
+      - data-calc-duckdb-first-slice
+    paths:
+      - 'apps/Data/**'
+      - '.github/workflows/data-first-slice.yml'
+  pull_request:
+    paths:
+      - 'apps/Data/**'
+      - '.github/workflows/data-first-slice.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    name: Build and worker integration
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+
+      - name: Set up .NET 10
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+
+      - name: Build Data app contracts
+        run: dotnet build apps/Data/App/HavenOS.Data.App.csproj -c Release --nologo
+
+      - name: Run Data contract smoke checks
+        run: dotnet run --project apps/Data/Tests/HavenOS.Data.Smoke.csproj -c Release --no-restore
+
+      - name: Install disposable Calc/UNO test runtime
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends libreoffice-calc-nogui python3-uno python3-venv
+
+      - name: Create isolated Python test environment
+        run: |
+          /usr/bin/python3 -m venv --system-site-packages .data-venv
+          .data-venv/bin/python -m pip install --disable-pip-version-check --no-cache-dir duckdb==1.5.5
+          .data-venv/bin/python -c "import duckdb, uno; print('duckdb', duckdb.__version__, 'uno ok')"
+
+      - name: Compile worker Python
+        run: |
+          .data-venv/bin/python -m py_compile apps/Data/workers/calc_worker.py
+          .data-venv/bin/python -m py_compile apps/Data/workers/duckdb_worker.py
+          .data-venv/bin/python -m py_compile apps/Data/Tests/test_workers.py
+
+      - name: Run worker integration checks
+        env:
+          HAVEN_DATA_DUCKDB_MEMORY_LIMIT: 512MB
+          HAVEN_DATA_DUCKDB_THREADS: '2'
+        run: .data-venv/bin/python apps/Data/Tests/test_workers.py
