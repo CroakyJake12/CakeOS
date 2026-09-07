@@ -182,6 +182,7 @@ jobs:
           echo '--- X11 window tree ---'
           cat artifacts/canvas-rnote-hui/x11-window-tree.txt 2>/dev/null || true
 
+          grep -q 'CANVAS_RNOTE_MANAGED_SAVE_RELOAD_READY' artifacts/canvas-rnote-hui/window.log
           grep -q 'CANVAS_RNOTE_HUI_RENDER_READY abi=1 format=svg coordinate=document' artifacts/canvas-rnote-hui/window.log
           grep -q 'CANVAS_RNOTE_VIEWPORT_ZOOM' artifacts/canvas-rnote-hui/window.log
           grep -q 'CANVAS_RNOTE_VIEWPORT_PAN_COMMITTED' artifacts/canvas-rnote-hui/window.log
