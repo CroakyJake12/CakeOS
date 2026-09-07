@@ -2,7 +2,7 @@ namespace HavenOS.Apps.Data;
 
 public sealed class CalcSpreadsheetEngine : IDataSpreadsheetEngine
 {
-    private const int MaximumMaterializedRows = 1001;
+    private const int MaximumMaterializedRows = 1000;
     private const int MaximumMaterializedColumns = 256;
 
     private readonly JsonLineWorkerClient _worker;
