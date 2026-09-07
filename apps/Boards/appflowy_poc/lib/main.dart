@@ -10,7 +10,12 @@ void main() {
 }
 
 class HavenBoardsPocApp extends StatelessWidget {
-  const HavenBoardsPocApp({super.key});
+  const HavenBoardsPocApp({
+    super.key,
+    this.enablePersistence = true,
+  });
+
+  final bool enablePersistence;
 
   @override
   Widget build(BuildContext context) {
@@ -18,13 +23,18 @@ class HavenBoardsPocApp extends StatelessWidget {
       debugShowCheckedModeBanner: false,
       title: 'Haven Boards AppFlowy PoC',
       theme: ThemeData(useMaterial3: true),
-      home: const HavenBoardsPocPage(),
+      home: HavenBoardsPocPage(enablePersistence: enablePersistence),
     );
   }
 }
 
 class HavenBoardsPocPage extends StatefulWidget {
-  const HavenBoardsPocPage({super.key});
+  const HavenBoardsPocPage({
+    super.key,
+    this.enablePersistence = true,
+  });
+
+  final bool enablePersistence;
 
   @override
   State<HavenBoardsPocPage> createState() => _HavenBoardsPocPageState();
@@ -46,7 +56,9 @@ class _HavenBoardsPocPageState extends State<HavenBoardsPocPage> {
       onMoveGroupItemToGroup: (_, __, ___, ____) => unawaited(_persist('Card moved between groups')),
     );
     _loadDefaults();
-    unawaited(_restore());
+    if (widget.enablePersistence) {
+      unawaited(_restore());
+    }
   }
 
   @override
@@ -76,6 +88,8 @@ class _HavenBoardsPocPageState extends State<HavenBoardsPocPage> {
   }
 
   Future<void> _restore() async {
+    if (!widget.enablePersistence) return;
+
     if (!await _snapshotFile.exists()) {
       await _persist('Created local snapshot');
       return;
@@ -120,6 +134,8 @@ class _HavenBoardsPocPageState extends State<HavenBoardsPocPage> {
   }
 
   Future<void> _persist(String reason) async {
+    if (!widget.enablePersistence) return;
+
     final snapshot = BoardSnapshot(
       id: 'board-main',
       title: 'Haven Boards',
@@ -195,7 +211,7 @@ class _HavenBoardsPocPageState extends State<HavenBoardsPocPage> {
         actions: [
           IconButton(
             tooltip: 'Save board locally',
-            onPressed: () => unawaited(_persist('Manual save')),
+            onPressed: widget.enablePersistence ? () => unawaited(_persist('Manual save')) : null,
             icon: const Icon(Icons.save_outlined),
           ),
         ],
