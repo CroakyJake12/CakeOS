@@ -8,6 +8,9 @@ $contract = Join-Path $boards 'contract/HavenBoardContract.cs'
 $contractProject = Join-Path $boards 'contract/CakeOS.Apps.Boards.Contract.csproj'
 $store = Join-Path $boards 'contract/JsonFileHavenBoardStore.cs'
 $hui = Join-Path $boards 'hui/HavenBoardsHuiScene.cs'
+$huiProject = Join-Path $boards 'hui/CakeOS.Apps.Boards.Hui.csproj'
+$huiTestProject = Join-Path $boards 'hui-tests/CakeOS.Apps.Boards.Hui.Tests.csproj'
+$huiTests = Join-Path $boards 'hui-tests/HavenBoardsHuiSceneTests.cs'
 $harness = Join-Path $boards 'appflowy_poc/lib/main.dart'
 $testProject = Join-Path $boards 'tests/CakeOS.Apps.Boards.Tests.csproj'
 $contractTests = Join-Path $boards 'tests/HavenBoardContractTests.cs'
@@ -19,6 +22,9 @@ $required = @(
     $contractProject,
     $store,
     $hui,
+    $huiProject,
+    $huiTestProject,
+    $huiTests,
     $harness,
     $testProject,
     $contractTests
@@ -54,6 +60,32 @@ if ($huiText -notmatch '(?m)^using Haven\.UI;') {
 }
 if ($huiText -notmatch 'HavenBoardCommand') {
     throw 'HUI board scene must emit typed Haven board commands.'
+}
+if ($huiText -notmatch 'SetState\(HavenElementState\.Disabled,\s*!enabled\)' -or
+    $huiText -notmatch 'Accessibility\.Enabled\s*=\s*enabled') {
+    throw 'HUI board controls must synchronize Enabled, accessibility, and Disabled state.'
+}
+
+$huiProjectText = Get-Content -LiteralPath $huiProject -Raw
+if ($huiProjectText -notmatch 'HavenUiProjectPath' -or
+    $huiProjectText -notmatch 'RequireRealHavenUi' -or
+    $huiProjectText -notmatch 'Haven\.UI\.csproj') {
+    throw 'HUI build project must fail closed unless a real Haven.UI project is supplied.'
+}
+if ($huiProjectText -match '<PackageReference[^>]+(?:Avalonia|Flutter|AppFlowy)') {
+    throw 'HUI product project must not take a renderer/vendor package dependency.'
+}
+
+$huiTestProjectText = Get-Content -LiteralPath $huiTestProject -Raw
+if ($huiTestProjectText -notmatch 'CakeOS\.Apps\.Boards\.Hui\.csproj' -or
+    $huiTestProjectText -notmatch 'xunit') {
+    throw 'Executable HUI scene test project is not wired to the real-HUI compile project.'
+}
+
+$huiTestsText = Get-Content -LiteralPath $huiTests -Raw
+if ($huiTestsText -notmatch 'Disabled_keyboard_move_cannot_emit_command' -or
+    $huiTestsText -notmatch 'Enabled_keyboard_move_emits_typed_neutral_command') {
+    throw 'HUI tests must cover enabled and disabled keyboard command paths.'
 }
 
 $storeText = Get-Content -LiteralPath $store -Raw
