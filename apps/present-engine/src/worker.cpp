@@ -340,6 +340,7 @@ Json helloResult()
             "addSlideAfter",
             "duplicateSlide",
             "deleteSlide",
+            "moveSlide",
             "undo",
             "redo",
             "saveAs"
@@ -430,6 +431,12 @@ int main()
                     queueMutationEvents(eventQueue, engine, operation);
                 } else if (operation == "deleteSlide") {
                     engine.deleteSlide(request.at("slideIndex").get<int>());
+                    writeFrame(std::cout, success(id, slideListResult(engine)));
+                    queueMutationEvents(eventQueue, engine, operation);
+                } else if (operation == "moveSlide") {
+                    engine.moveSlide(
+                        request.at("fromIndex").get<int>(),
+                        request.at("toIndex").get<int>());
                     writeFrame(std::cout, success(id, slideListResult(engine)));
                     queueMutationEvents(eventQueue, engine, operation);
                 } else if (operation == "undo") {
