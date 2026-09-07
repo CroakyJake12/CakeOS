@@ -20,7 +20,7 @@ struct SlideInfo {
     std::string hash;
 };
 
-struct DocumentExtent {
+struct SlideExtent {
     long widthTwips{};
     long heightTwips{};
 };
@@ -82,7 +82,7 @@ public:
     [[nodiscard]] std::vector<SlideInfo> slides() const;
     [[nodiscard]] int currentSlide() const;
     void setCurrentSlide(int slideIndex);
-    [[nodiscard]] DocumentExtent documentExtent() const;
+    [[nodiscard]] SlideExtent slideExtent(int slideIndex) const;
 
     [[nodiscard]] RenderedTile renderTile(const TileRequest& request);
 
