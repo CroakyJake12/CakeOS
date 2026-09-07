@@ -1,0 +1,55 @@
+name: One-shot PyUNO typed sort sequence patch
+
+on:
+  push:
+    branches:
+      - data-calc-duckdb-first-slice
+    paths:
+      - '.github/workflows/data-sort-typed-sequence-patch.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: data-calc-duckdb-first-slice
+          fetch-depth: 0
+      - name: Type SortFields sequence for PyUNO
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          path = Path('apps/Data/workers/calc_worker.py')
+          text = path.read_text(encoding='utf-8')
+          text = text.replace(
+              '            direction_property = "IsSortColumns"\n',
+              '            direction_property = "IsSortColumns"\n            sort_field_sequence_type = "[]com.sun.star.table.TableSortField"\n',
+              1,
+          )
+          text = text.replace(
+              '            direction_property = "SortColumns"\n',
+              '            direction_property = "SortColumns"\n            sort_field_sequence_type = "[]com.sun.star.util.SortField"\n',
+              1,
+          )
+          old = '                item.Value = (sort_field,)\n                seen.add(item.Name)\n'
+          new = '                item.Value = uno.Any(sort_field_sequence_type, (sort_field,))\n                seen.add(item.Name)\n'
+          if old not in text:
+              raise SystemExit('SortFields assignment anchor not found')
+          text = text.replace(old, new, 1)
+          path.write_text(text, encoding='utf-8')
+          PY
+      - name: Commit typed-sequence patch and remove workflow
+        shell: bash
+        run: |
+          rm .github/workflows/data-sort-typed-sequence-patch.yml
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add apps/Data/workers/calc_worker.py .github/workflows/data-sort-typed-sequence-patch.yml
+          git diff --cached --check
+          git commit -m 'Use explicitly typed PyUNO sort field sequences'
+          git push origin HEAD:data-calc-duckdb-first-slice
