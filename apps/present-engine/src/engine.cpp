@@ -2,19 +2,26 @@
 
 #include <LibreOfficeKit/LibreOfficeKit.hxx>
 #include <LibreOfficeKit/LibreOfficeKitEnums.h>
+#include <nlohmann/json.hpp>
 
+#include <algorithm>
 #include <charconv>
 #include <chrono>
 #include <cmath>
 #include <cctype>
 #include <filesystem>
 #include <limits>
+#include <optional>
 #include <stdexcept>
 #include <system_error>
 #include <utility>
 
 #if defined(__linux__)
 #include <unistd.h>
+#endif
+
+#ifndef CAKEOS_PRESENT_HAS_STRUCTURE_REQUEST
+#define CAKEOS_PRESENT_HAS_STRUCTURE_REQUEST 0
 #endif
 
 namespace cakeos::present {
@@ -196,6 +203,68 @@ PixelFormat toPixelFormat(int tileMode)
         throw std::runtime_error("LibreOfficeKit returned an unsupported tile format");
     }
 }
+
+#if CAKEOS_PRESENT_HAS_STRUCTURE_REQUEST
+using Json = nlohmann::json;
+
+const Json* findObjectMemberRecursive(const Json& value, std::string_view member)
+{
+    if (value.is_object()) {
+        const auto direct = value.find(std::string(member));
+        if (direct != value.end()) {
+            return &(*direct);
+        }
+        for (const auto& [key, child] : value.items()) {
+            (void)key;
+            if (const Json* found = findObjectMemberRecursive(child, member); found != nullptr) {
+                return found;
+            }
+        }
+    } else if (value.is_array()) {
+        for (const auto& child : value) {
+            if (const Json* found = findObjectMemberRecursive(child, member); found != nullptr) {
+                return found;
+            }
+        }
+    }
+    return nullptr;
+}
+
+void collectStringLeaves(const Json& value, std::vector<std::string>& output)
+{
+    if (value.is_string()) {
+        output.push_back(value.get<std::string>());
+        return;
+    }
+    if (value.is_array()) {
+        for (const auto& child : value) {
+            collectStringLeaves(child, output);
+        }
+        return;
+    }
+    if (value.is_object()) {
+        for (const auto& [key, child] : value.items()) {
+            (void)key;
+            collectStringLeaves(child, output);
+        }
+    }
+}
+
+std::optional<int> parseObjectIndex(std::string_view key)
+{
+    constexpr std::string_view prefix{"Objects "};
+    if (key.rfind(prefix, 0) != 0) {
+        return std::nullopt;
+    }
+    const std::string_view digits = key.substr(prefix.size());
+    int value = -1;
+    const auto parsed = std::from_chars(digits.data(), digits.data() + digits.size(), value);
+    if (parsed.ec != std::errc{} || parsed.ptr != digits.data() + digits.size() || value < 0) {
+        return std::nullopt;
+    }
+    return value;
+}
+#endif
 
 } // namespace
 
@@ -413,6 +482,83 @@ SlideExtent PresentEngine::slideExtent(int slideIndex) const
     const long widthMm100 = parsePositiveLongField(info, "width");
     const long heightMm100 = parsePositiveLongField(info, "height");
     return SlideExtent{mm100ToTwips(widthMm100), mm100ToTwips(heightMm100)};
+}
+
+bool PresentEngine::supportsElementSnapshots() const noexcept
+{
+#if CAKEOS_PRESENT_HAS_STRUCTURE_REQUEST
+    return true;
+#else
+    return false;
+#endif
+}
+
+std::vector<ElementSnapshot> PresentEngine::elementSnapshot(
+    std::string_view documentPathOrUrl,
+    int slideIndex) const
+{
+#if !CAKEOS_PRESENT_HAS_STRUCTURE_REQUEST
+    (void)documentPathOrUrl;
+    (void)slideIndex;
+    throw std::runtime_error(
+        "this LibreOfficeKit runtime does not support semantic element snapshots");
+#else
+    if (slideIndex < 0) {
+        throw std::out_of_range("slide index is outside the presentation snapshot");
+    }
+
+    const std::string path = requireNonEmpty(documentPathOrUrl, "documentPathOrUrl");
+    char* raw = impl_->office->extractDocumentStructureRequest(path.c_str(), "slides");
+    if (raw == nullptr || *raw == '\0') {
+        if (raw != nullptr) {
+            impl_->office->freeMemory(raw);
+        }
+        throw std::runtime_error("LibreOfficeKit returned no presentation structure snapshot");
+    }
+
+    std::string structureText(raw);
+    impl_->office->freeMemory(raw);
+
+    const Json structure = Json::parse(structureText);
+    const Json* slides = findObjectMemberRecursive(structure, "Slides");
+    if (slides == nullptr || !slides->is_object()) {
+        throw std::runtime_error("LibreOfficeKit structure snapshot has no Slides object");
+    }
+
+    const std::string slideKey = "Slide " + std::to_string(slideIndex);
+    const auto slideIt = slides->find(slideKey);
+    if (slideIt == slides->end() || !slideIt->is_object()) {
+        throw std::out_of_range("slide index is outside the presentation snapshot");
+    }
+
+    const auto objectsIt = slideIt->find("Objects");
+    if (objectsIt == slideIt->end() || !objectsIt->is_object()) {
+        return {};
+    }
+
+    std::vector<ElementSnapshot> result;
+    result.reserve(objectsIt->size());
+    for (const auto& [key, object] : objectsIt->items()) {
+        const auto objectIndex = parseObjectIndex(key);
+        if (!objectIndex.has_value() || !object.is_object()) {
+            continue;
+        }
+
+        ElementSnapshot snapshot;
+        snapshot.slideIndex = slideIndex;
+        snapshot.objectIndex = *objectIndex;
+        const auto textsIt = object.find("Texts");
+        if (textsIt != object.end()) {
+            collectStringLeaves(*textsIt, snapshot.text);
+        }
+        result.push_back(std::move(snapshot));
+    }
+
+    std::sort(result.begin(), result.end(), [](const ElementSnapshot& left, const ElementSnapshot& right) {
+        return left.objectIndex < right.objectIndex;
+    });
+    return result;
+#endif
 }
 
 void PresentEngine::applySlideMove(int fromIndex, int toIndex)
