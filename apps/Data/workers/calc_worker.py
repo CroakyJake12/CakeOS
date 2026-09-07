@@ -396,9 +396,20 @@ class CalcRuntime:
             raise ValueError("A sort range marked as containing a header must include at least one data row.")
 
         descriptor = list(cell_range.createSortDescriptor())
-        sort_field = uno.createUnoStruct("com.sun.star.util.SortField")
-        sort_field.Field = key
-        sort_field.SortAscending = bool(ascending)
+        property_names = {str(item.Name) for item in descriptor}
+        uses_v2 = "IsSortColumns" in property_names
+        if uses_v2:
+            sort_field = uno.createUnoStruct("com.sun.star.table.TableSortField")
+            sort_field.Field = key
+            sort_field.IsAscending = bool(ascending)
+            sort_field.IsCaseSensitive = False
+            sort_field.FieldType = uno.Enum("com.sun.star.table.TableSortFieldType", "AUTOMATIC")
+            direction_property = "IsSortColumns"
+        else:
+            sort_field = uno.createUnoStruct("com.sun.star.util.SortField")
+            sort_field.Field = key
+            sort_field.SortAscending = bool(ascending)
+            direction_property = "SortColumns"
 
         seen: set[str] = set()
         for item in descriptor:
@@ -408,7 +419,7 @@ class CalcRuntime:
             elif item.Name == "ContainsHeader":
                 item.Value = bool(contains_header)
                 seen.add(item.Name)
-            elif item.Name == "SortColumns":
+            elif item.Name == direction_property:
                 item.Value = False
                 seen.add(item.Name)
             elif item.Name == "IsCaseSensitive":
@@ -420,7 +431,7 @@ class CalcRuntime:
             elif item.Name == "IsUserListEnabled":
                 item.Value = False
 
-        required = {"SortFields", "ContainsHeader", "SortColumns"}
+        required = {"SortFields", "ContainsHeader", direction_property}
         missing = required.difference(seen)
         if missing:
             raise RuntimeError(f"LibreOffice sort descriptor is missing required properties: {sorted(missing)}")
