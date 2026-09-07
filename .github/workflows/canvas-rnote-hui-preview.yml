@@ -99,7 +99,7 @@ jobs:
             exit 1
           fi
 
-      - name: Run Canvas through HUI, zoom, pan, draw ink, and capture real window
+      - name: Run Canvas through HUI, tools, viewport, ink, and capture real window
         shell: bash
         run: |
           mkdir -p artifacts/canvas-rnote-hui
@@ -133,27 +133,39 @@ jobs:
               xdotool windowraise "$window_id" >/dev/null 2>&1 || true
               sleep 1
 
+              # Exercise visible HUI-native controls through real X11 pointer input.
+              # Positions target Pen, Eraser, Undo, Redo in the 38px HUI tool strip.
+              xdotool mousemove --window "$window_id" 158 154
+              xdotool click 1
+              xdotool mousemove --window "$window_id" 65 154
+              xdotool click 1
+              xdotool mousemove --window "$window_id" 250 154
+              xdotool click 1
+              xdotool mousemove --window "$window_id" 340 154
+              xdotool click 1
+              sleep 0.35
+
               # HUI owns viewport state. Prove cursor-anchored wheel zoom first.
-              xdotool mousemove --window "$window_id" 480 260
+              xdotool mousemove --window "$window_id" 480 280
               xdotool click 4
               xdotool click 4
               sleep 0.25
 
               # Prove a non-ink middle-button drag pans the HUI viewport.
-              xdotool mousemove --window "$window_id" 500 280
+              xdotool mousemove --window "$window_id" 500 300
               xdotool mousedown 2
-              xdotool mousemove --window "$window_id" 475 265
-              xdotool mousemove --window "$window_id" 450 245
+              xdotool mousemove --window "$window_id" 475 285
+              xdotool mousemove --window "$window_id" 450 265
               xdotool mouseup 2
               sleep 0.25
 
               # Then prove primary-button ink is mapped through the changed viewport
               # into Rnote document coordinates and refreshed through HUI.
-              xdotool mousemove --window "$window_id" 420 220
+              xdotool mousemove --window "$window_id" 420 240
               xdotool mousedown 1
-              xdotool mousemove --window "$window_id" 450 245
-              xdotool mousemove --window "$window_id" 485 270
-              xdotool mousemove --window "$window_id" 520 300
+              xdotool mousemove --window "$window_id" 450 265
+              xdotool mousemove --window "$window_id" 485 290
+              xdotool mousemove --window "$window_id" 520 320
               xdotool mouseup 1
               sleep 1
 
@@ -184,9 +196,12 @@ jobs:
 
           grep -q 'CANVAS_RNOTE_MANAGED_SAVE_RELOAD_READY' artifacts/canvas-rnote-hui/window.log
           grep -q 'CANVAS_RNOTE_HUI_RENDER_READY abi=1 format=svg coordinate=document' artifacts/canvas-rnote-hui/window.log
+          grep -q 'CANVAS_RNOTE_HUI_TOOLBAR_READY pen=1 eraser=1 undo=1 redo=1' artifacts/canvas-rnote-hui/window.log
+          test "$(grep -c 'CANVAS_RNOTE_TOOL_SELECTED' artifacts/canvas-rnote-hui/window.log)" -ge 4
+          test "$(grep -c 'CANVAS_RNOTE_HISTORY action=' artifacts/canvas-rnote-hui/window.log)" -ge 4
           grep -q 'CANVAS_RNOTE_VIEWPORT_ZOOM' artifacts/canvas-rnote-hui/window.log
           grep -q 'CANVAS_RNOTE_VIEWPORT_PAN_COMMITTED' artifacts/canvas-rnote-hui/window.log
-          grep -q 'CANVAS_RNOTE_POINTER_STROKE_COMMITTED' artifacts/canvas-rnote-hui/window.log
+          grep -q 'CANVAS_RNOTE_POINTER_STROKE_COMMITTED.*tool=Pen' artifacts/canvas-rnote-hui/window.log
           test -s artifacts/canvas-rnote-hui/window.png
           identify artifacts/canvas-rnote-hui/window.png | tee artifacts/canvas-rnote-hui/screenshot-info.txt
           cp /tmp/canvas-native-dependencies.txt artifacts/canvas-rnote-hui/native-bridge-dependencies.txt
