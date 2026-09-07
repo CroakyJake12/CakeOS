@@ -3,7 +3,12 @@ namespace HavenOS.Apps.Data;
 public sealed record DataCellAddress(string Sheet, int Row, int Column);
 public sealed record DataCellSnapshot(DataCellAddress Address, string Value, string Formula = "");
 public sealed record DataRangeRequest(string Sheet, int StartRow, int StartColumn, int RowCount, int ColumnCount);
-public sealed record DataRangeSnapshot(string Sheet, int StartRow, int StartColumn, IReadOnlyList<IReadOnlyList<string>> Values);
+public sealed record DataRangeSnapshot(
+    string Sheet,
+    int StartRow,
+    int StartColumn,
+    IReadOnlyList<IReadOnlyList<string>> Values,
+    IReadOnlyList<bool>? RowVisibility = null);
 public sealed record DataSheetSummary(string Name, int Index);
 public sealed record DataWorkbookHandle(string Id, string Path, bool ReadOnly);
 public sealed record DataNamedRangeSummary(string Name, DataRangeRequest Range);
@@ -39,6 +44,24 @@ public interface IDataSpreadsheetEngine : IAsyncDisposable
         bool containsHeader = true,
         CancellationToken cancellationToken = default) =>
         Task.FromException<DataSortResult>(new NotSupportedException("This spreadsheet engine does not support range sorting."));
+
+    // Filtering is likewise optional at the engine boundary. The first Calc slice
+    // supports one literal text-equality condition over rows and explicit clearing.
+    Task<DataRangeSnapshot> FilterEqualsAsync(
+        string workbookId,
+        DataRangeRequest range,
+        int keyColumnOffset,
+        string value,
+        bool containsHeader = true,
+        CancellationToken cancellationToken = default) =>
+        Task.FromException<DataRangeSnapshot>(new NotSupportedException("This spreadsheet engine does not support range filtering."));
+
+    Task<DataRangeSnapshot> ClearFilterAsync(
+        string workbookId,
+        DataRangeRequest range,
+        bool containsHeader = true,
+        CancellationToken cancellationToken = default) =>
+        Task.FromException<DataRangeSnapshot>(new NotSupportedException("This spreadsheet engine does not support clearing range filters."));
 
     Task InsertRowsAsync(string workbookId, string sheet, int index, int count, CancellationToken cancellationToken = default);
     Task DeleteRowsAsync(string workbookId, string sheet, int index, int count, CancellationToken cancellationToken = default);
