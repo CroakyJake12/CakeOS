@@ -35,18 +35,19 @@ No UNO type or DuckDB API is exposed to HUI. Calc remains authoritative for work
 | --- | --- |
 | Source implemented | Yes — CakeOS branch `data-calc-duckdb-first-slice` |
 | .NET 10 build | Yes — Ubuntu 24.04 and Ubuntu 26.04.1 GitHub Actions with warnings treated as errors |
-| HUI-facing app smoke | Yes — 10 × 8 grid, edit/recalculate/refresh, sheet selection, row/column edits, range-backed named ranges, literal-list validation, database publication, bounded query history and query-result materialisation |
+| HUI-facing app smoke | Yes — 10 × 8 grid, edit/recalculate/refresh, sheet selection, row/column edits, range-backed named ranges, literal-list validation, single-key sorting, literal equality filtering, database publication, bounded query history and query-result materialisation |
 | Worker Python syntax | Yes — workers and integration/corpus harnesses compile with `py_compile` |
-| Calc/UNO runtime | Yes — live headless Calc over a local UNO pipe opens, edits, recalculates, structurally edits, sorts, manages range-backed names and literal-list validation, saves and reopens disposable ODS/XLSX workbooks |
+| Calc/UNO runtime | Yes — live headless Calc over a local UNO pipe opens, edits, recalculates, structurally edits, sorts, filters, manages range-backed names and literal-list validation, saves and reopens disposable ODS/XLSX workbooks |
 | Formula compatibility baseline | Yes — arithmetic precedence, SUM, absolute references, exponentiation, AVERAGE, COUNT, MIN and MAX |
 | Row/column structural edits | Yes — live Calc insert/delete shifts formulas/references correctly, rejects unsafe/read-only edits and survives save/reopen |
 | Range-backed named ranges | Yes — create/list/delete, case-insensitive duplicate/delete handling, row/column shift tracking and ODS persistence are live-proven; arbitrary named formulas are not exposed |
 | Literal-list data validation | Yes — apply/read/clear, row/column shift tracking, ODS persistence, read-only guards and the full C# `DataGridSession → Calc` path are green on both distro lanes |
 | Single-key sorting | Yes — bounded row sorting by one relative key column, ascending/descending numeric order, optional header preservation, invalid-key/header-only/read-only guards, ODS persistence, and the full C# `DataGridSession → Calc` path are green on both distro lanes; source run `34156898422` |
+| Literal text-equality filtering | Yes — one bounded case-insensitive text `EQUAL` condition over a relative key column, header preservation, row-visibility reporting, invalid-key/header-only/empty-value/read-only guards, explicit clearing and ODS persistence are live-proven. Worker run `34158504780`; full `DataGridSession → Calc` run `34158775542` is green on both distro lanes |
 | DuckDB runtime | Yes — DuckDB 1.5.5 opens disposable databases, executes bounded read-only SQL, rejects DDL/multiple statements/external access, and atomically replaces typed snapshot tables |
 | Calc → DuckDB bridge | Yes — displayed-value range publication with generated/sanitised headers and structured table replacement |
 | DuckDB → Calc bridge | Yes — non-truncated current-session query results materialise into a new Calc sheet as literal text; formula-looking values such as `=1+1` are not executed |
-| Full .NET → workers runtime path | Yes — real C# adapters perform workbook edits, formula recalc, structural edits, named-range, validation and sort operations, Calc→DuckDB publication, SQL aggregation, DuckDB→Calc materialisation, save and reopen |
+| Full .NET → workers runtime path | Yes — real C# adapters perform workbook edits, formula recalc, structural edits, named-range, validation, sort and filter operations, Calc→DuckDB publication, SQL aggregation, DuckDB→Calc materialisation, save and reopen |
 | Ubuntu 26.04.1 distro proof | Yes — GitHub Actions `ubuntu-26.04`, LibreOffice `26.2.5.2-0ubuntu0.26.04.1`, Python 3.14, DuckDB 1.5.5 and .NET 10 |
 | Worker protocol cancellation safety | Implemented — an in-flight cancellation or malformed/misaligned response faults and terminates the worker instead of reusing a desynchronised stream |
 | Approved desktop checkout | Located — Sandbox project `cakeos` at `C:\Users\Jacob\OneDrive\Personal Files\Development\CakeOS`; its tracked/untracked Boards work is intentionally untouched by this Data branch |
@@ -63,10 +64,11 @@ The Ubuntu 26.04.1 proof materially narrows distro/runtime risk, but it is delib
 - macro execution and document-link updates disabled at load;
 - non-Calc document rejection;
 - real worksheet enumeration;
-- bounded range reads and viewport-bounded typed cell edits;
+- bounded range reads with per-row visibility metadata and viewport-bounded typed cell edits;
 - text, number and formula editing with Calc-owned recalculation;
 - row/column insertion and deletion behind typed operations;
 - bounded single-key row sorting, ascending or descending, with optional header preservation;
+- bounded case-insensitive literal text-equality row filtering with explicit clear;
 - global named ranges backed by one concrete cell range only;
 - range-backed named ranges track Calc row/column shifts and persist in ODS;
 - formula-style/non-range named expressions are not surfaced through the Haven API;
@@ -87,6 +89,7 @@ The Ubuntu 26.04.1 proof materially narrows distro/runtime risk, but it is delib
 - edit → recalculate → refresh;
 - typed row/column insertion and deletion with refresh;
 - bounded single-key sort of a visible range, followed by refresh;
+- bounded literal text-equality filter and explicit filter clearing, with row visibility returned in the grid snapshot;
 - named-range create/list/delete; creation must fit wholly inside the current viewport in this slice;
 - literal-list validation apply/read/clear; the target range must fit wholly inside the viewport;
 - save-as and deterministic close/dispose semantics;
@@ -103,7 +106,19 @@ The real HUI renderer remains a separate platform seam. No UNO/VCL object crosse
 - PyUNO `SortFields` is passed as an explicitly typed `uno.Any` sequence; a plain Python tuple was accepted by LibreOffice but produced a silent no-op during development;
 - live tests prove ascending/descending numeric key order, header preservation, invalid key/header-only rejection and ODS save/reopen persistence on LibreOffice 24.2.7 and 26.2.5.2.
 
-Multi-key sorting, custom collators/user lists and filtering remain separate deferred capabilities.
+Multi-key sorting and custom collators/user lists remain separate deferred capabilities.
+
+## Filter compatibility and safety boundary
+
+- Haven exposes one relative key column, one literal string and a header flag; callers cannot provide arbitrary UNO filter descriptors, formulas, regex patterns or compound predicates;
+- first-slice matching is case-insensitive literal text equality only, with regular-expression handling explicitly disabled;
+- the target must fit wholly inside the 10 × 8 `DataGridSession` viewport and filter values are limited to 1–256 non-control characters;
+- filtering and clearing are mutations and are refused for read-only workbooks;
+- `DataRangeSnapshot.RowVisibility` reports Calc's row visibility without compacting or rewriting the underlying cell values, so HUI can render hidden rows deliberately;
+- worker tests prove filtering does not mutate cell contents, filters survive ODS save/reopen, and an empty descriptor restores row visibility;
+- the full live C# path proves `DataGridSession → CalcSpreadsheetEngine → JSON worker → UNO` filter and clear operations on LibreOffice 24.2.7 and 26.2.5.2.
+
+Numeric comparison operators, NOT-EQUAL/range conditions, multiple criteria, regex filtering and persisted HUI filter-state metadata remain deferred.
 
 ## Literal-list validation safety boundary
 
@@ -182,6 +197,7 @@ python3 -m py_compile apps/Data/Tests/test_calc_structure.py
 python3 -m py_compile apps/Data/Tests/test_calc_named_ranges.py
 python3 -m py_compile apps/Data/Tests/test_calc_validation.py
 python3 -m py_compile apps/Data/Tests/test_calc_sort.py
+python3 -m py_compile apps/Data/Tests/test_calc_filter.py
 ```
 
 After disposable LibreOffice/UNO and DuckDB runtimes are available:
@@ -194,9 +210,11 @@ python3 apps/Data/Tests/test_calc_structure.py
 python3 apps/Data/Tests/test_calc_named_ranges.py
 python3 apps/Data/Tests/test_calc_validation.py
 python3 apps/Data/Tests/test_calc_sort.py
+python3 apps/Data/Tests/test_calc_filter.py
 dotnet run --project apps/Data/Tests/HavenOS.Data.Runtime.csproj -c Release
 dotnet run --project apps/Data/Tests/HavenOS.Data.Validation.Runtime.csproj -c Release
 dotnet run --project apps/Data/Tests/HavenOS.Data.Sort.Runtime.csproj -c Release
+dotnet run --project apps/Data/Tests/HavenOS.Data.Filter.Runtime.csproj -c Release
 ```
 
 `.github/workflows/data-first-slice.yml` runs all gates on Ubuntu 24.04 and Ubuntu 26.04.
@@ -215,9 +233,9 @@ dotnet run --project apps/Data/Tests/HavenOS.Data.Sort.Runtime.csproj -c Release
 
 Once the platform provides a real HUI renderer contract:
 
-1. Render the `DataGridSession` 10 × 8 snapshot.
-2. Exercise sheet selection, edits, row/column operations, single-key sorting, named ranges and list validation through typed commands.
-3. Verify focus, selection, keyboard navigation and screen-reader semantics.
+1. Render the `DataGridSession` 10 × 8 snapshot and honour its row-visibility metadata.
+2. Exercise sheet selection, edits, row/column operations, single-key sorting, literal equality filtering, named ranges and list validation through typed commands.
+3. Verify focus, selection, keyboard navigation and screen-reader semantics, including how hidden rows are announced/navigated.
 4. Render query results from `DataQuerySession` without exposing raw engine objects.
 5. Verify generated-UI actions map only to typed Haven operations, never unrestricted UNO/SQL authority.
 
@@ -229,7 +247,8 @@ Once the platform provides a real HUI renderer contract:
 - charts and drawings;
 - general formatting;
 - numeric/date/text-length/custom or formula/range-backed data validation;
-- multi-key/custom-collation sorting and filter operations;
+- multi-key/custom-collation sorting;
+- numeric/comparison, compound, regex and other advanced filter operations;
 - arbitrary named formulas/expressions;
 - raw SQL mutation/DDL;
 - typed preservation beyond displayed strings in Calc↔DuckDB transfer;
