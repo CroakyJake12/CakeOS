@@ -12,6 +12,7 @@ use anyhow::{Context, Result};
 use nalgebra::Vector2;
 use rnote_compose::penevent::PenEvent;
 use rnote_compose::penpath::Element;
+use rnote_compose::utils::{add_xml_header, wrap_svg_root};
 use rnote_engine::engine::export::{DocExportFormat, DocExportPrefs};
 use rnote_engine::engine::EngineSnapshot;
 use rnote_engine::pens::PenMode;
@@ -84,7 +85,11 @@ impl CanvasRenderFormat {
     }
 }
 
-/// Bounds of the Rnote document represented by a render frame.
+/// Document-space bounds represented by a render frame.
+///
+/// Rnote normalizes exported SVG coordinates to a zero-based viewBox. These
+/// bounds retain the corresponding original Canvas document-space rectangle so
+/// HUI can map input and viewport state to the normalized renderer payload.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct CanvasDocumentBounds {
     pub x: f64,
@@ -256,7 +261,8 @@ impl HeadlessCanvasEngine {
         self.end_stroke(*samples.last().expect("length checked above"))
     }
 
-    /// Current document-space bounds carried alongside renderer-neutral output.
+    /// Current storage/document extent. This is intentionally distinct from a
+    /// render frame's content/page bounds in Rnote Infinite layout.
     pub fn document_bounds(&self) -> CanvasDocumentBounds {
         CanvasDocumentBounds {
             x: self.engine.document.x,
@@ -282,11 +288,48 @@ impl HeadlessCanvasEngine {
             .context("Rnote SVG export failed")
     }
 
-    /// Produce the stable renderer-neutral frame consumed by the future HUI
-    /// Canvas surface. It deliberately contains no GTK/GSK/Rnote UI types.
+    /// Produce the stable renderer-neutral frame consumed by HUI.
+    ///
+    /// Rnote's document exporter first selects the page range containing content,
+    /// then `StrokeContent::gen_svg` normalizes that rectangle to a zero-based SVG
+    /// viewBox. The frame therefore carries the original document-space content
+    /// rectangle while the SVG bytes remain normalized. HUI subtracts the frame
+    /// origin when selecting a source rectangle and keeps its viewport in document
+    /// coordinates.
     pub async fn render_frame(&self) -> Result<CanvasRenderFrame> {
-        let bounds = self.document_bounds();
-        let bytes = self.export_svg().await?;
+        let prefs = DocExportPrefs {
+            export_format: DocExportFormat::Svg,
+            ..DocExportPrefs::default()
+        };
+        let content = self.engine.extract_document_content();
+        let source_bounds = content
+            .bounds()
+            .context("Rnote document content has no renderable bounds")?;
+        let generated = content
+            .gen_svg(
+                prefs.with_background,
+                prefs.with_pattern,
+                prefs.optimize_printing,
+                0.0,
+            )?
+            .context("Rnote document SVG generation returned no content")?;
+        let bytes = add_xml_header(
+            wrap_svg_root(
+                generated.svg_data.as_str(),
+                Some(generated.bounds),
+                Some(generated.bounds),
+                false,
+            )
+            .as_str(),
+        )
+        .into_bytes();
+        let bounds = CanvasDocumentBounds {
+            x: source_bounds.mins[0],
+            y: source_bounds.mins[1],
+            width: source_bounds.maxs[0] - source_bounds.mins[0],
+            height: source_bounds.maxs[1] - source_bounds.mins[1],
+        };
+
         Ok(CanvasRenderFrame {
             format: CanvasRenderFormat::Svg,
             coordinate_space: CanvasCoordinateSpace::Document,
@@ -398,10 +441,11 @@ mod tests {
     }
 
     #[test]
-    fn renderer_neutral_frame_carries_document_metadata() {
+    fn renderer_neutral_frame_carries_export_coordinate_metadata() {
         block_on(async {
             let mut canvas = HeadlessCanvasEngine::new();
             canvas.draw_stroke(&sample_stroke()).unwrap();
+            let storage_bounds = canvas.document_bounds();
 
             let frame = canvas.render_frame().await.unwrap();
             assert_eq!(frame.format, CanvasRenderFormat::Svg);
@@ -409,7 +453,13 @@ mod tests {
             assert_eq!(frame.mime_type(), "image/svg+xml");
             assert!(frame.bounds.width > 0.0);
             assert!(frame.bounds.height > 0.0);
-            assert!(std::str::from_utf8(&frame.bytes).unwrap().contains("<svg"));
+            assert!(frame.bounds.x <= 120.0 && frame.bounds.x + frame.bounds.width >= 280.0);
+            assert!(frame.bounds.y <= 120.0 && frame.bounds.y + frame.bounds.height >= 220.0);
+            assert!(frame.bounds.width < storage_bounds.width);
+            assert!(frame.bounds.height < storage_bounds.height);
+            let svg = std::str::from_utf8(&frame.bytes).unwrap();
+            assert!(svg.contains("<svg"));
+            assert!(svg.contains("viewBox=\"0.000 0.000"));
             assert!(frame.bytes.len() > 200, "render frame unexpectedly empty");
         });
     }
