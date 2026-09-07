@@ -35,16 +35,17 @@ No UNO type or DuckDB API is exposed to HUI. Calc remains authoritative for work
 | --- | --- |
 | Source implemented | Yes — CakeOS branch `data-calc-duckdb-first-slice` |
 | .NET 10 build | Yes — Ubuntu 24.04 and Ubuntu 26.04.1 GitHub Actions with warnings treated as errors |
-| HUI-facing app smoke | Yes — 10 × 8 grid, edit/recalculate/refresh, sheet selection, row/column edits, range-backed named ranges, database publication, bounded query history and query-result materialisation |
+| HUI-facing app smoke | Yes — 10 × 8 grid, edit/recalculate/refresh, sheet selection, row/column edits, range-backed named ranges, literal-list validation, database publication, bounded query history and query-result materialisation |
 | Worker Python syntax | Yes — workers and integration/corpus harnesses compile with `py_compile` |
-| Calc/UNO runtime | Yes — live headless Calc over a local UNO pipe opens, edits, recalculates, structurally edits, manages range-backed names, saves and reopens disposable ODS/XLSX workbooks |
+| Calc/UNO runtime | Yes — live headless Calc over a local UNO pipe opens, edits, recalculates, structurally edits, manages range-backed names and literal-list validation, saves and reopens disposable ODS/XLSX workbooks |
 | Formula compatibility baseline | Yes — arithmetic precedence, SUM, absolute references, exponentiation, AVERAGE, COUNT, MIN and MAX |
 | Row/column structural edits | Yes — live Calc insert/delete shifts formulas/references correctly, rejects unsafe/read-only edits and survives save/reopen |
 | Range-backed named ranges | Yes — create/list/delete, case-insensitive duplicate/delete handling, row/column shift tracking and ODS persistence are live-proven; arbitrary named formulas are not exposed |
+| Literal-list data validation | Yes — apply/read/clear, row/column shift tracking, ODS persistence, read-only guards and the full C# `DataGridSession → Calc` path are green on both distro lanes |
 | DuckDB runtime | Yes — DuckDB 1.5.5 opens disposable databases, executes bounded read-only SQL, rejects DDL/multiple statements/external access, and atomically replaces typed snapshot tables |
 | Calc → DuckDB bridge | Yes — displayed-value range publication with generated/sanitised headers and structured table replacement |
 | DuckDB → Calc bridge | Yes — non-truncated current-session query results materialise into a new Calc sheet as literal text; formula-looking values such as `=1+1` are not executed |
-| Full .NET → workers runtime path | Yes — real C# adapters perform workbook edits, formula recalc, structural edits, named-range operations, Calc→DuckDB publication, SQL aggregation, DuckDB→Calc materialisation, save and reopen |
+| Full .NET → workers runtime path | Yes — real C# adapters perform workbook edits, formula recalc, structural edits, named-range and validation operations, Calc→DuckDB publication, SQL aggregation, DuckDB→Calc materialisation, save and reopen |
 | Ubuntu 26.04.1 distro proof | Yes — GitHub Actions `ubuntu-26.04`, LibreOffice `26.2.5.2-0ubuntu0.26.04.1`, Python 3.14, DuckDB 1.5.5 and .NET 10 |
 | Worker protocol cancellation safety | Implemented — an in-flight cancellation or malformed/misaligned response faults and terminates the worker instead of reusing a desynchronised stream |
 | Approved desktop checkout | Located — Sandbox project `cakeos` at `C:\Users\Jacob\OneDrive\Personal Files\Development\CakeOS`; guarded branch switching is currently refused because the Boards checkout contains tracked/untracked work that must be preserved |
@@ -67,6 +68,10 @@ The Ubuntu 26.04.1 proof materially narrows distro/runtime risk, but it is delib
 - global named ranges backed by one concrete cell range only;
 - range-backed named ranges track Calc row/column shifts and persist in ODS;
 - formula-style/non-range named expressions are not surfaced through the Haven API;
+- literal-list data validation behind a typed range operation;
+- first-slice list rules contain 1–50 unique literal strings, each 1–64 characters, with control characters, semicolons and double quotes excluded;
+- imported formula/range-driven validation is not reinterpreted as a Haven literal-list rule;
+- list validation tracks Calc row/column shifts, persists in ODS and obeys read-only mutation guards;
 - first-slice save-as to `.ods` or `.xlsx`, with in-place overwrite disabled;
 - saved-output existence/size verification;
 - worker stderr draining and bounded shutdown/kill fallback.
@@ -80,10 +85,23 @@ The Ubuntu 26.04.1 proof materially narrows distro/runtime risk, but it is delib
 - edit → recalculate → refresh;
 - typed row/column insertion and deletion with refresh;
 - named-range create/list/delete; creation must fit wholly inside the current viewport in this slice;
+- literal-list validation apply/read/clear; the target range must fit wholly inside the viewport;
 - save-as and deterministic close/dispose semantics;
 - atomic open/close failure handling.
 
 The real HUI renderer remains a separate platform seam. No UNO/VCL object crosses this layer.
+
+## Literal-list validation safety boundary
+
+- only literal list items are created by Haven Data in this slice;
+- no validation formula, named range, external link or arbitrary UNO validation expression is accepted from HUI/GenUI;
+- values are bounded to 1–50 unique strings of at most 64 characters;
+- formula-sensitive/control characters used by the literal-list encoding are rejected;
+- Calc's stored validation is re-read after apply/clear and must match the requested Haven rule;
+- imported validation that is not representable as this literal subset is reported as not being a Haven literal-list rule rather than being rewritten or deleted;
+- live tests prove structural row/column shifts, ODS save/reopen persistence, read-only guards and clearing.
+
+Numeric/date/text-length/custom validation remain separate deferred capabilities.
 
 ## Database/query behaviour
 
@@ -148,6 +166,7 @@ python3 -m py_compile apps/Data/Tests/test_duckdb_publish.py
 python3 -m py_compile apps/Data/Tests/test_calc_formula_corpus.py
 python3 -m py_compile apps/Data/Tests/test_calc_structure.py
 python3 -m py_compile apps/Data/Tests/test_calc_named_ranges.py
+python3 -m py_compile apps/Data/Tests/test_calc_validation.py
 ```
 
 After disposable LibreOffice/UNO and DuckDB runtimes are available:
@@ -158,7 +177,9 @@ python3 apps/Data/Tests/test_duckdb_publish.py
 python3 apps/Data/Tests/test_calc_formula_corpus.py
 python3 apps/Data/Tests/test_calc_structure.py
 python3 apps/Data/Tests/test_calc_named_ranges.py
+python3 apps/Data/Tests/test_calc_validation.py
 dotnet run --project apps/Data/Tests/HavenOS.Data.Runtime.csproj -c Release
+dotnet run --project apps/Data/Tests/HavenOS.Data.Validation.Runtime.csproj -c Release
 ```
 
 `.github/workflows/data-first-slice.yml` runs all gates on Ubuntu 24.04 and Ubuntu 26.04.
@@ -178,7 +199,7 @@ dotnet run --project apps/Data/Tests/HavenOS.Data.Runtime.csproj -c Release
 Once the platform provides a real HUI renderer contract:
 
 1. Render the `DataGridSession` 10 × 8 snapshot.
-2. Exercise sheet selection, edits, row/column operations and named ranges through typed commands.
+2. Exercise sheet selection, edits, row/column operations, named ranges and list validation through typed commands.
 3. Verify focus, selection, keyboard navigation and screen-reader semantics.
 4. Render query results from `DataQuerySession` without exposing raw engine objects.
 5. Verify generated-UI actions map only to typed Haven operations, never unrestricted UNO/SQL authority.
@@ -189,7 +210,8 @@ Once the platform provides a real HUI renderer contract:
 - embedding LibreOffice/VCL UI;
 - LibreOfficeKit rendering;
 - charts and drawings;
-- formatting and data validation;
+- general formatting;
+- numeric/date/text-length/custom or formula/range-backed data validation;
 - sort/filter operations;
 - arbitrary named formulas/expressions;
 - raw SQL mutation/DDL;
