@@ -6,6 +6,8 @@ using HavenText = Haven.UI.Components.Text;
 
 namespace CakeOS.Apps.Boards.Hui;
 
+public delegate void HavenBoardCommandRequestedHandler(object? sender, HavenBoardCommand command);
+
 /// <summary>
 /// HUI-only projection of the neutral Haven Boards snapshot.
 ///
@@ -32,7 +34,7 @@ public sealed class HavenBoardsHuiScene : IDisposable
     public HavenText Status { get; }
 
     /// <summary>Raised for mutations. The owner validates, persists, then calls <see cref="SetSnapshot"/>.</summary>
-    public event EventHandler<HavenBoardCommand>? CommandRequested;
+    public event HavenBoardCommandRequestedHandler? CommandRequested;
 
     public void SetSnapshot(HavenBoardSnapshot snapshot)
     {
@@ -91,7 +93,7 @@ public sealed class HavenBoardsHuiScene : IDisposable
 
         var title = new HavenText { Content = group.Title };
         title.SetValue(HavenProperties.FontSize, 15d);
-        title.SetValue(HavenProperties.FontWeight, 700d);
+        title.SetValue(HavenProperties.FontWeight, 700);
         title.SetValue(HavenProperties.Width, HavenLength.Percent(100));
         header.Add(title);
 
@@ -148,7 +150,7 @@ public sealed class HavenBoardsHuiScene : IDisposable
 
         var title = new HavenText { Content = card.Title };
         title.SetValue(HavenProperties.FontSize, 13d);
-        title.SetValue(HavenProperties.FontWeight, 600d);
+        title.SetValue(HavenProperties.FontWeight, 600);
         surface.Add(title);
 
         var details = CardDetails(card);
