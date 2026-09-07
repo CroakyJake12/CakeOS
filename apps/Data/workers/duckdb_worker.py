@@ -2,7 +2,7 @@
 """Haven Data DuckDB worker.
 
 First-slice worker: one local database, read-only SQL execution, no external access.
-Requires the DuckDB Python package at runtime.
+Requires the pinned DuckDB Python package at runtime.
 """
 
 from __future__ import annotations
@@ -25,6 +25,7 @@ FORBIDDEN = re.compile(
     r"\b(ATTACH|DETACH|COPY|EXPORT|IMPORT|INSTALL|LOAD|CREATE|DROP|ALTER|INSERT|UPDATE|DELETE|MERGE|REPLACE|TRUNCATE|VACUUM|CALL|PRAGMA|SET)\b",
     re.IGNORECASE,
 )
+MEMORY_LIMIT = re.compile(r"^[1-9][0-9]*(?:\.[0-9]+)?\s*(?:KB|MB|GB)$", re.IGNORECASE)
 
 
 class DuckDbRuntime:
@@ -35,14 +36,32 @@ class DuckDbRuntime:
     def open(self, database_path: str) -> dict:
         if self.connection is not None:
             self.close()
+        if not database_path or not database_path.strip():
+            raise ValueError("databasePath is required.")
+
         full = str(Path(database_path).expanduser().resolve())
         Path(full).parent.mkdir(parents=True, exist_ok=True)
         self.connection = duckdb.connect(full)
         self.path = full
-        # These settings fail closed if the linked DuckDB build does not support them.
-        self.connection.execute("SET enable_external_access = false")
-        self.connection.execute("SET autoinstall_known_extensions = false")
-        self.connection.execute("SET autoload_known_extensions = false")
+
+        memory_limit = os.environ.get("HAVEN_DATA_DUCKDB_MEMORY_LIMIT", "512MB").strip()
+        if not MEMORY_LIMIT.fullmatch(memory_limit):
+            raise ValueError("HAVEN_DATA_DUCKDB_MEMORY_LIMIT must be a positive KB/MB/GB value.")
+        threads = int(os.environ.get("HAVEN_DATA_DUCKDB_THREADS", "2"))
+        if threads < 1 or threads > 8:
+            raise ValueError("HAVEN_DATA_DUCKDB_THREADS must be between 1 and 8.")
+
+        # Configure every capability before locking configuration. These settings are
+        # defense in depth; the worker must still run inside an OS sandbox before ship.
+        connection = self._conn()
+        connection.execute("SET enable_external_access = false")
+        connection.execute("SET autoinstall_known_extensions = false")
+        connection.execute("SET autoload_known_extensions = false")
+        connection.execute("SET allow_community_extensions = false")
+        connection.execute("SET allow_persistent_secrets = false")
+        connection.execute(f"SET memory_limit = '{memory_limit}'")
+        connection.execute(f"SET threads = {threads}")
+        connection.execute("SET lock_configuration = true")
         return {"ok": True}
 
     def _conn(self):
