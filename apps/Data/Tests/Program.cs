@@ -18,6 +18,8 @@ var queryResult = new DataQueryResult(["total"], [["42"]], false);
 Assert(queryResult.Columns.Count == 1 && queryResult.Rows.Count == 1, "Query result contract is invalid.");
 
 var fake = new FakeSpreadsheetEngine();
+await using var fakeDatabase = new FakeDatabaseEngine();
+await fakeDatabase.OpenAsync("fixture.duckdb");
 await using (var session = new DataGridSession(fake))
 {
     var opened = await session.OpenAsync("fixture.ods");
@@ -33,6 +35,16 @@ await using (var session = new DataGridSession(fake))
     Assert(formula.Grid.Values[0][1] == "10", "Grid session did not expose the recalculated formula result.");
     Assert(fake.RecalculateCalls == 2, "Grid session did not recalculate the formula edit.");
 
+    var bridge = new DataWorkbookDatabaseBridge(fake, fakeDatabase);
+    var published = await bridge.PublishRangeAsync(
+        opened.Workbook.Id,
+        new DataRangeRequest("Sheet 1", 0, 0, 1, 2),
+        "GridSnapshot");
+    Assert(published.Columns.SequenceEqual(["A", "B"]), "Database bridge did not generate stable spreadsheet column names.");
+    Assert(published.RowCount == 1, "Database bridge published the wrong row count.");
+    Assert(fakeDatabase.LastTable is not null, "Database bridge did not call the database engine.");
+    Assert(fakeDatabase.LastTable.Rows[0].SequenceEqual(["5", "10"]), "Database bridge did not publish displayed spreadsheet values.");
+
     var secondSheet = await session.SelectSheetAsync(1);
     Assert(secondSheet.ActiveSheet.Name == "Summary", "Grid session sheet selection failed.");
 
@@ -41,8 +53,9 @@ await using (var session = new DataGridSession(fake))
     await session.CloseAsync();
     Assert(fake.CloseCalls == 1, "Grid session did not close the workbook exactly once.");
 }
+await fakeDatabase.CloseAsync();
 
-Console.WriteLine("Haven Data contract and grid-session smoke checks passed.");
+Console.WriteLine("Haven Data contract, grid-session and database-bridge smoke checks passed.");
 
 internal sealed class FakeSpreadsheetEngine : IDataSpreadsheetEngine
 {
@@ -127,5 +140,54 @@ internal sealed class FakeSpreadsheetEngine : IDataSpreadsheetEngine
     {
         if (_open is null || !string.Equals(_open.Id, workbookId, StringComparison.Ordinal))
             throw new InvalidOperationException("Fake workbook is not open.");
+    }
+}
+
+internal sealed class FakeDatabaseEngine : IDataDatabaseEngine
+{
+    private bool _open;
+
+    public DataTableSnapshot? LastTable { get; private set; }
+
+    public Task OpenAsync(string databasePath, CancellationToken cancellationToken = default)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        ArgumentException.ThrowIfNullOrWhiteSpace(databasePath);
+        _open = true;
+        return Task.CompletedTask;
+    }
+
+    public Task ReplaceTableAsync(DataTableSnapshot table, CancellationToken cancellationToken = default)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        EnsureOpen();
+        LastTable = table;
+        return Task.CompletedTask;
+    }
+
+    public Task<DataQueryResult> ExecuteReadOnlyAsync(string sql, int maxRows = 200, CancellationToken cancellationToken = default)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        EnsureOpen();
+        return Task.FromResult(new DataQueryResult([], [], false));
+    }
+
+    public Task CloseAsync(CancellationToken cancellationToken = default)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        _open = false;
+        return Task.CompletedTask;
+    }
+
+    public ValueTask DisposeAsync()
+    {
+        _open = false;
+        return ValueTask.CompletedTask;
+    }
+
+    private void EnsureOpen()
+    {
+        if (!_open)
+            throw new InvalidOperationException("Fake database is not open.");
     }
 }
