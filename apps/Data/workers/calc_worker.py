@@ -384,6 +384,51 @@ class CalcRuntime:
             raise RuntimeError("LibreOffice did not clear the list validation rule.")
         return state
 
+    def sort_range(self, workbook_id: str, request: dict, key_column_offset: object, ascending: bool, contains_header: bool) -> dict:
+        document = self._doc(workbook_id)
+        if bool(document.isReadonly()):
+            raise PermissionError("Workbook was opened read-only.")
+        _sheet, cell_range, normalized = self._bounded_cell_range(document, request, "Sort range")
+        key = int(key_column_offset)
+        if key < 0 or key >= normalized["columnCount"]:
+            raise ValueError("Sort key must identify a column inside the requested range.")
+        if contains_header and normalized["rowCount"] < 2:
+            raise ValueError("A sort range marked as containing a header must include at least one data row.")
+
+        descriptor = list(cell_range.createSortDescriptor())
+        sort_field = uno.createUnoStruct("com.sun.star.util.SortField")
+        sort_field.Field = key
+        sort_field.SortAscending = bool(ascending)
+
+        seen: set[str] = set()
+        for item in descriptor:
+            if item.Name == "SortFields":
+                item.Value = (sort_field,)
+                seen.add(item.Name)
+            elif item.Name == "ContainsHeader":
+                item.Value = bool(contains_header)
+                seen.add(item.Name)
+            elif item.Name == "SortColumns":
+                item.Value = False
+                seen.add(item.Name)
+            elif item.Name == "IsCaseSensitive":
+                item.Value = False
+            elif item.Name == "BindFormatsToContent":
+                item.Value = True
+            elif item.Name == "CopyOutputData":
+                item.Value = False
+            elif item.Name == "IsUserListEnabled":
+                item.Value = False
+
+        required = {"SortFields", "ContainsHeader", "SortColumns"}
+        missing = required.difference(seen)
+        if missing:
+            raise RuntimeError(f"LibreOffice sort descriptor is missing required properties: {sorted(missing)}")
+
+        cell_range.sort(tuple(descriptor))
+        document.calculateAll()
+        return self.read_range(workbook_id, normalized)
+
     def read_range(self, workbook_id: str, request: dict) -> dict:
         document = self._doc(workbook_id)
         _sheet, cell_range, normalized = self._bounded_cell_range(document, request, "Requested range")
@@ -621,6 +666,14 @@ def serve() -> int:
                     )
                 elif method == "clearValidation":
                     result = runtime.clear_validation(params["workbookId"], params["range"])
+                elif method == "sortRange":
+                    result = runtime.sort_range(
+                        params["workbookId"],
+                        params["range"],
+                        params["keyColumnOffset"],
+                        bool(params.get("ascending", True)),
+                        bool(params.get("containsHeader", True)),
+                    )
                 elif method == "readRange":
                     result = runtime.read_range(params["workbookId"], params["range"])
                 elif method == "setCell":
