@@ -1,32 +1,36 @@
-# CakeOS Windows compatibility broker
+# HavenOS Windows compatibility broker
 
-This directory contains the first implementation slice of the optional Windows compatibility layer originally planned under the HavenOS name.
+This directory contains the first implementation slice of the optional Windows compatibility layer for the current CakeOS repository. The historical HavenOS naming is retained in code paths and documentation where the platform migration has not yet renamed those interfaces.
 
 ## Implemented
 
 - provider-based manifest model (`wine` and reserved `winboat` provider names)
 - per-application Wine state/prefix locations
-- managed runtime identifiers that cannot traverse outside the runtime root
 - fail-closed Bubblewrap requirement
-- private network namespace with all network grants refused in slice 1
-- explicit host mount grants restricted to `/mnt/haven-share/<name>` inside the sandbox
-- host mount sources resolved before launch, with sensitive system/backend paths refused
-- optional GPU render-node grant that fails if no render node is available
+- private network namespace only; network-enabled manifests are rejected in slice 1
+- explicit host mount grants beneath `/mnt/haven-share/<name>` only
+- broad and sensitive host filesystem grants rejected after path resolution
+- explicit GPU render-node grant which fails if no render node exists
 - Wayland-only display socket exposure for slice 1
 - explicit refusal of clipboard/media permissions until enforceable mediation exists
 - explicit refusal of the WinBoat provider until its VM/container boundary is implemented and proven
-- reset/delete boundary restricted to the broker state root
-- read-only runtime audit for Wine, Bubblewrap, Wayland, KVM, GPU, PipeWire, Podman/Docker, and FreeRDP prerequisites
+- one transient `systemd --user` service per launched Windows app
+- deterministic hashed unit names rather than embedding app identifiers in unit names
+- `KillMode=control-group` lifecycle ownership for full Wine process-tree shutdown
+- clean service environment using `env -i`; unrelated user/session environment variables are not forwarded to Wine
+- lifecycle status, stop, journal logs, reset, capability and health reporting
+- reset/delete boundary restricted to the broker state root and refused while an app is running
+- read-only host prerequisite audit for Wine and future WinBoat requirements
 
 ## Not implemented or claimed
 
 - Wine installation or downloading
 - a bundled Wine runtime
-- network mediation or Internet-versus-LAN separation
 - WinBoat, Podman, Docker, QEMU/KVM, Windows installation, or FreeRDP orchestration
 - X11 fallback
 - PipeWire output-only mediation
 - clipboard brokering
+- Internet/LAN mediation
 - USB/smartcard/camera/microphone passthrough
 - application compatibility claims
 - approved-VM runtime proof
@@ -44,17 +48,13 @@ This directory contains the first implementation slice of the optional Windows c
   "audioOutput": false,
   "microphone": false,
   "gpu": "none",
-  "mounts": [
-    {
-      "source": "/home/user/Documents/Example",
-      "target": "/mnt/haven-share/example",
-      "mode": "ro"
-    }
-  ]
+  "mounts": []
 }
 ```
 
-The manifest parser reserves `internet` and `lan` for future policy versions, but slice 1 refuses both at launch. This prevents a misleading permission label from silently becoming unrestricted host networking.
+The manifest parser reserves `internet` and `lan` network values for the future HUI contract, but slice 1 deliberately rejects both. No network access is advertised or granted until a backend can enforce the distinction without simply sharing the host network namespace.
+
+User-selected file/folder grants must target a child beneath `/mnt/haven-share/`. Host paths are resolved before launch so symlinks cannot be used to bypass the sensitive-path checks.
 
 ## Runtime layout
 
@@ -68,23 +68,39 @@ and stores application state beneath:
 
 The broker never installs a missing runtime and never falls back to an unsandboxed system Wine executable.
 
-## Read-only runtime audit
+## Lifecycle
 
-Run the audit on the target Linux session without changing packages, VM settings, or containers:
+A launch is wrapped in a transient per-user systemd service named from a SHA-256 digest of the application ID. HUI therefore gets an authoritative lifecycle object instead of an unmanaged child PID.
+
+The transient service uses:
+
+- `KillMode=control-group`
+- `TimeoutStopSec=10s`
+- collection after the transient unit becomes inactive
+- a clean `env -i` command environment containing only the broker-approved `PATH` and `LANG`
+- Bubblewrap as the compatibility process executed by the service
+
+The service manager itself receives only the minimum session routing environment required to reach the user's systemd manager. Windows application environment inheritance is intentionally separate from that control-plane environment.
+
+`reset` first checks the unit state and refuses to delete an application's prefix while that application is still running.
+
+## CLI / HUI boundary
+
+From the repository root:
 
 ```sh
 python3 -m compatibility.wine.haven_compat.cli audit
+python3 -m compatibility.wine.haven_compat.cli capabilities
+python3 -m compatibility.wine.haven_compat.cli health
+python3 -m compatibility.wine.haven_compat.cli plan path/to/manifest.json
+python3 -m compatibility.wine.haven_compat.cli launch path/to/manifest.json
+python3 -m compatibility.wine.haven_compat.cli status path/to/manifest.json
+python3 -m compatibility.wine.haven_compat.cli stop path/to/manifest.json
+python3 -m compatibility.wine.haven_compat.cli logs path/to/manifest.json --lines 200
+python3 -m compatibility.wine.haven_compat.cli reset path/to/manifest.json
 ```
 
-The JSON output reports prerequisite presence separately for `wineSlice1` and `winboatFuture`. `prerequisitesPresent: true` is only a preflight result; it is not evidence that a Windows application was launched successfully.
-
-## Broker commands
-
-```sh
-python3 -m compatibility.wine.haven_compat.cli plan manifest.json
-python3 -m compatibility.wine.haven_compat.cli launch manifest.json
-python3 -m compatibility.wine.haven_compat.cli reset manifest.json
-```
+The `capabilities` output is the intended stable HUI-facing feature contract for this slice. `health` combines host preflight facts with lifecycle-supervisor availability. `audit` and `health` are observational; they do not install, enable, reconfigure or create anything.
 
 ## Tests
 
@@ -94,4 +110,4 @@ The test suite is dependency-free:
 python3 -m unittest tests.test_haven_compat -v
 ```
 
-Tests validate policy generation and prerequisite evaluation only. Passing tests are not runtime proof that Wine applications work on the approved CakeOS/HavenOS development VM.
+Tests validate manifest policy, sandbox-plan construction, lifecycle command construction, capability reporting and preflight evaluation. Passing tests are not runtime proof that Wine applications work on the approved HavenOS/CakeOS VM.
