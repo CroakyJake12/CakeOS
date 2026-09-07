@@ -1,0 +1,64 @@
+from __future__ import annotations
+
+import pathlib
+import unittest
+
+RUNTIME = pathlib.Path(__file__).resolve().parents[1]
+REPO = RUNTIME.parents[1]
+WORKFLOW = (REPO / ".github/workflows/llamacpp-slice0.yml").read_text(encoding="utf-8")
+PROOF = (RUNTIME / "tests/real_runtime_proof.py").read_text(encoding="utf-8")
+
+
+class InstalledPackageProofContractTests(unittest.TestCase):
+    def test_harness_has_explicit_installed_package_mode(self) -> None:
+        self.assertIn('HAVEN_PROOF_SURFACE', PROOF)
+        self.assertIn('HAVEN_MODELCTL_EXECUTABLE', PROOF)
+        self.assertIn('HAVEN_BROKER_SCRIPT', PROOF)
+        self.assertIn('installed-package', PROOF)
+        self.assertIn('dpkg-query', PROOF)
+        self.assertIn('/usr/bin/haven-modelctl', PROOF)
+        self.assertIn('/usr/lib/haven/inference/broker.py', PROOF)
+        self.assertIn('/usr/lib/haven/llama.cpp/llama-server', PROOF)
+        self.assertIn('/usr/lib/systemd/user/haven-inference-broker.service', PROOF)
+        self.assertIn('pathsOwnedByPackage', PROOF)
+        self.assertIn('systemdManagedRuntimeProven', PROOF)
+
+    def test_package_job_is_forced_for_workflow_changes(self) -> None:
+        package_scope = WORKFLOW.split('id: package_scope', 1)[1].split('Checkout pinned upstream llama.cpp', 1)[0]
+        self.assertIn('.github/workflows/llamacpp-slice0.yml', package_scope)
+
+    def test_installed_job_downloads_installs_and_uses_canonical_paths(self) -> None:
+        section = WORKFLOW.split('installed-package-runtime-proof:', 1)[1]
+        self.assertIn('needs: package-runtime-amd64', section)
+        self.assertIn('actions/download-artifact@v4', section)
+        self.assertIn('name: haven-llamacpp-runtime-amd64', section)
+        self.assertIn('sudo dpkg -i "$DEB"', section)
+        self.assertIn("install ok installed", section)
+        self.assertIn('HAVEN_PROOF_SURFACE: installed-package', section)
+        self.assertIn('HAVEN_MODELCTL_EXECUTABLE: /usr/bin/haven-modelctl', section)
+        self.assertIn('HAVEN_BROKER_SCRIPT: /usr/lib/haven/inference/broker.py', section)
+        self.assertIn('HAVEN_LLAMA_SERVER: /usr/lib/haven/llama.cpp/llama-server', section)
+        self.assertIn('/usr/bin/python3 cakeos/runtime/llamacpp/tests/real_runtime_proof.py', section)
+        self.assertNotIn('apt-get', section)
+
+    def test_installed_job_verifies_model_before_running_and_uploads_no_model(self) -> None:
+        section = WORKFLOW.split('installed-package-runtime-proof:', 1)[1]
+        verify_index = section.index('sha256sum -c -')
+        proof_index = section.index('/usr/bin/python3 cakeos/runtime/llamacpp/tests/real_runtime_proof.py')
+        self.assertLess(verify_index, proof_index)
+        self.assertIn('name: haven-llamacpp-installed-package-proof', section)
+        upload_section = section.split('name: haven-llamacpp-installed-package-proof', 1)[1]
+        self.assertIn('installed-package-runtime-evidence.json', upload_section)
+        self.assertNotIn('*.gguf', upload_section)
+        self.assertIn('rm -f "$MODEL_PATH"', section)
+        self.assertIn('sudo dpkg -r haven-llamacpp-runtime', section)
+
+    def test_install_has_no_maintainer_script_or_user_enable_side_effect(self) -> None:
+        section = WORKFLOW.split('installed-package-runtime-proof:', 1)[1]
+        self.assertIn('/var/lib/dpkg/info/haven-llamacpp-runtime.postinst', section)
+        self.assertIn('$HOME/.config/systemd/user', section)
+        self.assertIn('haven-inference-broker.service', section)
+
+
+if __name__ == "__main__":
+    unittest.main()
