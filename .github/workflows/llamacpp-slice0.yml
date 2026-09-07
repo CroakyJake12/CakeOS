@@ -24,7 +24,7 @@ jobs:
           python-version: '3.12'
       - name: Compile Python sources
         run: python -m compileall -q runtime/llamacpp
-      - name: Run unit tests
+      - name: Run unit and model-free integration tests
         run: python -m unittest discover -s runtime/llamacpp/tests -v
       - name: Check pinned provenance and build policy
         run: |
@@ -118,7 +118,40 @@ jobs:
         uses: actions/checkout@v4
         with:
           path: cakeos
+          fetch-depth: 0
+      - name: Determine whether package inputs changed
+        id: package_scope
+        shell: bash
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
+            echo 'required=true' >> "$GITHUB_OUTPUT"
+          elif git -C cakeos diff --quiet "$BASE_SHA" "$HEAD_SHA" -- \
+              packaging/bin/haven-modelctl \
+              packaging/systemd/user/haven-inference-broker.service \
+              packaging/llamacpp \
+              runtime/llamacpp/broker.py \
+              runtime/llamacpp/gguf.py \
+              runtime/llamacpp/model_lease.py \
+              runtime/llamacpp/modelctl.py \
+              runtime/llamacpp/provider-contract.json \
+              runtime/llamacpp/backend-matrix.json \
+              runtime/llamacpp/backend_matrix.py \
+              runtime/llamacpp/hardware_probe.py \
+              runtime/llamacpp/budget.py \
+              runtime/llamacpp/benchmark.py \
+              runtime/llamacpp/upstream.lock.json \
+              runtime/llamacpp/build-cpu.sh \
+              runtime/llamacpp/licenses/llama.cpp-LICENSE; then
+            echo 'required=false' >> "$GITHUB_OUTPUT"
+            echo 'Package inputs are unchanged; reusing base-branch package evidence.'
+          else
+            echo 'required=true' >> "$GITHUB_OUTPUT"
+          fi
       - name: Checkout pinned upstream llama.cpp
+        if: steps.package_scope.outputs.required == 'true'
         uses: actions/checkout@v4
         with:
           repository: ggml-org/llama.cpp
@@ -126,19 +159,23 @@ jobs:
           path: llama-src
           fetch-depth: 1
       - name: Verify committed upstream MIT notice is exact
+        if: steps.package_scope.outputs.required == 'true'
         run: cmp cakeos/runtime/llamacpp/licenses/llama.cpp-LICENSE llama-src/LICENSE
       - name: Build pinned CPU server for package
+        if: steps.package_scope.outputs.required == 'true'
         env:
           LLAMA_SOURCE: ${{ github.workspace }}/llama-src
           LLAMA_BUILD_DIR: ${{ github.workspace }}/llama-package-build
           LLAMA_BUILD_PARALLEL: '2'
         run: sh cakeos/runtime/llamacpp/build-cpu.sh
       - name: Build model-free Debian package
+        if: steps.package_scope.outputs.required == 'true'
         env:
           LLAMA_SERVER_BINARY: ${{ github.workspace }}/llama-package-build/bin/llama-server
           HAVEN_PACKAGE_OUTPUT_DIR: ${{ github.workspace }}/package-out
         run: sh cakeos/packaging/llamacpp/build-deb.sh
       - name: Inspect package without installing it
+        if: steps.package_scope.outputs.required == 'true'
         shell: bash
         run: |
           deb=$(find package-out -maxdepth 1 -type f -name '*.deb' -print -quit)
@@ -157,6 +194,7 @@ jobs:
           extracted/usr/lib/haven/llama.cpp/llama-server --version
           cat "$deb.sha256"
       - name: Upload package evidence artifact
+        if: steps.package_scope.outputs.required == 'true'
         uses: actions/upload-artifact@v4
         with:
           name: haven-llamacpp-runtime-amd64
