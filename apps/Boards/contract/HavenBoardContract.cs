@@ -61,6 +61,7 @@ public static class HavenBoardReducer
     {
         ArgumentNullException.ThrowIfNull(snapshot);
         ArgumentNullException.ThrowIfNull(command);
+        Validate(snapshot);
 
         var groups = snapshot.Groups
             .Select(group => new MutableGroup(group.Id, group.Title, group.Cards.ToList()))
@@ -149,11 +150,34 @@ public static class HavenBoardReducer
                 throw new NotSupportedException($"Unsupported board command '{command.GetType().Name}'.");
         }
 
-        return snapshot with
+        var updated = snapshot with
         {
             Version = checked(snapshot.Version + 1),
             Groups = groups.Select(group => new HavenBoardGroup(group.Id, group.Title, group.Cards.ToArray())).ToArray()
         };
+        Validate(updated);
+        return updated;
+    }
+
+    public static void Validate(HavenBoardSnapshot snapshot)
+    {
+        ArgumentNullException.ThrowIfNull(snapshot);
+
+        var cardsById = new Dictionary<string, HavenBoardCard>(StringComparer.Ordinal);
+        foreach (var card in snapshot.Groups.SelectMany(group => group.Cards))
+        {
+            if (string.IsNullOrWhiteSpace(card.Id))
+                throw new InvalidOperationException("Board cards must have non-empty IDs.");
+            if (!cardsById.TryAdd(card.Id, card))
+                throw new InvalidOperationException($"Board card ID '{card.Id}' is duplicated.");
+        }
+
+        foreach (var card in cardsById.Values)
+        {
+            if (card.ParentCardId is null)
+                continue;
+            ValidateParentChain(cardsById, card.Id, card.ParentCardId);
+        }
     }
 
     private static MutableGroup FindGroup(IReadOnlyList<MutableGroup> groups, string id) =>
@@ -190,6 +214,30 @@ public static class HavenBoardReducer
                 throw new InvalidOperationException("The existing card hierarchy contains a cycle.");
 
             currentId = FindCard(groups, currentId).Card.ParentCardId;
+        }
+    }
+
+    private static void ValidateParentChain(
+        IReadOnlyDictionary<string, HavenBoardCard> cardsById,
+        string cardId,
+        string proposedParentId)
+    {
+        if (string.Equals(cardId, proposedParentId, StringComparison.Ordinal))
+            throw new InvalidOperationException($"Board card '{cardId}' cannot be its own parent.");
+
+        var visited = new HashSet<string>(StringComparer.Ordinal);
+        string? currentId = proposedParentId;
+        while (currentId is not null)
+        {
+            if (string.Equals(currentId, cardId, StringComparison.Ordinal))
+                throw new InvalidOperationException($"Board card hierarchy contains a cycle involving '{cardId}'.");
+            if (!visited.Add(currentId))
+                throw new InvalidOperationException("Board card hierarchy contains a cycle.");
+            if (!cardsById.TryGetValue(currentId, out var current))
+                throw new InvalidOperationException(
+                    $"Board card '{cardId}' references missing parent '{currentId}'.");
+
+            currentId = current.ParentCardId;
         }
     }
 
