@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Haven Data Calc worker.
 
-Repository-side P0/P1 worker. Requires LibreOffice/pyuno at runtime.
+Repository-side Calc worker. Requires LibreOffice/pyuno at runtime.
 The worker owns an isolated LibreOffice profile and communicates only over stdin/stdout.
 """
 
@@ -29,6 +29,8 @@ MAX_MATERIALIZED_ROWS = 1000
 MAX_MATERIALIZED_COLUMNS = 256
 MAX_STRUCTURAL_MUTATION_COUNT = 100
 MAX_NAMED_RANGE_NAME_LENGTH = 64
+MAX_VALIDATION_VALUES = 50
+MAX_VALIDATION_VALUE_LENGTH = 64
 PORTABLE_SHEET_FORBIDDEN = set("[]:*?/\\")
 
 
@@ -63,6 +65,44 @@ def named_range_name(value: object) -> str:
     if any(not (character.isalnum() or character in "_.") for character in text[1:]):
         raise ValueError("Named range names may contain only letters, digits, underscores or periods after the first character.")
     return text
+
+
+def validation_values(supplied_values: object) -> list[str]:
+    if not isinstance(supplied_values, list) or not 1 <= len(supplied_values) <= MAX_VALIDATION_VALUES:
+        raise ValueError(f"List validation requires 1-{MAX_VALIDATION_VALUES} literal values.")
+    values: list[str] = []
+    seen: set[str] = set()
+    for supplied in supplied_values:
+        if not isinstance(supplied, str):
+            raise ValueError("Validation values must be strings.")
+        if not 1 <= len(supplied) <= MAX_VALIDATION_VALUE_LENGTH:
+            raise ValueError(f"Validation values must contain 1-{MAX_VALIDATION_VALUE_LENGTH} characters.")
+        if any(ord(character) < 32 or ord(character) == 127 for character in supplied) or ';' in supplied or '"' in supplied:
+            raise ValueError("First-slice validation values cannot contain control characters, semicolons or double quotes.")
+        if supplied in seen:
+            raise ValueError("Duplicate validation values are not allowed in the first slice.")
+        seen.add(supplied)
+        values.append(supplied)
+    return values
+
+
+def validation_formula(values: list[str]) -> str:
+    return ";".join(f'"{value}"' for value in values)
+
+
+def parse_literal_validation_formula(formula: str) -> list[str] | None:
+    if not formula:
+        return None
+    parts = formula.split(";")
+    values: list[str] = []
+    for part in parts:
+        if len(part) < 2 or not part.startswith('"') or not part.endswith('"'):
+            return None
+        value = part[1:-1]
+        if '"' in value or not value:
+            return None
+        values.append(value)
+    return values if values else None
 
 
 class CalcRuntime:
@@ -116,7 +156,7 @@ class CalcRuntime:
                 )
             try:
                 return resolver.resolve(target)
-            except Exception as exc:  # UNO raises bridge-specific exceptions
+            except Exception as exc:
                 last_error = exc
                 time.sleep(0.1)
         raise RuntimeError(f"Timed out connecting to LibreOffice UNO pipe: {last_error}.{self._stderr_suffix()}")
@@ -173,6 +213,35 @@ class CalcRuntime:
             "columnCount": int(address.EndColumn - address.StartColumn + 1),
         }
 
+    def _bounded_cell_range(self, document, request: dict, label: str):
+        sheet_name = str(request.get("sheet") or "").strip()
+        start_row = int(request["startRow"])
+        start_column = int(request["startColumn"])
+        row_count = int(request["rowCount"])
+        column_count = int(request["columnCount"])
+        if not sheet_name:
+            raise ValueError(f"{label} sheet is required.")
+        if min(start_row, start_column) < 0 or row_count < 1 or column_count < 1:
+            raise ValueError(f"Invalid {label.lower()} coordinates.")
+        if row_count > MAX_MATERIALIZED_ROWS or column_count > MAX_MATERIALIZED_COLUMNS:
+            raise ValueError(f"{label} exceeds first-slice safety limits.")
+        sheet = self._sheet(document, sheet_name)
+        row_capacity = int(sheet.getRows().getCount())
+        column_capacity = int(sheet.getColumns().getCount())
+        if start_row + row_count > row_capacity or start_column + column_count > column_capacity:
+            raise ValueError(f"{label} exceeds the sheet bounds.")
+        end_row = start_row + row_count - 1
+        end_column = start_column + column_count - 1
+        cell_range = sheet.getCellRangeByPosition(start_column, start_row, end_column, end_row)
+        normalized = {
+            "sheet": sheet_name,
+            "startRow": start_row,
+            "startColumn": start_column,
+            "rowCount": row_count,
+            "columnCount": column_count,
+        }
+        return sheet, cell_range, normalized
+
     @staticmethod
     def _find_name_case_insensitive(names: tuple | list, requested: str) -> str | None:
         requested_folded = requested.casefold()
@@ -222,37 +291,17 @@ class CalcRuntime:
         if bool(document.isReadonly()):
             raise PermissionError("Workbook was opened read-only.")
         name = named_range_name(supplied_name)
-        sheet_name = str(request.get("sheet") or "").strip()
-        start_row = int(request["startRow"])
-        start_column = int(request["startColumn"])
-        row_count = int(request["rowCount"])
-        column_count = int(request["columnCount"])
-        if not sheet_name:
-            raise ValueError("Named range sheet is required.")
-        if min(start_row, start_column) < 0 or row_count < 1 or column_count < 1:
-            raise ValueError("Invalid named range coordinates.")
-        if row_count > MAX_MATERIALIZED_ROWS or column_count > MAX_MATERIALIZED_COLUMNS:
-            raise ValueError("Named range exceeds first-slice safety limits.")
-
-        sheet = self._sheet(document, sheet_name)
-        row_capacity = int(sheet.getRows().getCount())
-        column_capacity = int(sheet.getColumns().getCount())
-        if start_row + row_count > row_capacity or start_column + column_count > column_capacity:
-            raise ValueError("Named range exceeds the sheet bounds.")
-
+        _sheet, cell_range, normalized = self._bounded_cell_range(document, request, "Named range")
         named_ranges = document.NamedRanges
         existing_names = tuple(named_ranges.getElementNames())
         if self._find_name_case_insensitive(existing_names, name) is not None:
             raise ValueError(f"Workbook already contains a named range named '{name}'.")
 
-        end_row = start_row + row_count - 1
-        end_column = start_column + column_count - 1
-        cell_range = sheet.getCellRangeByPosition(start_column, start_row, end_column, end_row)
         absolute_name = str(cell_range.AbsoluteName)
         reference_address = cell_range.getCellByPosition(0, 0).CellAddress
         named_ranges.addNewByName(name, absolute_name, reference_address, 0)
         summary = self._named_range_summary(document, name)
-        if summary is None:
+        if summary is None or summary["range"] != normalized:
             try:
                 named_ranges.removeByName(name)
             except Exception:
@@ -274,29 +323,80 @@ class CalcRuntime:
         named_ranges.removeByName(actual)
         return {"ok": True}
 
+    def get_list_validation(self, workbook_id: str, request: dict) -> dict:
+        document = self._doc(workbook_id)
+        _sheet, cell_range, normalized = self._bounded_cell_range(document, request, "Validation range")
+        validation = cell_range.Validation
+        list_type = uno.Enum("com.sun.star.sheet.ValidationType", "LIST")
+        if validation.Type != list_type:
+            return {"range": normalized, "enabled": False, "values": [], "allowBlank": True}
+        values = parse_literal_validation_formula(str(validation.getFormula1()))
+        if values is None:
+            # Imported validation formulas/ranges are deliberately not represented as
+            # Haven literal-list rules in this first slice.
+            return {"range": normalized, "enabled": False, "values": [], "allowBlank": bool(validation.IgnoreBlankCells)}
+        return {
+            "range": normalized,
+            "enabled": True,
+            "values": values,
+            "allowBlank": bool(validation.IgnoreBlankCells),
+        }
+
+    def apply_list_validation(self, workbook_id: str, request: dict, supplied_values: object, allow_blank: bool) -> dict:
+        document = self._doc(workbook_id)
+        if bool(document.isReadonly()):
+            raise PermissionError("Workbook was opened read-only.")
+        values = validation_values(supplied_values)
+        _sheet, cell_range, normalized = self._bounded_cell_range(document, request, "Validation range")
+        validation = cell_range.Validation
+        validation.Type = uno.Enum("com.sun.star.sheet.ValidationType", "LIST")
+        validation.setOperator(uno.Enum("com.sun.star.sheet.ConditionOperator", "EQUAL"))
+        validation.setFormula1(validation_formula(values))
+        validation.setFormula2("")
+        validation.IgnoreBlankCells = bool(allow_blank)
+        validation.ShowList = 1
+        validation.ShowErrorMessage = True
+        validation.ErrorAlertStyle = uno.Enum("com.sun.star.sheet.ValidationAlertStyle", "STOP")
+        validation.ErrorTitle = "Invalid value"
+        validation.ErrorMessage = "Choose a value from the allowed list."
+        cell_range.setPropertyValue("Validation", validation)
+
+        state = self.get_list_validation(workbook_id, normalized)
+        if not state["enabled"] or state["values"] != values or state["allowBlank"] != bool(allow_blank):
+            raise RuntimeError("LibreOffice did not retain the requested literal list validation rule.")
+        return state
+
+    def clear_validation(self, workbook_id: str, request: dict) -> dict:
+        document = self._doc(workbook_id)
+        if bool(document.isReadonly()):
+            raise PermissionError("Workbook was opened read-only.")
+        _sheet, cell_range, normalized = self._bounded_cell_range(document, request, "Validation range")
+        validation = cell_range.Validation
+        validation.Type = uno.Enum("com.sun.star.sheet.ValidationType", "ANY")
+        validation.setFormula1("")
+        validation.setFormula2("")
+        validation.ShowList = 0
+        validation.ShowErrorMessage = False
+        validation.IgnoreBlankCells = True
+        cell_range.setPropertyValue("Validation", validation)
+        state = self.get_list_validation(workbook_id, normalized)
+        if state["enabled"]:
+            raise RuntimeError("LibreOffice did not clear the list validation rule.")
+        return state
+
     def read_range(self, workbook_id: str, request: dict) -> dict:
         document = self._doc(workbook_id)
-        sheet_name = request["sheet"]
-        start_row = int(request["startRow"])
-        start_column = int(request["startColumn"])
-        row_count = int(request["rowCount"])
-        column_count = int(request["columnCount"])
-        if min(start_row, start_column) < 0 or row_count < 1 or column_count < 1:
-            raise ValueError("Invalid range coordinates.")
-        if row_count > 1000 or column_count > 256:
-            raise ValueError("Requested range exceeds first-slice safety limits.")
-        sheet = self._sheet(document, sheet_name)
+        _sheet, cell_range, normalized = self._bounded_cell_range(document, request, "Requested range")
         values: list[list[str]] = []
-        for row in range(start_row, start_row + row_count):
+        for row in range(normalized["rowCount"]):
             current: list[str] = []
-            for column in range(start_column, start_column + column_count):
-                cell = sheet.getCellByPosition(column, row)
-                current.append(cell.getString())
+            for column in range(normalized["columnCount"]):
+                current.append(cell_range.getCellByPosition(column, row).getString())
             values.append(current)
         return {
-            "sheet": sheet_name,
-            "startRow": start_row,
-            "startColumn": start_column,
+            "sheet": normalized["sheet"],
+            "startRow": normalized["startRow"],
+            "startColumn": normalized["startColumn"],
             "values": values,
         }
 
@@ -513,6 +613,14 @@ def serve() -> int:
                     result = runtime.create_named_range(params["workbookId"], params["name"], params["range"])
                 elif method == "deleteNamedRange":
                     result = runtime.delete_named_range(params["workbookId"], params["name"])
+                elif method == "getListValidation":
+                    result = runtime.get_list_validation(params["workbookId"], params["range"])
+                elif method == "applyListValidation":
+                    result = runtime.apply_list_validation(
+                        params["workbookId"], params["range"], params["values"], bool(params.get("allowBlank", True))
+                    )
+                elif method == "clearValidation":
+                    result = runtime.clear_validation(params["workbookId"], params["range"])
                 elif method == "readRange":
                     result = runtime.read_range(params["workbookId"], params["range"])
                 elif method == "setCell":
