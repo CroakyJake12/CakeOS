@@ -74,10 +74,12 @@ jobs:
       - name: Run contract tests
         run: ctest --test-dir build/present-engine --output-on-failure
 
-      - name: Create deterministic ODP fixture
-        run: python3 apps/present-engine/tests/make_smoke_fixture.py /tmp/cakeos-present-source.odp
+      - name: Create deterministic ODP fixtures
+        run: |
+          python3 apps/present-engine/tests/make_smoke_fixture.py /tmp/cakeos-present-source.odp
+          python3 apps/present-engine/tests/make_reorder_fixture.py /tmp/cakeos-present-reorder-source.odp
 
-      - name: Normalize fixture through LibreOffice Impress
+      - name: Normalize fixtures through LibreOffice Impress
         run: |
           mkdir -p /tmp/cakeos-present-normalized
           /usr/lib/libreoffice/program/soffice \
@@ -85,7 +87,13 @@ jobs:
             --convert-to odp \
             --outdir /tmp/cakeos-present-normalized \
             /tmp/cakeos-present-source.odp
+          /usr/lib/libreoffice/program/soffice \
+            --headless \
+            --convert-to odp \
+            --outdir /tmp/cakeos-present-normalized \
+            /tmp/cakeos-present-reorder-source.odp
           test -s /tmp/cakeos-present-normalized/cakeos-present-source.odp
+          test -s /tmp/cakeos-present-normalized/cakeos-present-reorder-source.odp
 
       - name: Prove exact geometry and LibreOfficeKit Impress rendering
         run: |
@@ -148,6 +156,16 @@ jobs:
               raise SystemExit('PPTX round-trip render is a uniform image')
           print(f'pptx_unique_rgb_values={len(pixels)}')
           PY
+
+      - name: Prove slide reordering, undo-redo, and persistence
+        run: |
+          rm -f /tmp/cakeos-present-reordered.odp
+          build/present-engine/cakeos-present-engine-reorder-smoke \
+            /tmp/cakeos-present-normalized/cakeos-present-reorder-source.odp \
+            /tmp/cakeos-present-reordered.odp | tee /tmp/present-reorder.log
+          test -s /tmp/cakeos-present-reordered.odp
+          grep -q '^slide_reorder=passed$' /tmp/present-reorder.log
+          grep -q '^slide_order=Beta,Gamma,Alpha$' /tmp/present-reorder.log
 
       - name: Prove framed HUI worker protocol
         run: |
