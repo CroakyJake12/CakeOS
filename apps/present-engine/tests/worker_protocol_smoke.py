@@ -16,6 +16,7 @@ ALLOWED_EVENTS = {
     "documentChanged",
     "slideChanged",
     "editingContextChanged",
+    "elementSelectionChanged",
     "engineError",
 }
 
