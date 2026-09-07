@@ -11,15 +11,15 @@ internal sealed class CanvasToolStrip : Container
         Name = "Canvas.Tools";
         Layout = HavenLayout.Horizontal;
         SetValue(HavenProperties.Width, HavenLength.Percent(100));
-        SetValue(HavenProperties.Height, HavenLength.Px(38));
+        SetValue(HavenProperties.Height, HavenLength.Px(42));
         SetValue(HavenProperties.Gap, HavenLength.Px(8));
         SetValue(HavenProperties.VerticalAlignment, HavenVerticalAlignment.Center);
         SetValue(HavenProperties.Overflow, HavenOverflow.Clip);
 
-        PenButton = CreateButton("Canvas.Tool.Pen", "Pen", 82);
-        EraserButton = CreateButton("Canvas.Tool.Eraser", "Eraser", 88);
-        UndoButton = CreateButton("Canvas.Undo", "Undo", 82);
-        RedoButton = CreateButton("Canvas.Redo", "Redo", 82);
+        PenButton = CreateButton("Canvas.Tool.Pen", "Pen", 112);
+        EraserButton = CreateButton("Canvas.Tool.Eraser", "Eraser", 128);
+        UndoButton = CreateButton("Canvas.Undo", "Undo", 112);
+        RedoButton = CreateButton("Canvas.Redo", "Redo", 112);
 
         PenButton.Invoked += (_, _) => ToolRequested?.Invoke(CanvasStrokeTool.Pen);
         EraserButton.Invoked += (_, _) => ToolRequested?.Invoke(CanvasStrokeTool.Eraser);
@@ -62,7 +62,7 @@ internal sealed class CanvasToolStrip : Container
     {
         var button = new HuiButton { Name = name, Content = content };
         button.SetValue(HavenProperties.Width, HavenLength.Px(width));
-        button.SetValue(HavenProperties.Height, HavenLength.Px(34));
+        button.SetValue(HavenProperties.Height, HavenLength.Px(36));
         button.Accessibility.AccessibleName = content;
         return button;
     }
