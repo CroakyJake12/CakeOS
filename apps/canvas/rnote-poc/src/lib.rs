@@ -341,6 +341,14 @@ mod tests {
         ]
     }
 
+    fn trashed_stroke_count(canvas: &HeadlessCanvasEngine) -> usize {
+        canvas
+            .debug_state_json()
+            .expect("debug engine state")
+            .matches("\"trashed\": true")
+            .count()
+    }
+
     #[test]
     fn pressure_is_clamped_but_tilt_is_preserved_at_hui_boundary() {
         let mut sample = CanvasPointerSample::new(1.0, 2.0, 2.5);
@@ -407,26 +415,23 @@ mod tests {
     }
 
     #[test]
-    fn eraser_changes_rendered_content_and_is_undoable() {
-        block_on(async {
-            let samples = sample_stroke();
-            let mut canvas = HeadlessCanvasEngine::new();
-            assert_eq!(canvas.stroke_tool(), CanvasStrokeTool::Pen);
-            canvas.draw_stroke(&samples).unwrap();
-            let before_erase = canvas.render_frame().await.unwrap().bytes;
+    fn eraser_trashes_stroke_and_history_restores_state() {
+        let samples = sample_stroke();
+        let mut canvas = HeadlessCanvasEngine::new();
+        canvas.draw_stroke(&samples).unwrap();
+        assert_eq!(trashed_stroke_count(&canvas), 0);
 
-            canvas.set_stroke_tool(CanvasStrokeTool::Eraser).unwrap();
-            assert_eq!(canvas.stroke_tool(), CanvasStrokeTool::Eraser);
-            canvas.begin_stroke(samples[2]).unwrap();
-            canvas.end_stroke(samples[2]).unwrap();
+        canvas.set_stroke_tool(CanvasStrokeTool::Eraser).unwrap();
+        canvas.begin_stroke(samples[2]).unwrap();
+        canvas.end_stroke(samples[2]).unwrap();
+        assert_eq!(trashed_stroke_count(&canvas), 1, "eraser did not trash the colliding stroke");
 
-            let after_erase = canvas.render_frame().await.unwrap().bytes;
-            assert_ne!(before_erase, after_erase, "eraser did not change rendered content");
+        assert!(canvas.undo().unwrap());
+        assert!(canvas.can_redo());
+        assert_eq!(trashed_stroke_count(&canvas), 0, "undo did not restore the erased stroke");
 
-            assert!(canvas.undo().unwrap());
-            let after_undo = canvas.render_frame().await.unwrap().bytes;
-            assert_eq!(before_erase, after_undo, "undo did not restore erased content");
-        });
+        assert!(canvas.redo().unwrap());
+        assert_eq!(trashed_stroke_count(&canvas), 1, "redo did not reapply the eraser state");
     }
 
     #[test]
