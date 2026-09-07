@@ -19,6 +19,7 @@ public sealed class HuiPreviewSurface : Control, IHavenMeasureContext
     private readonly HavenLayoutEngine _layout = new();
     private readonly HavenSceneRenderer _renderer = new();
     private readonly HavenInputRouter _input;
+    private int _invocationCount;
 
     public HuiPreviewSurface()
     {
@@ -26,6 +27,7 @@ public sealed class HuiPreviewSurface : Control, IHavenMeasureContext
         ClipToBounds = true;
         (_root, _action, _status) = BuildScene();
         _input = new HavenInputRouter(_root);
+        _action.Invoked += (_, _) => _invocationCount++;
     }
 
     protected override Size MeasureOverride(Size availableSize)
@@ -180,16 +182,16 @@ public sealed class HuiPreviewSurface : Control, IHavenMeasureContext
     {
         _layout.Layout(_root, new HavenSize(Math.Max(1, Bounds.Width), Math.Max(1, Bounds.Height)), HavenPlatform.Linux, this);
         var center = new HavenPoint(_action.Bounds.X + _action.Bounds.Width / 2d, _action.Bounds.Y + _action.Bounds.Height / 2d);
-        _action.SetState(HavenElementState.Selected, false);
-        _action.Accessibility.Selected = false;
+
+        _invocationCount = 0;
         _input.PointerPressed(center);
-        if (!_input.PointerReleased(center) || _action.Accessibility.Selected != true)
+        if (!_input.PointerReleased(center) || _invocationCount != 1)
             throw new InvalidOperationException("HUI pointer activation self-test failed.");
 
-        _action.SetState(HavenElementState.Selected, false);
-        _action.Accessibility.Selected = false;
         _input.Focus(_action);
-        if (!_input.KeyDown(HavenKey.Enter) || !_input.KeyUp(HavenKey.Enter) || _action.Accessibility.Selected != true)
+        var keyDownHandled = _input.KeyDown(HavenKey.Enter);
+        var keyUpHandled = _input.KeyUp(HavenKey.Enter);
+        if (!keyDownHandled || !keyUpHandled || _invocationCount != 2)
             throw new InvalidOperationException("HUI keyboard activation self-test failed.");
 
         _status.Content = "HUI pointer + keyboard input passed";
@@ -230,7 +232,6 @@ public sealed class HuiPreviewSurface : Control, IHavenMeasureContext
         var action = new HuiButton { Name = "Action", Content = "Test HUI input" };
         action.SetValue(HavenProperties.Width, HavenLength.Px(190));
         action.SetValue(HavenProperties.Height, HavenLength.Px(46));
-        action.ClickActions.Add(HavenAction.Parse("Name.Action -> Selected=True"));
 
         var status = new HuiText { Name = "Status", Content = "Ready for pointer or keyboard input" };
         status.SetValue(HavenProperties.FontSize, 15d);
