@@ -29,5 +29,11 @@ jobs:
       - name: Compile compatibility broker
         run: python -m compileall -q compatibility/wine/haven_compat
 
+      - name: Validate acceptance harness syntax
+        run: bash -n compatibility/wine/acceptance.sh
+
+      - name: Validate acceptance harness help path
+        run: bash compatibility/wine/acceptance.sh --help
+
       - name: Run compatibility tests
         run: python -m unittest discover -s tests -p 'test_haven_compat*.py' -v
