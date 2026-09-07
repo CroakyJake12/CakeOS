@@ -15,9 +15,9 @@ use rnote_engine::engine::EngineSnapshot;
 use rnote_engine::pens::PenMode;
 use rnote_engine::Engine;
 
-/// One normalized Haven/HUI pointer sample.
+/// One normalized CakeOS/HUI pointer sample.
 ///
-/// Tilt remains in the Haven boundary because Rnote 0.14.2 only accepts position
+/// Tilt remains in the CakeOS boundary because Rnote 0.14.2 only accepts position
 /// and pressure in its core `Element` type. Keeping tilt here prevents a lossy
 /// public API if the engine is extended later.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -50,6 +50,7 @@ impl CanvasPointerSample {
 #[derive(Debug)]
 pub struct HeadlessCanvasEngine {
     engine: Engine,
+    stroke_active: bool,
 }
 
 impl Default for HeadlessCanvasEngine {
@@ -63,42 +64,75 @@ impl HeadlessCanvasEngine {
         let mut engine = Engine::default();
         // Initialize the currently configured pen while keeping the `ui` feature off.
         let _ = engine.reinstall_pen_current_style();
-        Self { engine }
+        Self {
+            engine,
+            stroke_active: false,
+        }
     }
 
-    /// Feed one complete pressure-sensitive freehand stroke to Rnote's abstract
-    /// pen-event API. Device arbitration (mouse/touch/stylus/palm rejection)
-    /// intentionally stays above this adapter in HUI.
+    fn send_pen_event(&mut self, event: PenEvent) {
+        let _ = self
+            .engine
+            .handle_pen_event(event, Some(PenMode::Pen), Instant::now());
+    }
+
+    /// Begin a freehand stroke. Device arbitration (mouse/touch/stylus/palm
+    /// rejection) intentionally stays above this adapter in HUI.
+    pub fn begin_stroke(&mut self, sample: CanvasPointerSample) -> Result<()> {
+        if self.stroke_active {
+            anyhow::bail!("a Canvas stroke is already active");
+        }
+
+        self.send_pen_event(PenEvent::Down {
+            element: sample.rnote_element(),
+            modifier_keys: HashSet::new(),
+        });
+        self.stroke_active = true;
+        Ok(())
+    }
+
+    /// Append a pressure-sensitive sample to the active stroke.
+    pub fn update_stroke(&mut self, sample: CanvasPointerSample) -> Result<()> {
+        if !self.stroke_active {
+            anyhow::bail!("cannot update a Canvas stroke before begin_stroke");
+        }
+
+        self.send_pen_event(PenEvent::Down {
+            element: sample.rnote_element(),
+            modifier_keys: HashSet::new(),
+        });
+        Ok(())
+    }
+
+    /// Finalize the active stroke at the supplied release sample.
+    pub fn end_stroke(&mut self, sample: CanvasPointerSample) -> Result<()> {
+        if !self.stroke_active {
+            anyhow::bail!("cannot end a Canvas stroke before begin_stroke");
+        }
+
+        self.send_pen_event(PenEvent::Up {
+            element: sample.rnote_element(),
+            modifier_keys: HashSet::new(),
+        });
+        self.stroke_active = false;
+        Ok(())
+    }
+
+    pub fn stroke_active(&self) -> bool {
+        self.stroke_active
+    }
+
+    /// Convenience helper for tests/importers that already have a complete stroke.
     pub fn draw_stroke(&mut self, samples: &[CanvasPointerSample]) -> Result<()> {
         if samples.len() < 2 {
             anyhow::bail!("a stroke requires at least two pointer samples");
         }
 
-        let modifiers = HashSet::new();
-        let now = Instant::now();
-
-        for sample in samples {
-            let _ = self.engine.handle_pen_event(
-                PenEvent::Down {
-                    element: sample.rnote_element(),
-                    modifier_keys: modifiers.clone(),
-                },
-                Some(PenMode::Pen),
-                now,
-            );
+        self.begin_stroke(samples[0])?;
+        for sample in &samples[1..samples.len() - 1] {
+            self.update_stroke(*sample)?;
         }
-
-        let last = *samples.last().expect("length checked above");
-        let _ = self.engine.handle_pen_event(
-            PenEvent::Up {
-                element: last.rnote_element(),
-                modifier_keys: modifiers,
-            },
-            Some(PenMode::Pen),
-            now,
-        );
-
-        Ok(())
+        self.end_stroke(*samples.last().expect("length checked above"))
     }
 
     /// Produce renderer-neutral SVG bytes using the engine export path.
@@ -133,7 +167,10 @@ impl HeadlessCanvasEngine {
             .context("Rnote snapshot load failed")?;
         let mut engine = Engine::default();
         let _ = engine.load_snapshot(snapshot);
-        Ok(Self { engine })
+        Ok(Self {
+            engine,
+            stroke_active: false,
+        })
     }
 
     /// Expose a debug-only JSON snapshot for mechanical assertions in the PoC.
@@ -170,6 +207,24 @@ mod tests {
     }
 
     #[test]
+    fn incremental_stroke_boundary_enforces_event_lifecycle() {
+        let samples = sample_stroke();
+        let mut canvas = HeadlessCanvasEngine::new();
+
+        assert!(canvas.update_stroke(samples[1]).is_err());
+        assert!(canvas.end_stroke(samples[1]).is_err());
+
+        canvas.begin_stroke(samples[0]).unwrap();
+        assert!(canvas.stroke_active());
+        assert!(canvas.begin_stroke(samples[1]).is_err());
+
+        canvas.update_stroke(samples[1]).unwrap();
+        canvas.update_stroke(samples[2]).unwrap();
+        canvas.end_stroke(samples[3]).unwrap();
+        assert!(!canvas.stroke_active());
+    }
+
+    #[test]
     fn headless_engine_draws_exports_saves_and_reloads() {
         block_on(async {
             let mut canvas = HeadlessCanvasEngine::new();
@@ -184,6 +239,7 @@ mod tests {
             assert!(native.len() > 100, ".rnote payload unexpectedly empty");
 
             let restored = HeadlessCanvasEngine::from_rnote(native).await.unwrap();
+            assert!(!restored.stroke_active());
             let svg_after = restored.export_svg().await.unwrap();
             assert!(svg_after.len() > 200, "reloaded SVG unexpectedly empty");
 
