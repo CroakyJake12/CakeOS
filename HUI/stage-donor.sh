@@ -13,9 +13,9 @@ repo="$(jq -r '.components.HUI.migrationDonor.repository' "$lock")"
 rev="$(jq -r '.components.HUI.migrationDonor.revision' "$lock")"
 path="$(jq -r '.components.HUI.migrationDonor.sourcePath' "$lock")"
 
-[[ -n "$repo" && "$repo" != null ]] || { echo "Missing HUI donor repository" >&2; exit 2; }
+[[ "$repo" =~ ^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$ ]] || { echo "Invalid HUI donor repository" >&2; exit 2; }
 [[ "$rev" =~ ^[0-9a-f]{40}$ ]] || { echo "HUI donor revision must be a full commit SHA" >&2; exit 2; }
-[[ -n "$path" && "$path" != null ]] || { echo "Missing HUI donor source path" >&2; exit 2; }
+[[ -n "$path" && "$path" != null && "$path" != /* && "$path" != *..* ]] || { echo "Invalid HUI donor source path" >&2; exit 2; }
 
 tmp="$(mktemp -d)"
 trap 'rm -rf "$tmp"' EXIT
