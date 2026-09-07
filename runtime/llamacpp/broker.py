@@ -229,6 +229,7 @@ def build_worker_args(manifest: ModelManifest, model_path: pathlib.Path) -> list
         "--no-ui",
         "--no-slots",
         "--log-disable",
+        "--offline",
         "--parallel", "1",
         "--ctx-size", str(CONTEXT_LIMIT),
         "--cache-ram", "0",

@@ -123,9 +123,10 @@ class RequestAndWorkerTests(unittest.TestCase):
         with self.assertRaises(broker.BrokerError):
             broker.validate_request_id("ok\r\nInjected: yes")
 
-    def test_worker_args_disable_logs_ui_slots_and_bound_context(self) -> None:
+    def test_worker_args_disable_network_logs_ui_slots_and_bound_context(self) -> None:
         manifest = broker.ModelManifest("model-1", "Model", "0" * 64, 8, broker.canonical_blob_relative("0" * 64), "MIT", "local", (3,))
         args = broker.build_worker_args(manifest, pathlib.Path("/models/model.gguf"))
+        self.assertIn("--offline", args)
         self.assertIn("--log-disable", args)
         self.assertIn("--no-ui", args)
         self.assertIn("--no-slots", args)
