@@ -95,21 +95,47 @@ await using (var querySession = new DataQuerySession(querySpreadsheet, queryData
     Assert(querySnapshot.RecentQueries[^1].Sql == "SELECT 2 AS value", "Query history did not discard the oldest entries.");
     Assert(queryDatabase.QueryCalls == 22, "Query session did not delegate every query exactly once.");
 
+    var materialized = await querySession.MaterializeAsync(
+        queryWorkbook.Id,
+        querySnapshot.RecentQueries[0],
+        "Query Result");
+    Assert(materialized.Sheet == "Query Result", "Query materialisation changed the requested sheet name.");
+    Assert(materialized.DataRowCount == 1 && materialized.Range.RowCount == 2 && materialized.Range.ColumnCount == 1,
+        "Query materialisation exposed the wrong dimensions.");
+    var materializedValues = await querySpreadsheet.ReadRangeAsync(queryWorkbook.Id, materialized.Range);
+    Assert(materializedValues.Values[0][0] == "sql", "Query materialisation omitted the result header.");
+    Assert(materializedValues.Values[1][0] == "SELECT 21 AS value", "Query materialisation changed the result value.");
+    Assert(querySpreadsheet.MaterializedSheetCalls == 1, "Query materialisation did not use the typed spreadsheet operation exactly once.");
+
+    var truncated = await querySession.ExecuteAsync("TRUNCATED PREVIEW", maxRows: 25);
+    var refusedTruncated = false;
+    try
+    {
+        _ = await querySession.MaterializeAsync(queryWorkbook.Id, truncated, "Incomplete");
+    }
+    catch (InvalidOperationException)
+    {
+        refusedTruncated = true;
+    }
+    Assert(refusedTruncated, "Query session allowed a truncated preview to be materialized silently.");
+
     await querySession.CloseAsync();
     Assert(!querySession.IsOpen, "Query session remained open after a successful close.");
     Assert(queryDatabase.CloseCalls == 1, "Query session did not close the database exactly once.");
 }
 await querySpreadsheet.CloseAsync(queryWorkbook.Id);
 
-Console.WriteLine("Haven Data contract, grid-session, database-bridge and query-session smoke checks passed.");
+Console.WriteLine("Haven Data contract, grid-session, database-bridge, query-session and materialisation smoke checks passed.");
 
 internal sealed class FakeSpreadsheetEngine : IDataSpreadsheetEngine
 {
     private readonly Dictionary<(string Sheet, int Row, int Column), string> _values = new();
+    private readonly List<string> _sheets = ["Sheet 1", "Summary"];
     private DataWorkbookHandle? _open;
 
     public int RecalculateCalls { get; private set; }
     public int CloseCalls { get; private set; }
+    public int MaterializedSheetCalls { get; private set; }
     public string? LastSavePath { get; private set; }
 
     public Task<DataWorkbookHandle> OpenAsync(string path, bool readOnly, CancellationToken cancellationToken = default)
@@ -123,7 +149,7 @@ internal sealed class FakeSpreadsheetEngine : IDataSpreadsheetEngine
     {
         cancellationToken.ThrowIfCancellationRequested();
         EnsureOpen(workbookId);
-        IReadOnlyList<DataSheetSummary> sheets = [new("Sheet 1", 0), new("Summary", 1)];
+        IReadOnlyList<DataSheetSummary> sheets = _sheets.Select((name, index) => new DataSheetSummary(name, index)).ToArray();
         return Task.FromResult(sheets);
     }
 
@@ -149,6 +175,27 @@ internal sealed class FakeSpreadsheetEngine : IDataSpreadsheetEngine
         var stored = string.IsNullOrWhiteSpace(formula) ? value ?? string.Empty : formula == "=A1*2" ? "10" : value ?? string.Empty;
         _values[(address.Sheet, address.Row, address.Column)] = stored;
         return Task.FromResult(new DataCellSnapshot(address, stored, formula ?? string.Empty));
+    }
+
+    public Task<DataRangeSnapshot> CreateSheetWithValuesAsync(
+        string workbookId,
+        string sheetName,
+        IReadOnlyList<IReadOnlyList<string>> values,
+        CancellationToken cancellationToken = default)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        EnsureOpen(workbookId);
+        if (_sheets.Any(existing => string.Equals(existing, sheetName, StringComparison.OrdinalIgnoreCase)))
+            throw new InvalidOperationException("Fake workbook already contains that sheet.");
+        if (values.Count == 0 || values[0].Count == 0 || values.Any(row => row.Count != values[0].Count))
+            throw new InvalidOperationException("Fake materialized values are not rectangular.");
+
+        _sheets.Add(sheetName);
+        MaterializedSheetCalls++;
+        for (var row = 0; row < values.Count; row++)
+            for (var column = 0; column < values[row].Count; column++)
+                _values[(sheetName, row, column)] = values[row][column];
+        return Task.FromResult(new DataRangeSnapshot(sheetName, 0, 0, values.Select(row => (IReadOnlyList<string>)row.ToArray()).ToArray()));
     }
 
     public Task RecalculateAsync(string workbookId, CancellationToken cancellationToken = default)
@@ -218,6 +265,8 @@ internal sealed class FakeDatabaseEngine : IDataDatabaseEngine
         cancellationToken.ThrowIfCancellationRequested();
         EnsureOpen();
         QueryCalls++;
+        if (string.Equals(sql, "TRUNCATED PREVIEW", StringComparison.Ordinal))
+            return Task.FromResult(new DataQueryResult(["value"], [["partial"]], true));
         return Task.FromResult(new DataQueryResult(["sql"], [[sql.Trim()]], false));
     }
 
