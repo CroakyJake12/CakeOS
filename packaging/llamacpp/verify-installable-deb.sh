@@ -39,6 +39,11 @@ for name in preinst postinst prerm postrm config triggers; do
 done
 
 CONTENTS=$(dpkg-deb --contents "$DEB")
+ROOT_MODE=$(printf '%s\n' "$CONTENTS" | awk '$NF == "./" { print $1; exit }')
+if [ "$ROOT_MODE" != 'drwxr-xr-x' ]; then
+  echo "Package root directory must be mode 0755; got ${ROOT_MODE:-missing}" >&2
+  exit 72
+fi
 if printf '%s\n' "$CONTENTS" | grep -E '/models/|\.gguf($| )' >/dev/null; then
   echo 'Package contains forbidden model data.' >&2
   exit 70
