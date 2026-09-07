@@ -141,6 +141,18 @@ class AppRegistry:
 
 
 def _fsync_directory(path: Path) -> None:
+    """Durably commit a directory entry where the host supports directory fsync.
+
+    Linux/Unix filesystems can fsync an opened directory after os.replace/unlink
+    so the rename itself is crash-durable. Windows does not permit opening a
+    directory through os.open this way; the record file itself has already been
+    flushed before the atomic os.replace, so skip this POSIX-only strengthening
+    there rather than turning successful registry writes into failures.
+    """
+
+    if os.name == "nt":
+        return
+
     flags = os.O_RDONLY
     if hasattr(os, "O_DIRECTORY"):
         flags |= os.O_DIRECTORY
