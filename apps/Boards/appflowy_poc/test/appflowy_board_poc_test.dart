@@ -49,7 +49,10 @@ void main() {
 
     try {
       await tester.pumpWidget(const HavenBoardsPocApp());
-      await tester.pumpAndSettle();
+      // AppFlowy Board may keep scroll/animation machinery active, so use bounded
+      // pumps rather than pumpAndSettle (which can wait indefinitely for quiescence).
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 150));
 
       expect(find.byTooltip('Move card up'), findsWidgets);
       expect(find.byTooltip('Move card down'), findsWidgets);
@@ -67,7 +70,7 @@ void main() {
       );
     } finally {
       await tester.pumpWidget(const SizedBox.shrink());
-      await tester.pumpAndSettle();
+      await tester.pump();
       Directory.current = originalDirectory.path;
       if (await tempDirectory.exists()) {
         await tempDirectory.delete(recursive: true);
