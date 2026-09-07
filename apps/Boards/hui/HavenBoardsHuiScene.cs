@@ -213,7 +213,7 @@ public sealed class HavenBoardsHuiScene : IDisposable
     {
         var button = new HavenButton { Content = content, Variant = ButtonVariant.Tertiary };
         button.Accessibility.AccessibleName = accessibleName;
-        button.SetValue(HavenProperties.Enabled, enabled);
+        SetEnabled(button, enabled);
         button.SetValue(HavenProperties.MinHeight, HavenLength.Px(30));
         if (command is not null)
         {
@@ -222,6 +222,13 @@ public sealed class HavenBoardsHuiScene : IDisposable
         }
         _wiredButtons.Add(button);
         return button;
+    }
+
+    private static void SetEnabled(HavenElement element, bool enabled)
+    {
+        element.SetValue(HavenProperties.Enabled, enabled);
+        element.Accessibility.Enabled = enabled;
+        element.SetState(HavenElementState.Disabled, !enabled);
     }
 
     private void UnwireButtons()
