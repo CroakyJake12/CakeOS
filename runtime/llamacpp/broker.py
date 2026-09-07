@@ -413,8 +413,10 @@ class Handler(http.server.BaseHTTPRequestHandler):
     server_version = "HavenInference/0"
 
     def log_message(self, fmt: str, *args: Any) -> None:
-        # Deliberately never log request bodies/prompts.
-        print(f"haven-inference: {self.address_string()} {fmt % args}")
+        # AF_UNIX peers do not have the TCP-style (host, port) tuple expected by
+        # BaseHTTPRequestHandler.address_string(). Keep transport logging local
+        # and prompt-free instead of trying to resolve a peer address.
+        print(f"haven-inference: local-uds {fmt % args}")
 
     def _send_json(self, status: int, value: Any) -> None:
         body = json.dumps(value, separators=(",", ":")).encode("utf-8")
