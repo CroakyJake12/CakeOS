@@ -23,10 +23,8 @@ check_cxx_source_compiles([[
 #include <LibreOfficeKit/LibreOfficeKit.hxx>
 int main()
 {
-    auto extractMethod = &lok::Office::extractDocumentStructureRequest;
-    auto freeMethod = &lok::Office::freeMemory;
-    (void)extractMethod;
-    (void)freeMethod;
+    auto method = &lok::Office::extractDocumentStructureRequest;
+    (void)method;
     return 0;
 }
 ]] CAKEOS_PRESENT_HAS_STRUCTURE_REQUEST)
