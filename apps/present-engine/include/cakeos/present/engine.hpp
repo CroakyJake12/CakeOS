@@ -101,6 +101,16 @@ public:
         std::string_view documentPathOrUrl,
         int slideIndex) const;
 
+    // Whole-object plain-text replacement. The saved snapshot is used to
+    // verify that objectIndex still identifies exactly one text value before
+    // the live document is mutated. Rich/multi-part text is deliberately not
+    // flattened by this first semantic write operation.
+    void replaceElementText(
+        std::string_view snapshotPathOrUrl,
+        int slideIndex,
+        int objectIndex,
+        std::string_view text);
+
     // CakeOS-owned semantic slide operations. These deliberately avoid
     // exposing LibreOffice command names or selection mechanics to HUI/GenUI.
     void addSlideAfter(int slideIndex);
@@ -123,7 +133,13 @@ public:
 
 private:
     void applySlideMove(int fromIndex, int toIndex);
+    void applyElementText(int slideIndex, int objectIndex, std::string_view text);
     void recordNativeMutation();
+    void recordTextMutation(
+        int slideIndex,
+        int objectIndex,
+        std::string beforeText,
+        std::string afterText);
 
     struct Impl;
     std::unique_ptr<Impl> impl_;
