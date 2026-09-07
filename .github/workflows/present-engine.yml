@@ -114,6 +114,16 @@ jobs:
           print(f'unique_rgb_values={len(pixels)}')
           PY
 
+      - name: Prove semantic slide lifecycle and persistence
+        run: |
+          rm -f /tmp/cakeos-present-mutated.odp
+          build/present-engine/cakeos-present-engine-lifecycle-smoke \
+            /tmp/cakeos-present-normalized/cakeos-present-source.odp \
+            /tmp/cakeos-present-mutated.odp | tee /tmp/present-lifecycle.log
+          test -s /tmp/cakeos-present-mutated.odp
+          grep -q '^semantic_lifecycle=passed$' /tmp/present-lifecycle.log
+          grep -q '^saved_slides=2$' /tmp/present-lifecycle.log
+
       - name: Record runtime versions
         if: always()
         run: |
