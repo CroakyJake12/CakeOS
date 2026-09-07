@@ -27,7 +27,19 @@ public interface IDataSpreadsheetEngine : IAsyncDisposable
     Task<DataListValidationState> GetListValidationAsync(string workbookId, DataRangeRequest range, CancellationToken cancellationToken = default);
     Task<DataListValidationState> ApplyListValidationAsync(string workbookId, DataRangeRequest range, IReadOnlyList<string> values, bool allowBlank = true, CancellationToken cancellationToken = default);
     Task<DataListValidationState> ClearValidationAsync(string workbookId, DataRangeRequest range, CancellationToken cancellationToken = default);
-    Task<DataSortResult> SortRangeAsync(string workbookId, DataRangeRequest range, int keyColumnOffset, bool ascending = true, bool containsHeader = true, CancellationToken cancellationToken = default);
+
+    // Sort is a first-slice optional capability so alternate/test spreadsheet engines
+    // do not gain a fake implementation merely to satisfy the base contract. Engines
+    // that support it (currently CalcSpreadsheetEngine) override this member.
+    Task<DataSortResult> SortRangeAsync(
+        string workbookId,
+        DataRangeRequest range,
+        int keyColumnOffset,
+        bool ascending = true,
+        bool containsHeader = true,
+        CancellationToken cancellationToken = default) =>
+        Task.FromException<DataSortResult>(new NotSupportedException("This spreadsheet engine does not support range sorting."));
+
     Task InsertRowsAsync(string workbookId, string sheet, int index, int count, CancellationToken cancellationToken = default);
     Task DeleteRowsAsync(string workbookId, string sheet, int index, int count, CancellationToken cancellationToken = default);
     Task InsertColumnsAsync(string workbookId, string sheet, int index, int count, CancellationToken cancellationToken = default);
