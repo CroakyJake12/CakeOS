@@ -6,13 +6,14 @@ using Avalonia.Media;
 using Haven.UI;
 using Haven.UI.Components;
 using HuiButton = Haven.UI.Components.Button;
+using HuiPage = Haven.UI.Components.Page;
 using HuiText = Haven.UI.Components.Text;
 
 namespace CakeOS.HuiLinuxHost;
 
 public sealed class HuiPreviewSurface : Control, IHavenMeasureContext
 {
-    private readonly Page _root;
+    private readonly HuiPage _root;
     private readonly HuiButton _action;
     private readonly HuiText _status;
     private readonly HavenLayoutEngine _layout = new();
@@ -162,9 +163,9 @@ public sealed class HuiPreviewSurface : Control, IHavenMeasureContext
         };
     }
 
-    private static (Page Root, HuiButton Action, HuiText Status) BuildScene()
+    private static (HuiPage Root, HuiButton Action, HuiText Status) BuildScene()
     {
-        var root = new Page { Name = "PreviewRoot", Layout = HavenLayout.Vertical };
+        var root = new HuiPage { Name = "PreviewRoot", Layout = HavenLayout.Vertical };
         root.SetValue(HavenProperties.Width, HavenLength.Percent(100));
         root.SetValue(HavenProperties.Height, HavenLength.Percent(100));
         root.SetValue(HavenProperties.Padding, HavenThickness.Parse("42px"));
@@ -206,11 +207,14 @@ public sealed class HuiPreviewSurface : Control, IHavenMeasureContext
         return new HavenSize(width, Math.Min(available.Height, fontSize * 1.45d));
     }
 
-    private static FormattedText Text(HavenTextLayout layout, IBrush brush) =>
-        new(layout.Text, CultureInfo.CurrentCulture, FlowDirection.LeftToRight,
+    private static FormattedText Text(HavenTextLayout layout, IBrush brush)
+    {
+        var maxWidth = double.IsFinite(layout.MaxWidth) ? Math.Max(1d, layout.MaxWidth) : 10000d;
+        return new FormattedText(layout.Text, CultureInfo.CurrentCulture, FlowDirection.LeftToRight,
             new Typeface(FontFamily.Default, layout.Italic ? FontStyle.Italic : FontStyle.Normal, new FontWeight(layout.FontWeight), FontStretch.Normal),
             layout.FontSize <= 0 ? 14d : layout.FontSize, brush)
-        { MaxTextWidth = Math.Max(1d, layout.MaxWidth) };
+        { MaxTextWidth = maxWidth };
+    }
 
     private static IBrush Brush(HavenBrush brush, double opacity)
     {
