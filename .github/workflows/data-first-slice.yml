@@ -62,3 +62,10 @@ jobs:
         run: |
           .data-venv/bin/python apps/Data/Tests/test_workers.py
           .data-venv/bin/python apps/Data/Tests/test_duckdb_publish.py
+
+      - name: Run .NET-to-worker integration checks
+        env:
+          HAVEN_DATA_PYTHON: ${{ github.workspace }}/.data-venv/bin/python
+          HAVEN_DATA_DUCKDB_MEMORY_LIMIT: 512MB
+          HAVEN_DATA_DUCKDB_THREADS: '2'
+        run: dotnet run --project apps/Data/Tests/HavenOS.Data.Runtime.csproj -c Release
