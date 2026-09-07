@@ -91,8 +91,6 @@ public:
     void postUnoCommand(std::string_view command, std::string_view jsonArguments = {}, bool notifyWhenFinished = false);
 
     void saveAs(std::string_view destinationPathOrUrl, std::string_view format = {}, std::string_view filterOptions = {});
-
-    [[nodiscard]] std::string presentationInfo() const;
     void setEventCallback(EventCallback callback);
 
     [[nodiscard]] static std::string pathToFileUrl(std::string_view pathOrUrl);
