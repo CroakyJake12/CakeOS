@@ -7,7 +7,7 @@ namespace CakeOS.Apps.Boards.Hui;
 ///
 /// It owns no network behavior: opening, mutation, and reopen all flow through the supplied
 /// <see cref="IHavenBoardStore"/>. HUI commands are serialized, persisted before becoming the
-/// current snapshot, and then projected back into the scene.
+/// current snapshot, and then projected into both the structured and freeform HUI scenes.
 /// </summary>
 public sealed class HavenBoardsHuiSession : IAsyncDisposable
 {
@@ -27,13 +27,22 @@ public sealed class HavenBoardsHuiSession : IAsyncDisposable
         _store = store;
         _boardId = boardId;
         Snapshot = snapshot;
+
         Scene = new HavenBoardsHuiScene();
+        FreeformScene = new HavenBoardsFreeformHuiScene();
         Scene.SetSnapshot(snapshot);
-        Scene.SetStatus(created ? "Created locally" : "Loaded locally");
+        FreeformScene.SetSnapshot(snapshot);
+
+        var status = created ? "Created locally" : "Loaded locally";
+        Scene.SetStatus(status);
+        FreeformScene.SetStatus(status);
+
         Scene.CommandRequested += OnSceneCommandRequested;
+        FreeformScene.CommandRequested += OnSceneCommandRequested;
     }
 
     public HavenBoardsHuiScene Scene { get; }
+    public HavenBoardsFreeformHuiScene FreeformScene { get; }
     public HavenBoardSnapshot Snapshot { get; private set; }
 
     public static async Task<HavenBoardsHuiSession> OpenAsync(
@@ -56,7 +65,7 @@ public sealed class HavenBoardsHuiSession : IAsyncDisposable
         else
         {
             // Persisted snapshots are untrusted input at the application boundary. Reject malformed
-            // parent references, duplicate card IDs, and cycles before any of them reach HUI.
+            // hierarchy and freeform geometry before any of it reaches HUI.
             HavenBoardReducer.Validate(snapshot);
         }
 
@@ -77,16 +86,19 @@ public sealed class HavenBoardsHuiSession : IAsyncDisposable
             if (!string.Equals(updated.Id, _boardId, StringComparison.Ordinal))
                 throw new InvalidOperationException("The reducer changed the open board identity.");
 
-            // Persist first. If this fails, the in-memory/visible snapshot remains the last durable one.
+            // Persist first. If this fails, neither visible projection advances past the last durable state.
             await _store.SaveAsync(updated, cancellationToken).ConfigureAwait(false);
             Snapshot = updated;
             Scene.SetSnapshot(updated);
+            FreeformScene.SetSnapshot(updated);
             Scene.SetStatus("Saved locally");
+            FreeformScene.SetStatus("Saved locally");
             return updated;
         }
         catch
         {
             Scene.SetStatus("Local save failed");
+            FreeformScene.SetStatus("Local save failed");
             throw;
         }
         finally
@@ -148,7 +160,9 @@ public sealed class HavenBoardsHuiSession : IAsyncDisposable
         {
             _disposed = true;
             Scene.CommandRequested -= OnSceneCommandRequested;
+            FreeformScene.CommandRequested -= OnSceneCommandRequested;
             Scene.Dispose();
+            FreeformScene.Dispose();
             _mutationGate.Dispose();
         }
     }
