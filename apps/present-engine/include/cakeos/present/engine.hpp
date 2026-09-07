@@ -85,10 +85,11 @@ public:
     [[nodiscard]] SlideExtent slideExtent(int slideIndex) const;
 
     // CakeOS-owned semantic slide operations. These deliberately avoid
-    // exposing LibreOffice command names to HUI/GenUI callers.
+    // exposing LibreOffice command names or selection mechanics to HUI/GenUI.
     void addSlideAfter(int slideIndex);
     void duplicateSlide(int slideIndex);
     void deleteSlide(int slideIndex);
+    void moveSlide(int fromIndex, int toIndex);
     void undo();
     void redo();
 
