@@ -1,0 +1,59 @@
+name: Present engine
+
+on:
+  pull_request:
+    paths:
+      - "apps/present-engine/**"
+      - ".github/workflows/present-engine.yml"
+  push:
+    branches:
+      - "migration/present-libreoffice-foundation"
+    paths:
+      - "apps/present-engine/**"
+      - ".github/workflows/present-engine.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  build-test-smoke:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+
+    steps:
+      - name: Check out CakeOS
+        uses: actions/checkout@v4
+
+      - name: Install no-GUI LibreOfficeKit dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install --no-install-recommends -y \
+            libreofficekit-dev \
+            libreoffice-impress-nogui
+
+      - name: Configure
+        run: cmake -S apps/present-engine -B build/present-engine -DCMAKE_BUILD_TYPE=Release
+
+      - name: Build with warnings as errors
+        run: cmake --build build/present-engine --parallel 2
+
+      - name: Run contract tests
+        run: ctest --test-dir build/present-engine --output-on-failure
+
+      - name: Create deterministic ODP fixture
+        run: python3 apps/present-engine/tests/make_smoke_fixture.py /tmp/cakeos-present-smoke.odp
+
+      - name: Prove LibreOfficeKit Impress rendering
+        run: |
+          build/present-engine/cakeos-present-engine-smoke \
+            /tmp/cakeos-present-smoke.odp \
+            /tmp/cakeos-present-smoke.ppm | tee /tmp/present-smoke.log
+          test -s /tmp/cakeos-present-smoke.ppm
+          grep -q '^slides=1$' /tmp/present-smoke.log
+          grep -q '^pixels=1280x720$' /tmp/present-smoke.log
+
+      - name: Record runtime versions
+        if: always()
+        run: |
+          dpkg-query -W -f='${Package} ${Version}\n' libreofficekit-dev libreoffice-impress-nogui libreoffice-core-nogui || true
+          /usr/lib/libreoffice/program/soffice --version || true
