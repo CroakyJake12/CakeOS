@@ -145,6 +145,28 @@ public sealed class CalcSpreadsheetEngine : IDataSpreadsheetEngine
             cancellationToken);
     }
 
+    public async Task<DataSortResult> SortRangeAsync(
+        string workbookId,
+        DataRangeRequest range,
+        int keyColumnOffset,
+        bool ascending = true,
+        bool containsHeader = true,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(workbookId);
+        ValidateBoundedRange(range, "Sort range");
+        if (keyColumnOffset < 0 || keyColumnOffset >= range.ColumnCount)
+            throw new ArgumentOutOfRangeException(nameof(keyColumnOffset), "Sort key must identify a column inside the requested range.");
+        if (containsHeader && range.RowCount < 2)
+            throw new ArgumentException("A sort range marked as containing a header must include at least one data row.", nameof(range));
+
+        var snapshot = await _worker.CallAsync<DataRangeSnapshot>(
+            "sortRange",
+            new { workbookId, range, keyColumnOffset, ascending, containsHeader },
+            cancellationToken).ConfigureAwait(false);
+        return new DataSortResult(range, keyColumnOffset, ascending, containsHeader, snapshot);
+    }
+
     public Task InsertRowsAsync(string workbookId, string sheet, int index, int count, CancellationToken cancellationToken = default) =>
         MutateStructureAsync("insertRows", workbookId, sheet, index, count, cancellationToken);
 
