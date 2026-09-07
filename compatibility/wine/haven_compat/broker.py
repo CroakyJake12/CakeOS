@@ -41,6 +41,10 @@ class CompatibilityBroker:
             raise CompatibilityError("WinBoat provider is not enabled in compatibility slice 1")
         if manifest.backend != "wine":
             raise CompatibilityError(f"unsupported backend: {manifest.backend}")
+        if manifest.clipboard:
+            raise CompatibilityError("clipboard permission is not implemented in compatibility slice 1")
+        if manifest.audio_output or manifest.microphone:
+            raise CompatibilityError("PipeWire media permissions are not implemented in compatibility slice 1")
 
         bwrap = shutil.which("bwrap")
         if not bwrap:
@@ -50,6 +54,8 @@ class CompatibilityBroker:
         wine_bin = runtime_dir / "bin" / "wine"
         if not wine_bin.is_file():
             raise CompatibilityError(f"Wine runtime is unavailable: {wine_bin}")
+
+        xdg_runtime_dir, wayland_display, wayland_socket = _wayland_socket()
 
         app_root = (self.state_root / manifest.app_id).resolve()
         prefix = app_root / "prefix"
@@ -65,10 +71,18 @@ class CompatibilityBroker:
             "--proc", "/proc",
             "--dev", "/dev",
             "--tmpfs", "/tmp",
+            "--dir", xdg_runtime_dir,
             "--ro-bind", str(runtime_dir), "/opt/haven-wine",
             "--bind", str(prefix), "/var/lib/haven-wine/prefix",
             "--bind", str(data), "/var/lib/haven-wine/data",
+            "--ro-bind", wayland_socket, wayland_socket,
         ]
+
+        # Runtime binaries can require host dynamic loader/system libraries.
+        # These paths are exposed read-only and contain no user data.
+        for host_path in ("/usr", "/lib", "/lib64"):
+            if Path(host_path).exists():
+                argv.extend(["--ro-bind", host_path, host_path])
 
         # Network is opt-in. bubblewrap's --unshare-all includes a private
         # network namespace; only an explicit grant re-shares host networking.
@@ -83,16 +97,11 @@ class CompatibilityBroker:
             for render_node in _existing_render_nodes():
                 argv.extend(["--dev-bind", render_node, render_node])
 
-        # Audio output gets the PipeWire runtime directory only when granted.
-        runtime_dir_env = os.environ.get("XDG_RUNTIME_DIR")
-        if manifest.audio_output and runtime_dir_env:
-            pipewire = Path(runtime_dir_env) / "pipewire-0"
-            if pipewire.exists():
-                argv.extend(["--ro-bind", str(pipewire), str(pipewire)])
-
         argv.extend([
             "--setenv", "WINEPREFIX", "/var/lib/haven-wine/prefix",
             "--setenv", "HOME", "/var/lib/haven-wine/data",
+            "--setenv", "XDG_RUNTIME_DIR", xdg_runtime_dir,
+            "--setenv", "WAYLAND_DISPLAY", wayland_display,
             "/opt/haven-wine/bin/wine",
             manifest.entrypoint,
         ])
@@ -101,9 +110,6 @@ class CompatibilityBroker:
             "PATH": "/usr/bin:/bin",
             "LANG": os.environ.get("LANG", "C.UTF-8"),
         }
-        for key in ("WAYLAND_DISPLAY", "DISPLAY", "XDG_RUNTIME_DIR"):
-            if key in os.environ:
-                env[key] = os.environ[key]
 
         return LaunchPlan(
             backend="wine",
@@ -130,6 +136,17 @@ def load_manifest(path: Path) -> AppManifest:
     if not isinstance(value, dict):
         raise CompatibilityError("manifest root must be an object")
     return AppManifest.from_dict(value)
+
+
+def _wayland_socket() -> tuple[str, str, str]:
+    runtime_dir = os.environ.get("XDG_RUNTIME_DIR")
+    display = os.environ.get("WAYLAND_DISPLAY")
+    if not runtime_dir or not display:
+        raise CompatibilityError("Wayland session is required in compatibility slice 1")
+    socket = Path(runtime_dir) / display
+    if not socket.exists():
+        raise CompatibilityError(f"Wayland socket is unavailable: {socket}")
+    return runtime_dir, display, str(socket)
 
 
 def _existing_render_nodes() -> Iterable[str]:
