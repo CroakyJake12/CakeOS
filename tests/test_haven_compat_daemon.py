@@ -20,6 +20,8 @@ from compatibility.wine.haven_compat.lifecycle import UnitStatus, unit_name
 
 
 _HEADER = struct.Struct("!I")
+_LINUX_UID_SECURITY = hasattr(os, "geteuid")
+_LINUX_PEERCRED = _LINUX_UID_SECURITY and hasattr(socket, "SO_PEERCRED") and hasattr(socket, "AF_UNIX")
 
 
 class FakeBroker:
@@ -98,6 +100,7 @@ class DaemonDispatchTests(unittest.TestCase):
         self.assertEqual("method_not_found", context.exception.code)
 
 
+@unittest.skipUnless(_LINUX_PEERCRED, "Linux SO_PEERCRED is required for daemon socket security tests")
 class DaemonSocketTests(unittest.TestCase):
     def _round_trip(self, raw_payload: bytes, broker=None):
         client, server = socket.socketpair(socket.AF_UNIX, socket.SOCK_STREAM)
@@ -137,6 +140,7 @@ class DaemonSocketTests(unittest.TestCase):
         return output
 
 
+@unittest.skipUnless(_LINUX_UID_SECURITY, "POSIX effective-UID semantics are required for daemon path security tests")
 class DaemonPathTests(unittest.TestCase):
     def test_socket_parent_must_stay_under_xdg_runtime_dir(self):
         with tempfile.TemporaryDirectory() as temporary:
