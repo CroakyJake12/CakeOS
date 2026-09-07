@@ -32,12 +32,19 @@ void PresentEngine::selectElement(
         throw std::runtime_error(
             "this LibreOfficeKit runtime does not support semantic element snapshots");
     }
+    if (snapshotPathOrUrl.empty()) {
+        throw std::invalid_argument("snapshot path must not be empty");
+    }
     if (objectIndex < 0) {
         throw std::out_of_range("object index must not be negative");
     }
 
-    const auto elements = elementSnapshot(snapshotPathOrUrl, slideIndex);
-    (void)requireSnapshotElement(elements, objectIndex);
+    // The worker already requires a fresh snapshot-scoped reference before
+    // calling this method. Do not call extractDocumentStructureRequest here:
+    // that office-level extraction loads the saved file again and can replace
+    // the active component immediately before MarkObject, suppressing the
+    // live view's GRAPHIC_SELECTION callback. Mark the active Impress view
+    // directly; HUI correlation remains snapshot-scoped in the worker.
     setCurrentSlide(slideIndex);
     postUnoCommand(
         ".uno:TransformDocumentStructure",
