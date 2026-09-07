@@ -43,13 +43,26 @@ class AppRegistry:
                 handle.write("\n")
                 handle.flush()
                 os.fsync(handle.fileno())
+            fd = -1
             os.replace(temporary, target)
             _fsync_directory(self.root)
-        except Exception:
+        except OSError as exc:
+            if fd >= 0:
+                try:
+                    os.close(fd)
+                except OSError:
+                    pass
             try:
-                os.close(fd)
-            except OSError:
+                temporary.unlink()
+            except FileNotFoundError:
                 pass
+            raise RegistryError(f"cannot persist compatibility registry record: {manifest.app_id}") from exc
+        except Exception:
+            if fd >= 0:
+                try:
+                    os.close(fd)
+                except OSError:
+                    pass
             try:
                 temporary.unlink()
             except FileNotFoundError:
@@ -78,16 +91,19 @@ class AppRegistry:
             return
         if path.is_dir():
             raise RegistryError(f"registry record is not a file: {path}")
-        path.unlink()
-        _fsync_directory(self.root)
+        try:
+            path.unlink()
+            _fsync_directory(self.root)
+        except OSError as exc:
+            raise RegistryError(f"cannot remove compatibility registry record: {app_id}") from exc
 
     def _record_path(self, app_id: str) -> Path:
         digest = hashlib.sha256(app_id.encode("utf-8")).hexdigest()
         return self.root / f"{digest}.json"
 
     def _ensure_root(self) -> None:
-        self.root.mkdir(parents=True, exist_ok=True, mode=0o700)
         try:
+            self.root.mkdir(parents=True, exist_ok=True, mode=0o700)
             os.chmod(self.root, 0o700)
         except OSError as exc:
             raise RegistryError(f"cannot secure registry directory: {self.root}") from exc
