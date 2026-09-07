@@ -108,10 +108,13 @@ public sealed class DataQuerySession : IAsyncDisposable
         if (_databasePath is null)
             return;
 
+        // Keep the logical session open until the engine confirms close. If worker
+        // shutdown fails, callers can still inspect state and retry rather than being
+        // left with a closed facade over a potentially live database process.
+        await _database.CloseAsync(cancellationToken).ConfigureAwait(false);
         _databasePath = null;
         _publishedTables.Clear();
         _recentQueries.Clear();
-        await _database.CloseAsync(cancellationToken).ConfigureAwait(false);
     }
 
     public async ValueTask DisposeAsync()
@@ -121,11 +124,14 @@ public sealed class DataQuerySession : IAsyncDisposable
         _disposed = true;
         if (_databasePath is not null)
         {
-            _databasePath = null;
-            _publishedTables.Clear();
-            _recentQueries.Clear();
             try { await _database.CloseAsync(CancellationToken.None).ConfigureAwait(false); }
             catch { }
+            finally
+            {
+                _databasePath = null;
+                _publishedTables.Clear();
+                _recentQueries.Clear();
+            }
         }
     }
 
