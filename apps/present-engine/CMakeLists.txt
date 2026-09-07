@@ -65,6 +65,12 @@ add_executable(cakeos-present-engine-lifecycle-smoke
 target_link_libraries(cakeos-present-engine-lifecycle-smoke PRIVATE cakeos-present-engine)
 cakeos_enable_strict_warnings(cakeos-present-engine-lifecycle-smoke)
 
+add_executable(cakeos-present-engine-reorder-smoke
+    tests/reorder_smoke.cpp
+)
+target_link_libraries(cakeos-present-engine-reorder-smoke PRIVATE cakeos-present-engine)
+cakeos_enable_strict_warnings(cakeos-present-engine-reorder-smoke)
+
 enable_testing()
 add_executable(cakeos-present-engine-contract-tests
     tests/contract_tests.cpp
