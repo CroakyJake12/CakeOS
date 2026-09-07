@@ -1,6 +1,6 @@
-# Haven llama.cpp runtime — Slice 0
+# Haven llama.cpp runtime — staged implementation
 
-This directory implements the first production boundary for local GGUF inference. It does **not** bundle a model, download a model, install packages, modify the approved VM, or expose llama.cpp directly to HUI.
+This directory implements the production boundary for local GGUF inference. It does **not** bundle a model, download a model, install packages, modify the approved VM, or expose llama.cpp directly to HUI.
 
 ## Evidence state
 
@@ -8,7 +8,8 @@ Evidence is attached to the exact commit that produced it; one stage never inher
 
 - Upstream `ggml-org/llama.cpp` v0.4.0 provenance: **inspected and pinned**.
 - Haven broker/model admission code: **implemented and CI-gated**.
-- Pinned CPU `llama-server`: **built/smoke-tested only when the current-head `build-pinned-llamacpp-cpu` CI job succeeds**.
+- Explicit local model manager: **implemented on the lifecycle slice; tested only when that slice's CI succeeds**.
+- Pinned CPU `llama-server`: **built/smoke-tested only when the relevant current-head `build-pinned-llamacpp-cpu` CI job succeeds**.
 - Pinned llama.cpp source: **not copied into this repository**.
 - Model inference: **not runtime-proven until an approved GGUF is actually loaded and prompted**.
 - Approved Ubuntu VM: **unchanged until a separately recorded staging/runtime gate**.
@@ -23,7 +24,7 @@ HUI / provider registry
   |
   | Haven API over $XDG_RUNTIME_DIR/haven/inference.sock (0600)
   v
-broker.py
+broker.py  [model store read-only]
   |
   | private Unix socket
   v
@@ -31,9 +32,17 @@ llama-server (single model, no UI/logs/slots, parallel 1)
   |
   v
 verified content-addressed GGUF
+
+explicit user action
+  |
+  v
+haven-modelctl  [local import / replace / delete only]
+  |
+  v
+model store
 ```
 
-The systemd user service restricts the broker and its worker to `AF_UNIX`, denies network sockets, makes the home directory read-only, gives write access only to the runtime directory, and grants read-only access to the Haven model store. Model-store mutation therefore belongs to a separate explicit user-action manager, not the inference daemon.
+The systemd user service restricts the broker and its worker to `AF_UNIX`, denies network sockets, makes the home directory read-only, gives write access only to the runtime directory, and grants read-only access to the Haven model store. Model-store mutation therefore belongs to `haven-modelctl`, not the inference daemon.
 
 ## HUI-facing API
 
@@ -57,7 +66,7 @@ CakeAI's existing provider router already treats provider-qualified keys as firs
 
 The llama.cpp broker never proxies or manages Ollama. Retiring Ollama remains deferred until feature compatibility and performance evidence justify it.
 
-## Model store
+## Model store and lifecycle
 
 Default root: `$XDG_DATA_HOME/haven/models` (or `~/.local/share/haven/models`).
 
@@ -65,9 +74,10 @@ Default root: `$XDG_DATA_HOME/haven/models` (or `~/.local/share/haven/models`).
 models/
   blobs/sha256/<first-two-digest-chars>/<full-sha256>.gguf
   manifests/<model-id>.json
+  .staging/
 ```
 
-Before a model is started, Slice 0 checks:
+Before a model is started, the broker checks:
 
 1. the manifest ID and filename are safe and identical;
 2. the blob path exactly matches its SHA-256 content address;
@@ -76,11 +86,15 @@ Before a model is started, Slice 0 checks:
 5. its GGUF version is 2 or 3 and is allowed by the manifest;
 6. its SHA-256 matches the manifest.
 
-A future catalogue/downloader must stage bytes elsewhere and atomically adopt them only after these checks plus model-license review. GGUF compatibility is never treated as redistribution permission.
+`haven-modelctl` is deliberately local-only. Import copies an already-local regular file into same-filesystem staging, hashes and validates it, adopts the content-addressed blob, then atomically publishes the manifest. Replace/update is explicit and retains the previous blob for rollback. Delete removes the manifest first and only purges a blob when explicitly requested and no other manifest references it.
+
+Mutations are serialized with a store `flock`. The broker holds a shared per-model `flock` for the entire llama-server worker lifetime; the manager requires an exclusive per-model lock for import/replace/delete. This closes the check-then-delete race around a live model.
+
+See `MODEL-LIFECYCLE.md` for crash consistency, permissions, and CLI semantics. GGUF compatibility is never treated as redistribution permission.
 
 ## Runtime policy
 
-Slice 0 is intentionally conservative:
+The first runtime is intentionally conservative:
 
 - one loaded model and one parallel generation slot;
 - default context limit 8192 tokens, bounded to 512–131072 by the broker;
@@ -109,16 +123,18 @@ Expected installed files:
 ```text
 /usr/lib/haven/inference/broker.py
 /usr/lib/haven/inference/gguf.py
+/usr/lib/haven/inference/model_lease.py
+/usr/lib/haven/inference/modelctl.py
 /usr/lib/haven/llama.cpp/llama-server
 /usr/lib/systemd/user/haven-inference-broker.service
+/usr/bin/haven-modelctl
 ```
 
 The model store remains user-owned and outside the OS image.
 
 ## Next acceptance gates
 
-1. Current-head Haven tests and pinned CPU build CI pass.
-2. Add a separate, explicit model-manager path for verified local import/update/deletion; keep inference read-only.
-3. With a separately approved model licence and GGUF, run model admission and inference smoke tests and record time-to-first-token, generation throughput, peak RSS, and failure behavior.
-4. Only after that, stage the package into the preserved approved Ubuntu VM and gather service/runtime evidence.
-5. Add accelerator backends independently; no backend inherits a `runtime-proven` label from CPU.
+1. Lifecycle-slice CI passes, including atomic import/delete and lease-concurrency tests.
+2. With a separately approved model licence and GGUF, run model admission and inference smoke tests and record time-to-first-token, generation throughput, peak RSS, and failure behavior.
+3. Only after that, stage the package into the preserved approved Ubuntu VM and gather service/runtime evidence.
+4. Add accelerator backends independently; no backend inherits a `runtime-proven` label from CPU.
