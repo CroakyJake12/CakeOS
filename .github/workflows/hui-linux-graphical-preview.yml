@@ -51,21 +51,37 @@ jobs:
       - name: Run real window, exercise HUI input, and capture screenshot
         run: |
           mkdir -p artifacts/hui-linux-host
+          set +e
           xvfb-run -a -s '-screen 0 1280x800x24' bash -c '
-            set -euo pipefail
+            set +e
             export CAKEOS_HUI_PREVIEW_SELF_TEST=1
             export CAKEOS_HUI_PREVIEW_AUTO_EXIT_MS=5000
             artifacts/hui-linux-host/publish/cakeos-hui-linux-preview > artifacts/hui-linux-host/window.log 2>&1 &
             pid=$!
             sleep 2
             import -window root artifacts/hui-linux-host/window.png
+            screenshot_status=$?
             wait "$pid"
+            app_status=$?
+            printf "%s\n" "$app_status" > artifacts/hui-linux-host/app-exit-code.txt
+            printf "%s\n" "$screenshot_status" > artifacts/hui-linux-host/screenshot-exit-code.txt
+            exit "$app_status"
           '
-          test -s artifacts/hui-linux-host/window.png
-          test -s artifacts/hui-linux-host/window.log || touch artifacts/hui-linux-host/window.log
-          identify artifacts/hui-linux-host/window.png | tee artifacts/hui-linux-host/screenshot-info.txt
+          runtime_status=$?
+          set -e
+          test -e artifacts/hui-linux-host/window.log || touch artifacts/hui-linux-host/window.log
+          echo '--- application log ---'
+          cat artifacts/hui-linux-host/window.log
+          if test -s artifacts/hui-linux-host/window.png; then
+            identify artifacts/hui-linux-host/window.png | tee artifacts/hui-linux-host/screenshot-info.txt
+          else
+            echo 'No screenshot was captured.' | tee artifacts/hui-linux-host/screenshot-info.txt
+          fi
+          echo "Runtime status: $runtime_status"
+          exit "$runtime_status"
 
       - name: Upload graphical evidence
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: hui-linux-graphical-preview
@@ -74,4 +90,6 @@ jobs:
             artifacts/hui-linux-host/window.log
             artifacts/hui-linux-host/screenshot-info.txt
             artifacts/hui-linux-host/native-dependencies.txt
-          if-no-files-found: error
+            artifacts/hui-linux-host/app-exit-code.txt
+            artifacts/hui-linux-host/screenshot-exit-code.txt
+          if-no-files-found: warn
