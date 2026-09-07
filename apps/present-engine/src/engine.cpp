@@ -328,6 +328,32 @@ SlideExtent PresentEngine::slideExtent(int slideIndex) const
     return SlideExtent{mm100ToTwips(widthMm100), mm100ToTwips(heightMm100)};
 }
 
+void PresentEngine::moveSlide(int fromIndex, int toIndex)
+{
+    impl_->requireSlideIndex(fromIndex);
+    impl_->requireSlideIndex(toIndex);
+    if (fromIndex == toIndex) {
+        return;
+    }
+
+    LibreOfficeKitDocument* rawDocument = impl_->document->get();
+    if (!LIBREOFFICEKIT_DOCUMENT_HAS(rawDocument, selectPart) ||
+        rawDocument->pClass->selectPart == nullptr ||
+        !LIBREOFFICEKIT_DOCUMENT_HAS(rawDocument, moveSelectedParts) ||
+        rawDocument->pClass->moveSelectedParts == nullptr) {
+        throw std::runtime_error("LibreOfficeKit runtime does not expose slide reordering");
+    }
+
+    const int count = impl_->document->getParts();
+    impl_->document->setPart(fromIndex);
+    for (int index = 0; index < count; ++index) {
+        rawDocument->pClass->selectPart(rawDocument, index, 0);
+    }
+    rawDocument->pClass->selectPart(rawDocument, fromIndex, 1);
+    rawDocument->pClass->moveSelectedParts(rawDocument, toIndex, false);
+    impl_->document->setPart(toIndex);
+}
+
 RenderedTile PresentEngine::renderTile(const TileRequest& request)
 {
     impl_->requireSlideIndex(request.slideIndex);
