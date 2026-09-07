@@ -39,6 +39,48 @@ bool containsString(const Json& value, const std::string& expected)
     return false;
 }
 
+const Json* findObjectMemberRecursive(const Json& value, const std::string& member)
+{
+    if (value.is_object()) {
+        const auto direct = value.find(member);
+        if (direct != value.end()) {
+            return &(*direct);
+        }
+        for (const auto& [key, child] : value.items()) {
+            (void)key;
+            if (const Json* found = findObjectMemberRecursive(child, member); found != nullptr) {
+                return found;
+            }
+        }
+    } else if (value.is_array()) {
+        for (const auto& child : value) {
+            if (const Json* found = findObjectMemberRecursive(child, member); found != nullptr) {
+                return found;
+            }
+        }
+    }
+    return nullptr;
+}
+
+std::string rootShape(const Json& value)
+{
+    if (value.is_object()) {
+        std::string keys;
+        for (const auto& [key, child] : value.items()) {
+            (void)child;
+            if (!keys.empty()) {
+                keys += ',';
+            }
+            keys += key;
+        }
+        return "object:" + keys;
+    }
+    if (value.is_array()) {
+        return "array:" + std::to_string(value.size());
+    }
+    return value.type_name();
+}
+
 } // namespace
 
 int main(int argc, char** argv)
@@ -49,6 +91,7 @@ int main(int argc, char** argv)
     }
 
 #if !CAKEOS_PRESENT_HAS_STRUCTURE_REQUEST
+    (void)argv;
     std::cout << "structure_request=unavailable\n";
     return 0;
 #else
@@ -77,14 +120,15 @@ int main(int argc, char** argv)
         office->freeError(raw);
 
         const Json structure = Json::parse(structureText);
-        if (!structure.contains("Slides") || !structure.at("Slides").is_object()) {
-            throw std::runtime_error("document structure has no Slides object");
+        const Json* slides = findObjectMemberRecursive(structure, "Slides");
+        if (slides == nullptr || !slides->is_object()) {
+            throw std::runtime_error(
+                "document structure has no Slides object; root=" + rootShape(structure));
         }
-        const Json& slides = structure.at("Slides");
-        if (!slides.contains("Slide 0")) {
+        if (!slides->contains("Slide 0")) {
             throw std::runtime_error("document structure has no Slide 0");
         }
-        const Json& slide0 = slides.at("Slide 0");
+        const Json& slide0 = slides->at("Slide 0");
         if (!slide0.contains("Objects") || !slide0.at("Objects").is_object()) {
             throw std::runtime_error("Slide 0 has no semantic Objects inventory");
         }
