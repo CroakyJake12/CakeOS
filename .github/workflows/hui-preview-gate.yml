@@ -6,6 +6,10 @@ on:
       - platform/hui-preview-gate1
   workflow_dispatch:
 
+concurrency:
+  group: hui-preview-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   build-and-package:
     runs-on: ubuntu-24.04
