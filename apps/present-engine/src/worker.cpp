@@ -52,6 +52,21 @@ struct ElementRef {
     int objectIndex{};
 };
 
+struct ElementSelectionState {
+    std::string ref;
+    int slideIndex{};
+    int objectIndex{};
+    bool active{false};
+
+    void reset()
+    {
+        ref.clear();
+        slideIndex = 0;
+        objectIndex = 0;
+        active = false;
+    }
+};
+
 std::uint32_t decodeU32Le(const std::array<std::uint8_t, 8>& header, std::size_t offset)
 {
     return static_cast<std::uint32_t>(header[offset]) |
@@ -259,7 +274,36 @@ std::vector<long> parseCommaSeparatedLongs(std::string_view payload)
     return values;
 }
 
-std::optional<Json> mapLibreOfficeEvent(const cakeos::present::EngineEvent& event)
+std::optional<std::array<long, 5>> parseGraphicSelection(std::string_view payload)
+{
+    if (payload.empty() || payload == "EMPTY") {
+        return std::nullopt;
+    }
+
+    std::array<long, 5> values{};
+    std::size_t offset = 0U;
+    for (std::size_t index = 0U; index < values.size(); ++index) {
+        const auto comma = payload.find(',', offset);
+        if (index < 4U && comma == std::string_view::npos) {
+            return std::nullopt;
+        }
+        const auto end = comma == std::string_view::npos ? payload.size() : comma;
+        const auto parsed = parseLong(payload.substr(offset, end - offset));
+        if (!parsed.has_value()) {
+            return std::nullopt;
+        }
+        values[index] = *parsed;
+        if (comma == std::string_view::npos) {
+            break;
+        }
+        offset = comma + 1U;
+    }
+    return values;
+}
+
+std::optional<Json> mapLibreOfficeEvent(
+    const cakeos::present::EngineEvent& event,
+    const ElementSelectionState& selection)
 {
     switch (event.upstreamType) {
     case LOK_CALLBACK_INVALIDATE_TILES: {
@@ -279,6 +323,27 @@ std::optional<Json> mapLibreOfficeEvent(const cakeos::present::EngineEvent& even
                 {"width", values[2]},
                 {"height", values[3]}
             }}
+        });
+    }
+    case LOK_CALLBACK_GRAPHIC_SELECTION: {
+        if (!selection.active) {
+            return std::nullopt;
+        }
+        const auto values = parseGraphicSelection(event.payload);
+        if (!values.has_value()) {
+            return std::nullopt;
+        }
+        return eventEnvelope("elementSelectionChanged", Json{
+            {"selected", true},
+            {"ref", selection.ref},
+            {"referenceStability", "snapshot-only"},
+            {"rectTwips", Json{
+                {"x", (*values)[0]},
+                {"y", (*values)[1]},
+                {"width", (*values)[2]},
+                {"height", (*values)[3]}
+            }},
+            {"angleHundredthDegrees", (*values)[4]}
         });
     }
     case LOK_CALLBACK_SET_PART: {
@@ -322,6 +387,42 @@ std::optional<Json> mapLibreOfficeEvent(const cakeos::present::EngineEvent& even
     default:
         return std::nullopt;
     }
+}
+
+void queueSelectionCleared(
+    EventQueue& queue,
+    ElementSelectionState& selection,
+    std::string_view reason)
+{
+    if (!selection.active) {
+        return;
+    }
+    const std::string ref = selection.ref;
+    selection.reset();
+    queueEvent(queue, eventEnvelope("elementSelectionChanged", Json{
+        {"selected", false},
+        {"ref", ref},
+        {"referenceStability", "snapshot-only"},
+        {"reason", reason}
+    }));
+}
+
+void clearActiveSelectionBestEffort(
+    cakeos::present::PresentEngine& engine,
+    ElementSelectionState& selection,
+    EventQueue& queue,
+    std::string_view reason)
+{
+    if (!selection.active) {
+        return;
+    }
+    try {
+        engine.clearElementSelection(selection.slideIndex, selection.objectIndex);
+    } catch (...) {
+        // Selection state must not block a document mutation. HUI still gets a
+        // deterministic deselection event and the stale snapshot is discarded.
+    }
+    queueSelectionCleared(queue, selection, reason);
 }
 
 void queueMutationEvents(EventQueue& queue, const cakeos::present::PresentEngine& engine, std::string_view reason)
@@ -431,6 +532,8 @@ Json helloResult(const cakeos::present::PresentEngine& engine)
     });
     if (engine.supportsElementSnapshots()) {
         capabilities.push_back("listElements");
+        capabilities.push_back("selectElement");
+        capabilities.push_back("clearElementSelection");
         capabilities.push_back("replaceElementText");
     }
 
@@ -445,6 +548,7 @@ Json helloResult(const cakeos::present::PresentEngine& engine)
             "documentChanged",
             "slideChanged",
             "editingContextChanged",
+            "elementSelectionChanged",
             "engineError"
         })},
         {"capabilities", std::move(capabilities)}
@@ -459,8 +563,9 @@ int main()
         cakeos::present::PresentEngine engine;
         EventQueue eventQueue;
         ElementSnapshotState elementSnapshot;
-        engine.setEventCallback([&eventQueue](const cakeos::present::EngineEvent& event) {
-            if (const auto mapped = mapLibreOfficeEvent(event); mapped.has_value()) {
+        ElementSelectionState elementSelection;
+        engine.setEventCallback([&eventQueue, &elementSelection](const cakeos::present::EngineEvent& event) {
+            if (const auto mapped = mapLibreOfficeEvent(event, elementSelection); mapped.has_value()) {
                 queueEvent(eventQueue, *mapped);
             }
         });
@@ -486,12 +591,14 @@ int main()
                 if (operation == "hello") {
                     writeFrame(std::cout, success(id, helloResult(engine)));
                 } else if (operation == "open") {
+                    clearActiveSelectionBestEffort(engine, elementSelection, eventQueue, "documentChanged");
                     const std::string path = request.at("path").get<std::string>();
                     engine.open(path);
                     elementSnapshot.path = path;
                     elementSnapshot.fresh = true;
                     writeFrame(std::cout, success(id, slideListResult(engine)));
                 } else if (operation == "close") {
+                    clearActiveSelectionBestEffort(engine, elementSelection, eventQueue, "documentClosed");
                     engine.close();
                     elementSnapshot.reset();
                     writeFrame(std::cout, success(id));
@@ -502,6 +609,53 @@ int main()
                         engine,
                         elementSnapshot,
                         request.at("slideIndex").get<int>())));
+                } else if (operation == "selectElement") {
+                    requireFreshElementSnapshot(engine, elementSnapshot);
+                    const std::string ref = request.at("ref").get<std::string>();
+                    const auto elementRef = parseElementRef(ref);
+                    if (!elementRef.has_value()) {
+                        throw std::invalid_argument(
+                            "element ref must use the CakeOS snapshot format slide:<index>/object:<index>");
+                    }
+                    if (elementSelection.active) {
+                        engine.clearElementSelection(
+                            elementSelection.slideIndex,
+                            elementSelection.objectIndex);
+                        queueSelectionCleared(eventQueue, elementSelection, "replacedSelection");
+                    }
+                    elementSelection.ref = ref;
+                    elementSelection.slideIndex = elementRef->slideIndex;
+                    elementSelection.objectIndex = elementRef->objectIndex;
+                    elementSelection.active = true;
+                    try {
+                        engine.selectElement(
+                            elementSnapshot.path,
+                            elementRef->slideIndex,
+                            elementRef->objectIndex);
+                    } catch (...) {
+                        elementSelection.reset();
+                        throw;
+                    }
+                    writeFrame(std::cout, success(id, Json{
+                        {"ref", ref},
+                        {"selected", true},
+                        {"referenceStability", "snapshot-only"}
+                    }));
+                } else if (operation == "clearElementSelection") {
+                    if (!elementSelection.active) {
+                        writeFrame(std::cout, success(id, Json{{"selected", false}}));
+                    } else {
+                        const std::string ref = elementSelection.ref;
+                        engine.clearElementSelection(
+                            elementSelection.slideIndex,
+                            elementSelection.objectIndex);
+                        queueSelectionCleared(eventQueue, elementSelection, "explicitClear");
+                        writeFrame(std::cout, success(id, Json{
+                            {"ref", ref},
+                            {"selected", false},
+                            {"referenceStability", "snapshot-only"}
+                        }));
+                    }
                 } else if (operation == "replaceElementText") {
                     requireFreshElementSnapshot(engine, elementSnapshot);
                     const std::string ref = request.at("ref").get<std::string>();
@@ -514,17 +668,25 @@ int main()
                     if (text.size() > MaxSemanticTextBytes) {
                         throw std::invalid_argument("replacement text exceeds the semantic text size limit");
                     }
-                    engine.replaceElementText(
+                    const bool changed = engine.replaceElementText(
                         elementSnapshot.path,
                         elementRef->slideIndex,
                         elementRef->objectIndex,
                         text);
-                    elementSnapshot.fresh = false;
+                    if (changed) {
+                        clearActiveSelectionBestEffort(
+                            engine,
+                            elementSelection,
+                            eventQueue,
+                            "documentMutation");
+                        elementSnapshot.fresh = false;
+                        queueMutationEvents(eventQueue, engine, operation);
+                    }
                     writeFrame(std::cout, success(id, Json{
                         {"ref", ref},
-                        {"snapshotFresh", false}
+                        {"changed", changed},
+                        {"snapshotFresh", elementSnapshot.fresh}
                     }));
-                    queueMutationEvents(eventQueue, engine, operation);
                 } else if (operation == "slideExtent") {
                     const int slideIndex = request.at("slideIndex").get<int>();
                     const auto extent = engine.slideExtent(slideIndex);
@@ -558,21 +720,25 @@ int main()
                         {"bytesPerPixel", 4}
                     }), tile.pixels);
                 } else if (operation == "addSlideAfter") {
+                    clearActiveSelectionBestEffort(engine, elementSelection, eventQueue, "documentMutation");
                     engine.addSlideAfter(request.at("slideIndex").get<int>());
                     elementSnapshot.fresh = false;
                     writeFrame(std::cout, success(id, slideListResult(engine)));
                     queueMutationEvents(eventQueue, engine, operation);
                 } else if (operation == "duplicateSlide") {
+                    clearActiveSelectionBestEffort(engine, elementSelection, eventQueue, "documentMutation");
                     engine.duplicateSlide(request.at("slideIndex").get<int>());
                     elementSnapshot.fresh = false;
                     writeFrame(std::cout, success(id, slideListResult(engine)));
                     queueMutationEvents(eventQueue, engine, operation);
                 } else if (operation == "deleteSlide") {
+                    clearActiveSelectionBestEffort(engine, elementSelection, eventQueue, "documentMutation");
                     engine.deleteSlide(request.at("slideIndex").get<int>());
                     elementSnapshot.fresh = false;
                     writeFrame(std::cout, success(id, slideListResult(engine)));
                     queueMutationEvents(eventQueue, engine, operation);
                 } else if (operation == "moveSlide") {
+                    clearActiveSelectionBestEffort(engine, elementSelection, eventQueue, "documentMutation");
                     engine.moveSlide(
                         request.at("fromIndex").get<int>(),
                         request.at("toIndex").get<int>());
@@ -580,11 +746,13 @@ int main()
                     writeFrame(std::cout, success(id, slideListResult(engine)));
                     queueMutationEvents(eventQueue, engine, operation);
                 } else if (operation == "undo") {
+                    clearActiveSelectionBestEffort(engine, elementSelection, eventQueue, "documentMutation");
                     engine.undo();
                     elementSnapshot.fresh = false;
                     writeFrame(std::cout, success(id, slideListResult(engine)));
                     queueMutationEvents(eventQueue, engine, operation);
                 } else if (operation == "redo") {
+                    clearActiveSelectionBestEffort(engine, elementSelection, eventQueue, "documentMutation");
                     engine.redo();
                     elementSnapshot.fresh = false;
                     writeFrame(std::cout, success(id, slideListResult(engine)));
@@ -599,6 +767,7 @@ int main()
                     elementSnapshot.fresh = true;
                     writeFrame(std::cout, success(id));
                 } else if (operation == "quit") {
+                    clearActiveSelectionBestEffort(engine, elementSelection, eventQueue, "workerClosing");
                     writeFrame(std::cout, success(id));
                     shouldQuit = true;
                 } else {
