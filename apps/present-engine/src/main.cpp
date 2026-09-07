@@ -74,11 +74,6 @@ int main(int argc, char** argv)
         }
 
         cakeos::present::PresentEngine engine(std::move(options));
-        engine.setEventCallback([](const cakeos::present::EngineEvent& event) {
-            if (!event.payload.empty()) {
-                std::clog << "LOK event " << event.upstreamType << ": " << event.payload << '\n';
-            }
-        });
         engine.open(argv[1]);
 
         const auto slideList = engine.slides();
