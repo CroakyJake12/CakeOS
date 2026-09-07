@@ -109,6 +109,58 @@ long mm100ToTwips(long value)
     return static_cast<long>(std::llround(twips));
 }
 
+std::string jsonStringLiteral(std::string_view value)
+{
+    std::string encoded;
+    encoded.reserve(value.size() + 2U);
+    encoded.push_back('"');
+    for (const unsigned char ch : value) {
+        switch (ch) {
+        case '"':
+            encoded += "\\\"";
+            break;
+        case '\\':
+            encoded += "\\\\";
+            break;
+        case '\b':
+            encoded += "\\b";
+            break;
+        case '\f':
+            encoded += "\\f";
+            break;
+        case '\n':
+            encoded += "\\n";
+            break;
+        case '\r':
+            encoded += "\\r";
+            break;
+        case '\t':
+            encoded += "\\t";
+            break;
+        default:
+            if (ch < 0x20U) {
+                static constexpr char Hex[] = "0123456789ABCDEF";
+                encoded += "\\u00";
+                encoded.push_back(Hex[(ch >> 4U) & 0x0FU]);
+                encoded.push_back(Hex[ch & 0x0FU]);
+            } else {
+                encoded.push_back(static_cast<char>(ch));
+            }
+        }
+    }
+    encoded.push_back('"');
+    return encoded;
+}
+
+std::string makeDocumentTransformArguments(std::string_view commandName, int value)
+{
+    const std::string transform =
+        "{\"Transforms\":{\"SlideCommands\":[{" + jsonStringLiteral(commandName) + ":" +
+        std::to_string(value) + "}]}}";
+    return "{\"DataJson\":{\"type\":\"string\",\"value\":" +
+        jsonStringLiteral(transform) + "}}";
+}
+
 int toLokKeyType(KeyEventType type)
 {
     switch (type) {
@@ -336,28 +388,26 @@ void PresentEngine::moveSlide(int fromIndex, int toIndex)
         return;
     }
 
-    LibreOfficeKitDocument* rawDocument = impl_->document->get();
-    if (!LIBREOFFICEKIT_DOCUMENT_HAS(rawDocument, selectPart) ||
-        rawDocument->pClass->selectPart == nullptr ||
-        !LIBREOFFICEKIT_DOCUMENT_HAS(rawDocument, moveSelectedParts) ||
-        rawDocument->pClass->moveSelectedParts == nullptr) {
-        throw std::runtime_error("LibreOfficeKit runtime does not expose slide reordering");
+    const auto before = slides();
+    const SlideInfo moved = before[static_cast<std::size_t>(fromIndex)];
+    const std::string transformCommand = "MoveSlide." + std::to_string(fromIndex);
+    const std::string arguments = makeDocumentTransformArguments(transformCommand, toIndex);
+    postUnoCommand(".uno:TransformDocumentStructure", arguments, true);
+
+    const auto after = slides();
+    if (after.size() != before.size()) {
+        throw std::runtime_error("LibreOffice document transform changed the slide count while reordering");
     }
 
-    const int count = impl_->document->getParts();
-    impl_->document->setPart(fromIndex);
-    for (int index = 0; index < count; ++index) {
-        rawDocument->pClass->selectPart(rawDocument, index, 0);
+    const auto& destination = after[static_cast<std::size_t>(toIndex)];
+    const bool hashMatches =
+        !moved.hash.empty() && !destination.hash.empty() && moved.hash == destination.hash;
+    const bool nameMatches = moved.name == destination.name;
+    if (!hashMatches && !nameMatches) {
+        throw std::runtime_error("LibreOffice document transform did not move the requested slide");
     }
-    rawDocument->pClass->selectPart(rawDocument, fromIndex, 1);
 
-    // Impress MovePages() inserts the selected page(s) after a target in the
-    // current ordering. CakeOS exposes the more natural final zero-based index.
-    // Moving upward therefore targets the page immediately before toIndex;
-    // -1 is LibreOffice's sentinel for inserting before the first page.
-    const int impressTarget = toIndex < fromIndex ? toIndex - 1 : toIndex;
-    rawDocument->pClass->moveSelectedParts(rawDocument, impressTarget, false);
-    impl_->document->setPart(toIndex);
+    setCurrentSlide(toIndex);
 }
 
 RenderedTile PresentEngine::renderTile(const TileRequest& request)
