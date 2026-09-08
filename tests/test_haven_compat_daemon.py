@@ -210,6 +210,10 @@ class DaemonLiveIntegrationTests(unittest.TestCase):
                     except subprocess.TimeoutExpired:
                         process.kill()
                         process.wait(timeout=2)
+                if process.stdout is not None:
+                    process.stdout.close()
+                if process.stderr is not None:
+                    process.stderr.close()
 
     @staticmethod
     def _read_exact(connection, size):
