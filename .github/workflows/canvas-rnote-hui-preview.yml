@@ -99,7 +99,7 @@ jobs:
             exit 1
           fi
 
-      - name: Run Canvas through HUI, tools, viewport, ink, and capture real window
+      - name: Run Canvas through HUI, tools, viewport, ink, eraser, and capture real window
         shell: bash
         run: |
           mkdir -p artifacts/canvas-rnote-hui
@@ -129,6 +129,7 @@ jobs:
             xwininfo -root -tree > artifacts/canvas-rnote-hui/x11-window-tree.txt 2>&1 || true
 
             if test -n "$window_id"; then
+              screenshot_status=0
               xdotool windowmap "$window_id" >/dev/null 2>&1
               xdotool windowraise "$window_id" >/dev/null 2>&1 || true
               sleep 1
@@ -159,18 +160,45 @@ jobs:
               xdotool mouseup 2
               sleep 0.25
 
-              # Then prove primary-button ink is mapped through the changed viewport
-              # into Rnote document coordinates and refreshed through HUI.
+              # Draw a deterministic Pen stroke through the changed viewport.
               xdotool mousemove --window "$window_id" 420 240
               xdotool mousedown 1
               xdotool mousemove --window "$window_id" 450 265
               xdotool mousemove --window "$window_id" 485 290
               xdotool mousemove --window "$window_id" 520 320
               xdotool mouseup 1
-              sleep 1
+              sleep 0.5
 
-              import -window "$window_id" artifacts/canvas-rnote-hui/window.png
-              screenshot_status=$?
+              # Capture the Canvas with the cursor parked outside it so pixel
+              # comparison cannot be satisfied by a moving pointer image.
+              xdotool mousemove --window "$window_id" 900 560
+              sleep 0.2
+              import -window "$window_id" artifacts/canvas-rnote-hui/before-eraser.png
+              before_status=$?
+              if test "$before_status" -ne 0; then screenshot_status=$before_status; fi
+
+              # Select Eraser through the visible HUI toolbar and erase across the
+              # exact Pen path. This must change Canvas pixels, not only tool state.
+              xdotool mousemove --window "$window_id" 158 154
+              xdotool click 1
+              sleep 0.2
+              xdotool mousemove --window "$window_id" 410 230
+              xdotool mousedown 1
+              xdotool mousemove --window "$window_id" 440 255
+              xdotool mousemove --window "$window_id" 470 280
+              xdotool mousemove --window "$window_id" 500 305
+              xdotool mousemove --window "$window_id" 530 330
+              xdotool mouseup 1
+              sleep 0.6
+
+              xdotool mousemove --window "$window_id" 900 560
+              sleep 0.2
+              import -window "$window_id" artifacts/canvas-rnote-hui/after-eraser.png
+              after_status=$?
+              if test "$after_status" -ne 0; then screenshot_status=$after_status; fi
+              if test "$screenshot_status" -eq 0; then
+                cp artifacts/canvas-rnote-hui/after-eraser.png artifacts/canvas-rnote-hui/window.png
+              fi
               printf "%s\n" "$window_id" > artifacts/canvas-rnote-hui/window-id.txt
             else
               screenshot_status=20
@@ -197,12 +225,28 @@ jobs:
           grep -q 'CANVAS_RNOTE_MANAGED_SAVE_RELOAD_READY' artifacts/canvas-rnote-hui/window.log
           grep -q 'CANVAS_RNOTE_HUI_RENDER_READY abi=1 format=svg coordinate=document' artifacts/canvas-rnote-hui/window.log
           grep -q 'CANVAS_RNOTE_HUI_TOOLBAR_READY pen=1 eraser=1 undo=1 redo=1' artifacts/canvas-rnote-hui/window.log
-          test "$(grep -c 'CANVAS_RNOTE_TOOL_SELECTED' artifacts/canvas-rnote-hui/window.log)" -ge 4
+          test "$(grep -c 'CANVAS_RNOTE_TOOL_SELECTED' artifacts/canvas-rnote-hui/window.log)" -ge 5
           test "$(grep -c 'CANVAS_RNOTE_HISTORY action=' artifacts/canvas-rnote-hui/window.log)" -ge 4
           grep -q 'CANVAS_RNOTE_VIEWPORT_ZOOM' artifacts/canvas-rnote-hui/window.log
           grep -q 'CANVAS_RNOTE_VIEWPORT_PAN_COMMITTED' artifacts/canvas-rnote-hui/window.log
           grep -q 'CANVAS_RNOTE_POINTER_STROKE_COMMITTED.*tool=Pen' artifacts/canvas-rnote-hui/window.log
+          grep -q 'CANVAS_RNOTE_POINTER_STROKE_COMMITTED.*tool=Eraser' artifacts/canvas-rnote-hui/window.log
+
+          test -s artifacts/canvas-rnote-hui/before-eraser.png
+          test -s artifacts/canvas-rnote-hui/after-eraser.png
           test -s artifacts/canvas-rnote-hui/window.png
+          convert artifacts/canvas-rnote-hui/before-eraser.png -crop 912x310+24+191 +repage artifacts/canvas-rnote-hui/before-eraser-canvas.png
+          convert artifacts/canvas-rnote-hui/after-eraser.png -crop 912x310+24+191 +repage artifacts/canvas-rnote-hui/after-eraser-canvas.png
+          changed_pixels="$(compare -metric AE artifacts/canvas-rnote-hui/before-eraser-canvas.png artifacts/canvas-rnote-hui/after-eraser-canvas.png null: 2>&1 || true)"
+          printf '%s\n' "$changed_pixels" | tee artifacts/canvas-rnote-hui/eraser-changed-pixels.txt
+          case "$changed_pixels" in
+            ''|*[!0-9]*) echo "Canvas eraser pixel metric was not an integer: $changed_pixels" >&2; exit 1 ;;
+          esac
+          if test "$changed_pixels" -le 0; then
+            echo 'HUI Eraser gesture did not visibly change Canvas pixels.' >&2
+            exit 1
+          fi
+
           identify artifacts/canvas-rnote-hui/window.png | tee artifacts/canvas-rnote-hui/screenshot-info.txt
           cp /tmp/canvas-native-dependencies.txt artifacts/canvas-rnote-hui/native-bridge-dependencies.txt
           cp /tmp/canvas-hui-host-dependencies.txt artifacts/canvas-rnote-hui/hui-host-dependencies.txt
@@ -216,6 +260,11 @@ jobs:
           name: canvas-rnote-hui-graphical-preview
           path: |
             artifacts/canvas-rnote-hui/window.png
+            artifacts/canvas-rnote-hui/before-eraser.png
+            artifacts/canvas-rnote-hui/after-eraser.png
+            artifacts/canvas-rnote-hui/before-eraser-canvas.png
+            artifacts/canvas-rnote-hui/after-eraser-canvas.png
+            artifacts/canvas-rnote-hui/eraser-changed-pixels.txt
             artifacts/canvas-rnote-hui/window.log
             artifacts/canvas-rnote-hui/openbox.log
             artifacts/canvas-rnote-hui/window-id.txt
