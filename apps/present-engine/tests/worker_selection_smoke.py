@@ -68,6 +68,19 @@ def require_cleared(
         )
 
 
+def worker_exit_details(client: WorkerClient) -> str:
+    code = client.process.poll()
+    if code is None:
+        try:
+            code = client.process.wait(timeout=2)
+        except TimeoutError:
+            code = None
+    stderr = ""
+    if client.process.stderr is not None and code is not None:
+        stderr = client.process.stderr.read().decode("utf-8", errors="replace")
+    return f"returncode={code}, stderr={stderr!r}"
+
+
 def main() -> int:
     if len(sys.argv) != 4:
         print(
@@ -122,7 +135,13 @@ def main() -> int:
             raise RuntimeError(f"selectElement returned invalid metadata: {selected}")
         checkpoint("select_response")
 
-        client.require_ok("listSlides")
+        try:
+            client.require_ok("listSlides")
+        except Exception as error:
+            raise RuntimeError(
+                "worker failed immediately after the successful selectElement response: "
+                + worker_exit_details(client)
+            ) from error
         selection_events = client.take_events()
         first_geometry = selected_event(selection_events, alpha_ref)
         checkpoint("selection_geometry")
@@ -187,7 +206,8 @@ def main() -> int:
         checkpoint("complete")
         return 0
     finally:
-        client.close()
+        if client.process.poll() is None:
+            client.close()
 
 
 if __name__ == "__main__":
