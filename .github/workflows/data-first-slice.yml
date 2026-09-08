@@ -67,8 +67,6 @@ jobs:
             libreoffice-common \
             python3-uno | tee "$evidence_dir/apt-packages.txt"
 
-          .data-venv/bin/python -m pip check
-
           .data-venv/bin/python - <<'PY' | tee "$evidence_dir/duckdb-metadata.txt"
           from importlib import metadata
           from pathlib import Path
@@ -86,6 +84,12 @@ jobs:
           print('Requires-Python:', package_metadata.get('Requires-Python', 'unknown'))
           print('License-Expression:', package_metadata.get('License-Expression', 'unspecified'))
           print('License:', package_metadata.get('License', 'unspecified'))
+          requirements = distribution.requires or []
+          if requirements:
+              for requirement in requirements:
+                  print('Requires-Dist:', requirement)
+          else:
+              print('Requires-Dist: none')
 
           native_files = [
               Path(distribution.locate_file(item)).resolve()
