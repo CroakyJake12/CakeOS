@@ -54,6 +54,85 @@ jobs:
           .data-venv/bin/python -m pip install --disable-pip-version-check --no-cache-dir duckdb==1.5.5
           .data-venv/bin/python -c "import duckdb, uno; print('duckdb', duckdb.__version__, 'uno ok')"
 
+      - name: Record exact runtime package provenance
+        shell: bash
+        run: |
+          set -euo pipefail
+          evidence_dir="$RUNNER_TEMP/haven-data-package-evidence"
+          mkdir -p "$evidence_dir"
+
+          dpkg-query -W -f='${binary:Package}\t${Version}\t${Architecture}\n' \
+            libreoffice-calc-nogui \
+            libreoffice-core-nogui \
+            libreoffice-common \
+            python3-uno | tee "$evidence_dir/apt-packages.txt"
+
+          .data-venv/bin/python -m pip check
+
+          .data-venv/bin/python - <<'PY' | tee "$evidence_dir/duckdb-metadata.txt"
+          from importlib import metadata
+          from pathlib import Path
+          import duckdb
+
+          distribution = metadata.distribution('duckdb')
+          if distribution.version != '1.5.5':
+              raise SystemExit(f'FAIL: expected DuckDB 1.5.5, got {distribution.version}')
+          if duckdb.__version__ != '1.5.5':
+              raise SystemExit(f'FAIL: imported DuckDB version mismatch: {duckdb.__version__}')
+
+          package_metadata = distribution.metadata
+          print('Name:', package_metadata.get('Name', 'unknown'))
+          print('Version:', distribution.version)
+          print('Requires-Python:', package_metadata.get('Requires-Python', 'unknown'))
+          print('License-Expression:', package_metadata.get('License-Expression', 'unspecified'))
+          print('License:', package_metadata.get('License', 'unspecified'))
+
+          native_files = [
+              Path(distribution.locate_file(item)).resolve()
+              for item in (distribution.files or ())
+              if str(item).endswith(('.so', '.pyd'))
+          ]
+          if not native_files:
+              raise SystemExit('FAIL: installed DuckDB distribution has no native extension payload')
+          for native_file in native_files:
+              if not native_file.is_file():
+                  raise SystemExit(f'FAIL: DuckDB native payload is missing: {native_file}')
+              print('Native-Payload:', native_file)
+          PY
+
+          .data-venv/bin/python -m pip download \
+            --disable-pip-version-check \
+            --no-cache-dir \
+            --no-deps \
+            --only-binary=:all: \
+            --dest "$evidence_dir" \
+            duckdb==1.5.5
+
+          mapfile -t duckdb_wheels < <(find "$evidence_dir" -maxdepth 1 -type f -name 'duckdb-1.5.5-*.whl' -print)
+          if [[ "${#duckdb_wheels[@]}" -ne 1 ]]; then
+            echo "FAIL: expected exactly one DuckDB 1.5.5 wheel, found ${#duckdb_wheels[@]}" >&2
+            exit 1
+          fi
+          sha256sum "${duckdb_wheels[0]}" | tee "$evidence_dir/duckdb-wheel.sha256"
+
+          {
+            echo '### Haven Data package provenance'
+            echo
+            echo "- Runner: \`${{ matrix.os }}\`."
+            echo '- Apt runtime packages:'
+            echo '```text'
+            cat "$evidence_dir/apt-packages.txt"
+            echo '```'
+            echo '- DuckDB installed distribution metadata:'
+            echo '```text'
+            cat "$evidence_dir/duckdb-metadata.txt"
+            echo '```'
+            echo '- DuckDB binary wheel SHA-256:'
+            echo '```text'
+            cat "$evidence_dir/duckdb-wheel.sha256"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
       - name: Compile worker Python
         run: |
           .data-venv/bin/python -m py_compile apps/Data/workers/calc_worker.py
