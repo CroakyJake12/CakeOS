@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import sys
+import time
 from pathlib import Path
 from typing import Any
 
@@ -48,6 +49,20 @@ def selected_event(events: list[dict[str, Any]], ref: str) -> dict[str, Any]:
     if not isinstance(data.get("angleHundredthDegrees"), int):
         raise RuntimeError(f"selection event has no normalized angle: {event}")
     return event
+
+
+def wait_for_selected_event(client: WorkerClient, ref: str) -> dict[str, Any]:
+    events: list[dict[str, Any]] = []
+    for attempt in range(50):
+        client.require_ok("listSlides")
+        events.extend(client.take_events())
+        try:
+            return selected_event(events, ref)
+        except RuntimeError:
+            if attempt == 49:
+                raise
+            time.sleep(0.02)
+    raise RuntimeError(f"selection callback wait exhausted for {ref}")
 
 
 def require_cleared(
@@ -136,14 +151,14 @@ def main() -> int:
         checkpoint("select_response")
 
         try:
-            client.require_ok("listSlides")
+            first_geometry = wait_for_selected_event(client, alpha_ref)
         except Exception as error:
-            raise RuntimeError(
-                "worker failed immediately after the successful selectElement response: "
-                + worker_exit_details(client)
-            ) from error
-        selection_events = client.take_events()
-        first_geometry = selected_event(selection_events, alpha_ref)
+            if client.process.poll() is not None:
+                raise RuntimeError(
+                    "worker failed after the successful selectElement response: "
+                    + worker_exit_details(client)
+                ) from error
+            raise
         checkpoint("selection_geometry")
 
         cleared, payload = client.require_ok("clearElementSelection")
@@ -157,8 +172,7 @@ def main() -> int:
         # Re-select, then mutate the document. The worker must invalidate both
         # the saved snapshot and its snapshot-scoped live selection.
         client.require_ok("selectElement", ref=alpha_ref)
-        client.require_ok("listSlides")
-        selected_event(client.take_events(), alpha_ref)
+        wait_for_selected_event(client, alpha_ref)
         checkpoint("reselection_geometry")
 
         moved, _ = client.require_ok("moveSlide", fromIndex=0, toIndex=2)
@@ -189,9 +203,7 @@ def main() -> int:
         checkpoint("refreshed_inventory")
 
         client.require_ok("selectElement", ref=beta_ref)
-        client.require_ok("listSlides")
-        refreshed_events = client.take_events()
-        selected_event(refreshed_events, beta_ref)
+        wait_for_selected_event(client, beta_ref)
         checkpoint("refreshed_geometry")
 
         rect = first_geometry["data"]["rectTwips"]
