@@ -1,8 +1,12 @@
 import json
 import os
 import socket
+import stat
 import struct
+import subprocess
+import sys
 import tempfile
+import time
 import unittest
 from pathlib import Path
 from unittest.mock import patch
@@ -137,6 +141,84 @@ class DaemonSocketTests(unittest.TestCase):
         output = b""
         while len(output) < size:
             output += connection.recv(size - len(output))
+        return output
+
+
+@unittest.skipUnless(_LINUX_PEERCRED, "Linux SO_PEERCRED is required for live daemon integration")
+class DaemonLiveIntegrationTests(unittest.TestCase):
+    def test_cli_daemon_binds_private_socket_and_serves_capabilities(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            runtime = root / "runtime"
+            data = root / "data"
+            runtime.mkdir(mode=0o700)
+            data.mkdir(mode=0o700)
+            socket_path = runtime / "haven" / "compat.sock"
+
+            env = os.environ.copy()
+            env["XDG_RUNTIME_DIR"] = str(runtime)
+            env["XDG_DATA_HOME"] = str(data)
+            project_root = Path(__file__).resolve().parents[1]
+            process = subprocess.Popen(
+                [
+                    sys.executable,
+                    "-m",
+                    "compatibility.wine.haven_compat.cli",
+                    "daemon",
+                    "--socket",
+                    str(socket_path),
+                ],
+                cwd=project_root,
+                env=env,
+                stdin=subprocess.DEVNULL,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+            )
+            try:
+                deadline = time.monotonic() + 5.0
+                while not socket_path.exists():
+                    if process.poll() is not None:
+                        _stdout, stderr = process.communicate()
+                        self.fail(f"compatibility daemon exited before binding socket: {stderr.strip()}")
+                    if time.monotonic() >= deadline:
+                        self.fail("compatibility daemon did not bind its socket")
+                    time.sleep(0.01)
+
+                self.assertEqual(0o600, stat.S_IMODE(socket_path.stat().st_mode))
+                self.assertEqual(0o700, stat.S_IMODE(socket_path.parent.stat().st_mode))
+
+                request = json.dumps({"method": "capabilities", "params": {}}).encode("utf-8")
+                with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as client:
+                    client.settimeout(2)
+                    client.connect(str(socket_path))
+                    client.sendall(_HEADER.pack(len(request)) + request)
+                    header = self._read_exact(client, _HEADER.size)
+                    (length,) = _HEADER.unpack(header)
+                    payload = self._read_exact(client, length)
+
+                response = json.loads(payload.decode("utf-8"))
+                self.assertTrue(response["ok"])
+                self.assertEqual(1, response["result"]["schemaVersion"])
+                self.assertTrue(response["result"]["providers"]["wine"]["enabled"])
+                self.assertFalse(response["result"]["providers"]["winboat"]["enabled"])
+            finally:
+                if process.poll() is None:
+                    process.terminate()
+                    try:
+                        process.wait(timeout=2)
+                    except subprocess.TimeoutExpired:
+                        process.kill()
+                        process.wait(timeout=2)
+
+    @staticmethod
+    def _read_exact(connection, size):
+        output = b""
+        while len(output) < size:
+            chunk = connection.recv(size - len(output))
+            if not chunk:
+                raise AssertionError("daemon closed the socket before the framed response completed")
+            output += chunk
         return output
 
 
