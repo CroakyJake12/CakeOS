@@ -1,0 +1,34 @@
+{
+  "schemaVersion": 1,
+  "package": "haven-llamacpp-runtime",
+  "version": "0.4.0+haven0.1",
+  "architecture": "amd64",
+  "modelFree": true,
+  "source": {
+    "repository": "CroakyJake12/CakeOS",
+    "workflowRunId": 34158175902,
+    "workflowHeadSha": "28f7e582febd3d5d0e9b1161fd844a4529206310",
+    "artifactId": 10031771129,
+    "artifactName": "haven-llamacpp-runtime-amd64",
+    "artifactZipSha256": "33fe22cdf3b1ba0bc2b77fd9e28290189b93f72575c55f5e24ff898ddfdbb4f3",
+    "artifactExpiresAt": "2026-09-21T20:12:10Z"
+  },
+  "deb": {
+    "filename": "haven-llamacpp-runtime_0.4.0+haven0.1_amd64.deb",
+    "sha256": "13ea16e4ffa92d1e4b2f31a1a32ba00dc8802ec9077733d7db96a68dad92142d",
+    "stagePath": "platform/ubuntu/image/live-build/config/packages.chroot/haven-llamacpp-runtime_0.4.0+haven0.1_amd64.deb"
+  },
+  "upstream": {
+    "repository": "https://github.com/ggml-org/llama.cpp.git",
+    "tag": "v0.4.0",
+    "commit": "5266f24da75dc449bd56cbed7addb9c8e4a6a73e",
+    "license": "MIT"
+  },
+  "runtimeDependencies": [
+    "python3",
+    "libc6",
+    "libstdc++6",
+    "libgcc-s1",
+    "libgomp1"
+  ]
+}
