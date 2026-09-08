@@ -61,11 +61,32 @@ jobs:
           evidence_dir="$RUNNER_TEMP/haven-data-package-evidence"
           mkdir -p "$evidence_dir"
 
+          is_installed() {
+            dpkg-query -W -f='${Status}' "$1" 2>/dev/null | grep -qx 'install ok installed'
+          }
+
+          runtime_packages=(libreoffice-calc-nogui libreoffice-common python3-uno)
+          core_packages=()
+          for candidate in libreoffice-core-nogui libreoffice-core; do
+            if is_installed "$candidate"; then
+              core_packages+=("$candidate")
+            fi
+          done
+          if [[ "${#core_packages[@]}" -eq 0 ]]; then
+            echo 'FAIL: neither libreoffice-core-nogui nor libreoffice-core is installed' >&2
+            exit 1
+          fi
+          runtime_packages+=("${core_packages[@]}")
+
+          for required in libreoffice-calc-nogui libreoffice-common python3-uno; do
+            if ! is_installed "$required"; then
+              echo "FAIL: required Data runtime package is not installed: $required" >&2
+              exit 1
+            fi
+          done
+
           dpkg-query -W -f='${binary:Package}\t${Version}\t${Architecture}\n' \
-            libreoffice-calc-nogui \
-            libreoffice-core-nogui \
-            libreoffice-common \
-            python3-uno | tee "$evidence_dir/apt-packages.txt"
+            "${runtime_packages[@]}" | sort | tee "$evidence_dir/apt-packages.txt"
 
           .data-venv/bin/python - <<'PY' | tee "$evidence_dir/duckdb-metadata.txt"
           from importlib import metadata
