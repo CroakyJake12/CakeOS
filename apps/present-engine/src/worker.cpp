@@ -280,23 +280,35 @@ std::optional<std::array<long, 5>> parseGraphicSelection(std::string_view payloa
         return std::nullopt;
     }
 
+    // The graphic-selection callback is version-dependent. The first four
+    // fields are the stable twip rectangle; some LibreOfficeKit builds append
+    // an angle. Do not discard valid geometry when that optional tail is absent.
     std::array<long, 5> values{};
     std::size_t offset = 0U;
-    for (std::size_t index = 0U; index < values.size(); ++index) {
+    for (std::size_t index = 0U; index < 4U; ++index) {
         const auto comma = payload.find(',', offset);
-        if (index < 4U && comma == std::string_view::npos) {
-            return std::nullopt;
-        }
         const auto end = comma == std::string_view::npos ? payload.size() : comma;
         const auto parsed = parseLong(payload.substr(offset, end - offset));
         if (!parsed.has_value()) {
             return std::nullopt;
         }
         values[index] = *parsed;
+        if (index < 3U && comma == std::string_view::npos) {
+            return std::nullopt;
+        }
         if (comma == std::string_view::npos) {
+            offset = payload.size();
             break;
         }
         offset = comma + 1U;
+    }
+
+    if (offset < payload.size()) {
+        const auto comma = payload.find(',', offset);
+        const auto end = comma == std::string_view::npos ? payload.size() : comma;
+        if (const auto angle = parseLong(payload.substr(offset, end - offset)); angle.has_value()) {
+            values[4] = *angle;
+        }
     }
     return values;
 }
