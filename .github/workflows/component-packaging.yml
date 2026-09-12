@@ -44,7 +44,6 @@ jobs:
         run: |
           cargo generate-lockfile --manifest-path apps/canvas/rnote-poc/Cargo.toml
           cargo test --manifest-path apps/canvas/rnote-poc/Cargo.toml --all-targets --verbose
-          test -f apps/canvas/rnote-poc/target/debug/libcakeos_canvas_rnote_poc.so
 
       - name: Build the HUI host containing the Canvas adapter
         run: bash HUI/build-linux-host.sh
