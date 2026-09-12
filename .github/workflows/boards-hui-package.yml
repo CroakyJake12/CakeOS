@@ -69,9 +69,12 @@ jobs:
               CAKEOS_HUI_PREVIEW_AUTO_EXIT_MS=4000 \
               cakeos-boards > artifacts/boards-runtime/runtime.log 2>&1 &
             app=$!
+            app_window_pid="$app"
             window=""
             for attempt in $(seq 1 40); do
-              window=$(timeout 1s xdotool search --pid "$app" --onlyvisible 2>/dev/null | head -n 1)
+              child_pid=$(timeout 1s pgrep -P "$app" -o 2>/dev/null)
+              test -n "$child_pid" && app_window_pid="$child_pid"
+              window=$(timeout 1s xdotool search --pid "$app_window_pid" --onlyvisible 2>/dev/null | head -n 1)
               test -n "$window" && break
               kill -0 "$app" 2>/dev/null || break
               timeout 1s sleep 0.1
