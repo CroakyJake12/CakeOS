@@ -1,0 +1,92 @@
+name: Boards HUI package
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - croakyjake12-worker-one-boards-hui-package
+
+jobs:
+  boards-hui:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 35
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+          submodules: false
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.0.x
+      - name: Install build and X11 tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends dpkg-dev jq xvfb xauth xdotool openbox imagemagick
+      - name: Build generic HUI host and Boards provider
+        run: |
+          bash HUI/build-linux-host.sh
+          dotnet publish apps/Boards/LinuxHostProvider/CakeOS.Apps.Boards.LinuxHostProvider.csproj \
+            -c Release -r linux-x64 --self-contained false \
+            -p:HavenUiProjectPath="$GITHUB_WORKSPACE/HUI/vendor/Haven.UI/Haven.UI.csproj" \
+            -o artifacts/boards/provider
+          cp -R artifacts/boards/provider/. artifacts/hui-linux-host/publish/
+          test -f artifacts/hui-linux-host/publish/Boards.dll
+      - name: Build deterministic Debian package
+        env:
+          CAKEOS_BOARDS_VERSION: 0.1.0+boards.${{ github.run_number }}
+          SOURCE_DATE_EPOCH: 0
+        run: |
+          bash packaging/boards-hui/build-deb.sh
+          package="artifacts/packages/haven-boards_0.1.0+boards.${GITHUB_RUN_NUMBER}_amd64.deb"
+          cp "$package" "$package.first"
+          bash packaging/boards-hui/build-deb.sh
+          cmp "$package.first" "$package"
+          rm "$package.first"
+          dpkg-deb --contents "$package" | tee artifacts/packages/package-files.txt
+          dpkg-deb --info "$package" | tee artifacts/packages/package-metadata.txt
+          sha256sum "$package" | tee artifacts/packages/package.sha256
+      - name: Install and smoke-test Boards through X11 input
+        run: |
+          package=$(find artifacts/packages -maxdepth 1 -name '*.deb' -print -quit)
+          sudo apt-get install -y "./$package"
+          test -x /usr/bin/cakeos-boards
+          test -f /usr/share/applications/cakeos-boards.desktop
+          mkdir -p artifacts/boards-runtime/data
+          xvfb-run -a -s '-screen 0 1280x800x24' bash -c '
+            openbox > artifacts/boards-runtime/openbox.log 2>&1 &
+            wm=$!
+            CAKEOS_BOARDS_DATA_DIR="$GITHUB_WORKSPACE/artifacts/boards-runtime/data" \
+            CAKEOS_HUI_PREVIEW_AUTO_EXIT_MS=4000 cakeos-boards > artifacts/boards-runtime/runtime.log 2>&1 &
+            app=$!
+            window=""
+            for attempt in $(seq 1 80); do
+              window=$(xdotool search --pid "$app" --onlyvisible 2>/dev/null | head -n 1)
+              test -n "$window" && break
+              kill -0 "$app" 2>/dev/null || break
+              sleep 0.1
+            done
+            test -n "$window"
+            xdotool windowactivate "$window"
+            xdotool mousemove --window "$window" 40 80 click 1
+            xdotool key Tab Tab Return
+            sleep 1
+            import -window "$window" artifacts/boards-runtime/window.png
+            wait "$app"
+            status=$?
+            kill "$wm" >/dev/null 2>&1 || true
+            exit "$status"
+          '
+          grep -q 'BOARDS_HUI_ROOT_READY' artifacts/boards-runtime/runtime.log
+          grep -q 'BOARDS_HUI_COMMAND_REQUESTED type=CreateCardCommand' artifacts/boards-runtime/runtime.log
+          jq -e '[.groups[].cards[].title] | index("New card") != null' artifacts/boards-runtime/data/board-main.json >/dev/null
+          test -s artifacts/boards-runtime/window.png
+      - name: Upload Boards package evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: cakeos-boards-hui-debian-${{ github.run_number }}
+          path: |
+            artifacts/packages/
+            artifacts/boards-runtime/
+          if-no-files-found: error
