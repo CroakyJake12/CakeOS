@@ -62,6 +62,27 @@ exists when the source branch does not provide one.
 
 ## Write recovery
 
-A bounded check of the authoritative CakeOS remote branches and exact owned
-paths found no Write source, package, launcher, or handoff artifact. Write is
-therefore **UNKNOWN**, not implemented or inferred from unrelated components.
+A bounded check of `git log --all --oneline -- apps/write apps/Write
+apps/present apps/data compatibility/wine` and
+`git ls-tree -r --name-only origin/main -- apps/write apps/Write apps/present
+apps/data` found no Write source, package, launcher, or handoff artifact.
+**BLOCKED — NO AUTHORITATIVE IMPLEMENTATION RECOVERED.** Write is not
+inferred from unrelated components.
+
+## Ubuntu cohort packaging
+
+`.github/workflows/cohort-packages.yml` runs on Ubuntu 24.04 and invokes
+`packaging/cohort/build-debs.sh`. It builds:
+
+- `havenos-data_<version>_amd64.deb`, launcher
+  `/usr/bin/haven-data-calc-worker`;
+- `havenos-present_<version>_amd64.deb`, launcher
+  `/usr/bin/cakeos-present-worker`;
+- `havenos-wine-compat_<version>_amd64.deb`, user service
+  `/usr/lib/systemd/user/haven-compatd.service`.
+
+The workflow records per-package SHA-256 values in `SHA256SUMS`, dependency
+metadata in `cohort.json`, and the GitHub artifact ID/digest in the release
+record. `packaging/cohort/verify-debs.sh` extracts each package into a clean
+root, checks installed paths, verifies the rendered Wine unit has no
+placeholders, runs Python syntax smoke checks, and verifies checksums.
