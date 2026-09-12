@@ -48,7 +48,7 @@ jobs:
       - name: Build the HUI host containing the Canvas adapter
         run: |
           command -v jq || sudo apt-get install -y jq
-          bash -x HUI/build-linux-host.sh
+          bash HUI/build-linux-host.sh
           mkdir -p artifacts/hui-preview/publish
           cp artifacts/hui-linux-host/publish/cakeos-hui-linux-preview \
             artifacts/hui-preview/publish/cakeos-hui-preview
@@ -67,9 +67,11 @@ jobs:
 
       - name: Install and smoke-test package
         run: |
-          sudo apt-get install -y ./artifacts/packages/*.deb
+          package=$(find artifacts/packages -maxdepth 1 -name '*.deb' -print -quit)
+          package_name=$(dpkg-deb --field "$package" Package)
+          sudo apt-get install -y "$package"
           test -x /usr/bin/cakeos-hui-preview
-          dpkg-query -W -f='${Status}\n' haven-hui-preview | grep -q 'install ok installed'
+          dpkg-query -W -f='${Status}\n' "$package_name" | grep -q 'install ok installed'
           timeout 5s env CAKEOS_HUI_PREVIEW_AUTO_EXIT_MS=1000 cakeos-hui-preview > artifacts/packages/runtime.log 2>&1 || test "$?" = 124
 
       - name: Upload package and immutable metadata
