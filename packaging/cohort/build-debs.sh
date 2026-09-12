@@ -82,7 +82,10 @@ build_wine
 for deb in "$OUT"/*.deb; do
   sha256sum "$deb"
 done > "$OUT/SHA256SUMS"
-dpkg-deb --info "$OUT"/*.deb > "$OUT/package-control.txt"
+: > "$OUT/package-control.txt"
+for deb in "$OUT"/*.deb; do
+  dpkg-deb --info "$deb" >> "$OUT/package-control.txt"
+done
 cat > "$OUT/cohort.json" <<EOF
 {
   "version": "$VERSION",
