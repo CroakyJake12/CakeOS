@@ -2,6 +2,9 @@ name: Canvas Rnote package smoke
 
 on:
   workflow_dispatch:
+  push:
+    branches:
+      - croakyjake12-worker-one-canvas-runtime-fix
 
 jobs:
   canvas-rnote:
