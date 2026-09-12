@@ -48,7 +48,7 @@ jobs:
       - name: Build the HUI host containing the Canvas adapter
         run: |
           command -v jq || sudo apt-get install -y jq
-          bash HUI/build-linux-host.sh
+          bash -x HUI/build-linux-host.sh
           mkdir -p artifacts/hui-preview/publish
           cp artifacts/hui-linux-host/publish/cakeos-hui-linux-preview \
             artifacts/hui-preview/publish/cakeos-hui-preview
