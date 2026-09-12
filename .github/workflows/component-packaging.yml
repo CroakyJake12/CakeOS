@@ -69,7 +69,7 @@ jobs:
         run: |
           package=$(find artifacts/packages -maxdepth 1 -name '*.deb' -print -quit)
           package_name=$(dpkg-deb --field "$package" Package)
-          sudo apt-get install -y "$package"
+          sudo apt-get install -y "./$package"
           test -x /usr/bin/cakeos-hui-preview
           dpkg-query -W -f='${Status}\n' "$package_name" | grep -q 'install ok installed'
           timeout 5s env CAKEOS_HUI_PREVIEW_AUTO_EXIT_MS=1000 cakeos-hui-preview > artifacts/packages/runtime.log 2>&1 || test "$?" = 124
