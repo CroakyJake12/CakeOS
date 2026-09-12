@@ -30,9 +30,9 @@ jobs:
       - name: Build Present worker
         run: cmake -S apps/present-engine -B build/present -DCMAKE_BUILD_TYPE=Release && cmake --build build/present --parallel
       - name: Build cohort Debian artifacts
-        run: VERSION="0.1.${GITHUB_RUN_NUMBER}" PRESENT_BUILD_DIR="$PWD/build/present" packaging/cohort/build-debs.sh artifacts/cohort
+        run: VERSION="0.1.${GITHUB_RUN_NUMBER}" PRESENT_BUILD_DIR="$PWD/build/present" bash packaging/cohort/build-debs.sh artifacts/cohort
       - name: Verify clean extraction and runtime contracts
-        run: packaging/cohort/verify-debs.sh artifacts/cohort
+        run: bash packaging/cohort/verify-debs.sh artifacts/cohort
       - name: Upload immutable cohort
         id: upload
         uses: actions/upload-artifact@v4
