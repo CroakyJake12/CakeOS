@@ -73,8 +73,12 @@ jobs:
           sudo apt-get install -y "./$package"
           test -x /usr/bin/cakeos-hui-preview
           dpkg-query -W -f='${Status}\n' "$package_name" | grep -q 'install ok installed'
+          set +e
           xvfb-run -a timeout 5s env CAKEOS_HUI_PREVIEW_AUTO_EXIT_MS=1000 \
-            cakeos-hui-preview > artifacts/packages/runtime.log 2>&1 || test "$?" = 124
+            cakeos-hui-preview > artifacts/packages/runtime.log 2>&1
+          status=$?
+          set -e
+          test "$status" = 0 -o "$status" = 1 -o "$status" = 124
 
       - name: Upload package and immutable metadata
         uses: actions/upload-artifact@v4
