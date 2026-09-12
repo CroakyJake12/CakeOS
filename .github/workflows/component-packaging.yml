@@ -49,6 +49,10 @@ jobs:
         run: |
           command -v jq || sudo apt-get install -y jq
           bash HUI/build-linux-host.sh
+          mkdir -p artifacts/hui-preview/publish
+          cp artifacts/hui-linux-host/publish/cakeos-hui-linux-preview \
+            artifacts/hui-preview/publish/cakeos-hui-preview
+          chmod 0755 artifacts/hui-preview/publish/cakeos-hui-preview
 
       - name: Build deterministic Debian package
         env:
