@@ -2,7 +2,8 @@
 
 States are evidence classifications. `UNKNOWN` means the evidence source has
 not been recovered; it does not mean the component is absent. GNOME/Mutter
-local checkout state is recorded separately from global provenance.
+local checkout state is recorded in the evidence, not promoted to a global
+provenance state.
 
 | Component | Evidence | State |
 | --- | --- | --- |
