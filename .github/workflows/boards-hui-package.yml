@@ -54,35 +54,55 @@ jobs:
           test -x /usr/bin/cakeos-boards
           test -f /usr/share/applications/cakeos-boards.desktop
           mkdir -p artifacts/boards-runtime/data
-          xvfb-run -a -s '-screen 0 1280x800x24' bash -c '
-            openbox > artifacts/boards-runtime/openbox.log 2>&1 &
+          touch artifacts/boards-runtime/runtime.log
+          set +e
+          timeout --kill-after=2s 12s xvfb-run -a -s '-screen 0 1280x800x24' bash -c '
+            timeout --kill-after=1s 10s openbox > artifacts/boards-runtime/openbox.log 2>&1 &
             wm=$!
-            CAKEOS_BOARDS_DATA_DIR="$GITHUB_WORKSPACE/artifacts/boards-runtime/data" \
-            CAKEOS_HUI_PREVIEW_AUTO_EXIT_MS=4000 cakeos-boards > artifacts/boards-runtime/runtime.log 2>&1 &
+            timeout --kill-after=1s 7s env \
+              CAKEOS_BOARDS_DATA_DIR="$GITHUB_WORKSPACE/artifacts/boards-runtime/data" \
+              CAKEOS_HUI_PREVIEW_AUTO_EXIT_MS=4000 \
+              cakeos-boards > artifacts/boards-runtime/runtime.log 2>&1 &
             app=$!
             window=""
-            for attempt in $(seq 1 80); do
-              window=$(xdotool search --pid "$app" --onlyvisible 2>/dev/null | head -n 1)
+            for attempt in $(seq 1 40); do
+              window=$(timeout 1s xdotool search --pid "$app" --onlyvisible 2>/dev/null | head -n 1)
               test -n "$window" && break
               kill -0 "$app" 2>/dev/null || break
-              sleep 0.1
+              timeout 1s sleep 0.1
             done
-            test -n "$window"
-            xdotool windowactivate "$window"
-            xdotool mousemove --window "$window" 40 80 click 1
-            xdotool key Tab Tab Return
-            sleep 1
-            import -window "$window" artifacts/boards-runtime/window.png
+            probe_status=0
+            if test -z "$window"; then
+              probe_status=20
+            else
+              timeout 2s xdotool windowactivate "$window" || probe_status=$?
+              if test "$probe_status" -eq 0; then timeout 2s xdotool mousemove --window "$window" 40 80 click 1 || probe_status=$?; fi
+              if test "$probe_status" -eq 0; then timeout 2s xdotool key Tab Tab Return || probe_status=$?; fi
+              if test "$probe_status" -eq 0; then timeout 2s sleep 1 || probe_status=$?; fi
+              if test "$probe_status" -eq 0; then timeout 3s import -window "$window" artifacts/boards-runtime/window.png || probe_status=$?; fi
+            fi
             wait "$app"
-            status=$?
+            app_status=$?
             kill "$wm" >/dev/null 2>&1 || true
-            exit "$status"
+            printf "%s\n" "$app_status" > artifacts/boards-runtime/app-exit-status.txt
+            printf "%s\n" "$probe_status" > artifacts/boards-runtime/input-probe-status.txt
+            test "$probe_status" -eq 0 || exit "$probe_status"
+            exit "$app_status"
           '
+          runtime_status=$?
+          set -e
+          printf '%s\n' "$runtime_status" | tee artifacts/boards-runtime/xvfb-exit-status.txt
+          echo '--- Boards runtime log ---'
+          cat artifacts/boards-runtime/runtime.log
+          echo '--- Boards smoke statuses ---'
+          cat artifacts/boards-runtime/app-exit-status.txt artifacts/boards-runtime/input-probe-status.txt 2>/dev/null || true
+          test "$runtime_status" -eq 0
           grep -q 'BOARDS_HUI_ROOT_READY' artifacts/boards-runtime/runtime.log
           grep -q 'BOARDS_HUI_COMMAND_REQUESTED type=CreateCardCommand' artifacts/boards-runtime/runtime.log
           jq -e '[.groups[].cards[].title] | index("New card") != null' artifacts/boards-runtime/data/board-main.json >/dev/null
           test -s artifacts/boards-runtime/window.png
       - name: Upload Boards package evidence
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: cakeos-boards-hui-debian-${{ github.run_number }}
