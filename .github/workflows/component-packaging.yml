@@ -68,7 +68,9 @@ jobs:
 
       - name: Install and smoke-test package
         run: |
-          package=$(find artifacts/packages -maxdepth 1 -name '*.deb' -print -quit)
+          find artifacts -maxdepth 3 -type f -print
+          package=$(find artifacts/packages -maxdepth 1 -type f -name '*.deb' -print -quit)
+          test -n "$package"
           package_name=$(dpkg-deb --field "$package" Package)
           sudo apt-get install -y "./$package"
           test -x /usr/bin/cakeos-hui-preview
