@@ -38,7 +38,7 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
             build-essential cmake pkg-config libglib2.0-dev libcairo2-dev \
-            libpango1.0-dev librsvg2-dev dpkg-dev jq
+            libpango1.0-dev librsvg2-dev dpkg-dev jq xvfb
 
       - name: Build and test Canvas/Rnote native boundary
         run: |
@@ -47,7 +47,6 @@ jobs:
 
       - name: Build the HUI host containing the Canvas adapter
         run: |
-          set -euxo pipefail
           command -v jq || sudo apt-get install -y jq
           bash HUI/build-linux-host.sh
           mkdir -p artifacts/hui-preview/publish
@@ -60,7 +59,7 @@ jobs:
           CAKEOS_HUI_PREVIEW_VERSION: 0.1.0+canvas-rnote.${{ github.run_number }}
           SOURCE_DATE_EPOCH: 0
         run: |
-          bash -x packaging/haven-hui-preview/build-deb.sh
+          bash packaging/haven-hui-preview/build-deb.sh
           package="artifacts/packages/haven-hui-preview_0.1.0+canvas-rnote.${GITHUB_RUN_NUMBER}_amd64.deb"
           dpkg-deb --info "$package" | tee artifacts/packages/package-metadata.txt
           dpkg-deb --contents "$package" | tee artifacts/packages/package-files.txt
@@ -68,14 +67,14 @@ jobs:
 
       - name: Install and smoke-test package
         run: |
-          find artifacts -maxdepth 3 -type f -print
           package=$(find artifacts/packages -maxdepth 1 -type f -name '*.deb' -print -quit)
           test -n "$package"
           package_name=$(dpkg-deb --field "$package" Package)
           sudo apt-get install -y "./$package"
           test -x /usr/bin/cakeos-hui-preview
           dpkg-query -W -f='${Status}\n' "$package_name" | grep -q 'install ok installed'
-          timeout 5s env CAKEOS_HUI_PREVIEW_AUTO_EXIT_MS=1000 cakeos-hui-preview > artifacts/packages/runtime.log 2>&1 || test "$?" = 124
+          xvfb-run -a timeout 5s env CAKEOS_HUI_PREVIEW_AUTO_EXIT_MS=1000 \
+            cakeos-hui-preview > artifacts/packages/runtime.log 2>&1 || test "$?" = 124
 
       - name: Upload package and immutable metadata
         uses: actions/upload-artifact@v4
