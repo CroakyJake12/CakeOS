@@ -2,6 +2,14 @@ name: Component packaging
 
 on:
   workflow_dispatch:
+  push:
+    branches:
+      - "release/**"
+    paths:
+      - "apps/**"
+      - "compatibility/wine/**"
+      - "packaging/**"
+      - ".github/workflows/component-packaging.yml"
 
 jobs:
   canvas-rnote:
