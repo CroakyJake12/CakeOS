@@ -1,3 +1,4 @@
+using System.Reflection;
 using System.Runtime.Loader;
 using Haven.UI.Components;
 
@@ -57,7 +58,8 @@ public static class HuiRootProviderResolver
         if (!Path.IsPathFullyQualified(assemblyPath))
             throw new ArgumentException($"{AssemblyOption} must be an absolute path.");
 
-        var assembly = AssemblyLoadContext.Default.LoadFromAssemblyPath(Path.GetFullPath(assemblyPath));
+        var assembly = new RootProviderLoadContext(Path.GetFullPath(assemblyPath))
+            .LoadFromAssemblyPath(Path.GetFullPath(assemblyPath));
         var providerType = assembly.GetType(typeName, throwOnError: true, ignoreCase: false)
             ?? throw new InvalidOperationException($"Provider type '{typeName}' was not found.");
         if (!typeof(IHuiRootProvider).IsAssignableFrom(providerType))
@@ -65,5 +67,23 @@ public static class HuiRootProviderResolver
 
         return Activator.CreateInstance(providerType) as IHuiRootProvider
             ?? throw new InvalidOperationException($"Provider type '{typeName}' must have a public parameterless constructor.");
+    }
+
+    private sealed class RootProviderLoadContext : AssemblyLoadContext
+    {
+        private readonly AssemblyDependencyResolver _dependencies;
+
+        public RootProviderLoadContext(string assemblyPath) => _dependencies = new AssemblyDependencyResolver(assemblyPath);
+
+        protected override Assembly? Load(AssemblyName assemblyName)
+        {
+            var hostAssembly = Default.Assemblies.FirstOrDefault(assembly =>
+                AssemblyName.ReferenceMatchesDefinition(assembly.GetName(), assemblyName));
+            if (hostAssembly is not null)
+                return hostAssembly;
+
+            var dependencyPath = _dependencies.ResolveAssemblyToPath(assemblyName);
+            return dependencyPath is null ? null : LoadFromAssemblyPath(dependencyPath);
+        }
     }
 }
