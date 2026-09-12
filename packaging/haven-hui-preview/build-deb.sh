@@ -3,14 +3,14 @@ set -euo pipefail
 
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 version="${CAKEOS_HUI_PREVIEW_VERSION:-0.1.0}"
-publish="$root/artifacts/hui-preview/publish"
+publish="$root/artifacts/hui-linux-host/publish"
 out="$root/artifacts/packages"
 stage="$(mktemp -d)"
 trap 'rm -rf "$stage"' EXIT
 
 command -v dpkg-deb >/dev/null || { echo "dpkg-deb is required" >&2; exit 2; }
 [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+([+~.-][A-Za-z0-9.+~-]+)?$ ]] || { echo "Invalid Debian preview version: $version" >&2; exit 2; }
-[[ -x "$publish/cakeos-hui-preview" ]] || { echo "Build HUI preview before packaging" >&2; exit 2; }
+[[ -x "$publish/cakeos-hui-linux-preview" ]] || { echo "Build graphical HUI Linux host before packaging" >&2; exit 2; }
 
 source_date_epoch="${SOURCE_DATE_EPOCH:-$(git -C "$root" show -s --format=%ct HEAD)}"
 [[ "$source_date_epoch" =~ ^[0-9]+$ ]] || { echo "Invalid SOURCE_DATE_EPOCH: $source_date_epoch" >&2; exit 2; }
@@ -20,7 +20,7 @@ mkdir -p "$stage/DEBIAN" "$stage/usr/lib/cakeos/hui-preview" "$stage/usr/bin" "$
 cp -R "$publish/." "$stage/usr/lib/cakeos/hui-preview/"
 cat > "$stage/usr/bin/cakeos-hui-preview" <<'EOF'
 #!/bin/sh
-exec /usr/lib/cakeos/hui-preview/cakeos-hui-preview "$@"
+exec /usr/lib/cakeos/hui-preview/cakeos-hui-linux-preview "$@"
 EOF
 chmod 0755 "$stage/usr/bin/cakeos-hui-preview"
 
