@@ -43,6 +43,7 @@ jobs:
       - name: Build and test Canvas/Rnote native boundary
         run: |
           cargo generate-lockfile --manifest-path apps/canvas/rnote-poc/Cargo.toml
+          cargo build --manifest-path apps/canvas/rnote-poc/Cargo.toml --lib --verbose
           cargo test --manifest-path apps/canvas/rnote-poc/Cargo.toml --all-targets --verbose
 
       - name: Build the HUI host containing the Canvas adapter
