@@ -60,7 +60,7 @@ jobs:
           CAKEOS_HUI_PREVIEW_VERSION: 0.1.0+canvas-rnote.${{ github.run_number }}
           SOURCE_DATE_EPOCH: 0
         run: |
-          bash packaging/haven-hui-preview/build-deb.sh
+          bash -x packaging/haven-hui-preview/build-deb.sh
           package="artifacts/packages/haven-hui-preview_0.1.0+canvas-rnote.${GITHUB_RUN_NUMBER}_amd64.deb"
           dpkg-deb --info "$package" | tee artifacts/packages/package-metadata.txt
           dpkg-deb --contents "$package" | tee artifacts/packages/package-files.txt
