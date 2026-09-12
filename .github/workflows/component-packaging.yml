@@ -46,7 +46,9 @@ jobs:
           cargo test --manifest-path apps/canvas/rnote-poc/Cargo.toml --all-targets --verbose
 
       - name: Build the HUI host containing the Canvas adapter
-        run: bash HUI/build-linux-host.sh
+        run: |
+          command -v jq || sudo apt-get install -y jq
+          bash HUI/build-linux-host.sh
 
       - name: Build deterministic Debian package
         env:
