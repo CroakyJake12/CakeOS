@@ -19,7 +19,7 @@ if (command is "status" or "source")
 
 if (command == "validate")
 {
-    var required = new[] { "platform/gnome-shell", "platform/mutter", "platform/ubuntu/image/live-build/auto/config", "image/build-live-iso.sh", "tests/verify-workspace.ps1" };
+    var required = new[] { "platform/gnome-shell", "platform/mutter", "platform/ubuntu/image/live-build/auto/config", "image/build-live-iso.sh", "tests/verify-workspace.ps1", "tests/verify-iso-provenance.ps1" };
     var missing = required.Where(path => !File.Exists(Path.Combine(root, path)) && !Directory.Exists(Path.Combine(root, path))).ToArray();
     if (missing.Length > 0) throw new InvalidOperationException("Missing required workspace paths: " + string.Join(", ", missing));
     Console.WriteLine("HavenOS workspace contract is present. This does not assert that an ISO or VM exists.");
