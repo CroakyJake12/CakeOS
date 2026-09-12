@@ -7,6 +7,8 @@ namespace CakeOS.HuiLinuxHost;
 
 public sealed class App : Application
 {
+    internal static IHuiRootProvider? RootProvider { get; set; }
+
     public override void OnFrameworkInitializationCompleted()
     {
         if (ApplicationLifetime is IClassicDesktopStyleApplicationLifetime desktop)
@@ -14,7 +16,12 @@ public sealed class App : Application
             if (Environment.GetEnvironmentVariable("CAKEOS_HUI_CANVAS_PREVIEW") == "1")
                 CanvasManagedBoundaryProof.Run();
 
-            var window = new PreviewWindow();
+            var root = RootProvider is null
+                ? null
+                : RootProvider.CreateRoot() ?? throw new InvalidOperationException("HUI root provider returned null.");
+            var window = root is null
+                ? new PreviewWindow()
+                : new PreviewWindow(new HuiPreviewSurface(root));
             desktop.MainWindow = window;
 
             window.Opened += (_, _) =>

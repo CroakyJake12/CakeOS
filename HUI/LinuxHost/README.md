@@ -4,6 +4,37 @@ This is the first graphical Linux backend slice for HUI. It is intentionally a n
 
 The host consumes the platform-neutral `Haven.UI` source pinned by `havenos.lock`. The initial renderer deliberately implements only the HUI draw-command subset used by this preview and throws on unsupported commands so a partial backend cannot be mistaken for full HUI compatibility.
 
+## External application launcher contract
+
+An application assembly provides one public, parameterless type implementing
+`CakeOS.HuiLinuxHost.IHuiRootProvider`:
+
+```csharp
+using CakeOS.HuiLinuxHost;
+using Haven.UI.Components;
+
+public sealed class ApplicationRootProvider : IHuiRootProvider
+{
+    public Page CreateRoot() => BuildApplicationRoot();
+}
+```
+
+The application assembly must reference `cakeos-hui-linux-preview` so its
+provider implements the exact host interface. Launch it through the shared
+host, using an absolute provider assembly path and its fully-qualified type:
+
+```sh
+cakeos-hui-linux-preview \
+  --hui-root-provider-assembly /opt/haven/apps/application/Application.dll \
+  --hui-root-provider-type Haven.Applications.ApplicationRootProvider
+```
+
+`HuiRootProviderResolver.Resolve` loads that type, and
+`App.OnFrameworkInitializationCompleted` mounts its `CreateRoot()` result via
+`new HuiPreviewSurface(root)`. Omitting both options retains the current
+preview-scene launcher; specifying either option without the other is an
+error. Arguments other than these two options continue to Avalonia.
+
 The automated graphical gate must:
 
 1. stage the exact pinned HUI source;

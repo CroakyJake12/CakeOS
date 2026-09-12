@@ -71,6 +71,18 @@ public sealed class HuiPreviewSurface : Control, IHavenMeasureContext, IDisposab
         _input = new HavenInputRouter(_root);
     }
 
+    // Application roots use the same layout, renderer, and input router as the preview scenes.
+    public HuiPreviewSurface(HuiPage root)
+    {
+        Focusable = true;
+        ClipToBounds = true;
+        _root = root;
+        _action = null!;
+        _status = null!;
+        _canvasMode = false;
+        _input = new HavenInputRouter(_root);
+    }
+
     protected override Size MeasureOverride(Size availableSize)
     {
         var width = double.IsFinite(availableSize.Width) ? availableSize.Width : 960d;
@@ -277,6 +289,9 @@ public sealed class HuiPreviewSurface : Control, IHavenMeasureContext, IDisposab
 
     public void RunInputSelfTest()
     {
+        if (_action is null || _status is null)
+            throw new InvalidOperationException("Input self-test requires the preview scene.");
+
         _layout.Layout(_root, new HavenSize(Math.Max(1, Bounds.Width), Math.Max(1, Bounds.Height)), HavenPlatform.Linux, this);
         var center = new HavenPoint(_action.Bounds.X + _action.Bounds.Width / 2d, _action.Bounds.Y + _action.Bounds.Height / 2d);
         _action.SetState(HavenElementState.Selected, false);

@@ -7,10 +7,15 @@ namespace CakeOS.HuiLinuxHost;
 public sealed class PreviewWindow : Window
 {
     private readonly bool _canvasMode = Environment.GetEnvironmentVariable("CAKEOS_HUI_CANVAS_PREVIEW") == "1";
-    private readonly HuiPreviewSurface _surface = new();
+    private readonly HuiPreviewSurface _surface;
 
-    public PreviewWindow()
+    public PreviewWindow() : this(new HuiPreviewSurface())
     {
+    }
+
+    public PreviewWindow(HuiPreviewSurface surface)
+    {
+        _surface = surface;
         Title = _canvasMode ? "CakeOS HUI Canvas / Rnote Preview" : "CakeOS HUI Linux Preview";
         Width = 960;
         Height = 600;
