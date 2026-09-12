@@ -4,6 +4,7 @@ on:
   pull_request:
     paths:
       - 'runtime/llamacpp/**'
+      - 'HUI/**'
       - 'packaging/systemd/user/haven-inference-broker.service'
       - 'packaging/bin/haven-modelctl'
       - 'packaging/llamacpp/**'
