@@ -31,7 +31,12 @@ jobs:
             -c Release -r linux-x64 --self-contained false \
             -p:HavenUiProjectPath="$GITHUB_WORKSPACE/HUI/vendor/Haven.UI/Haven.UI.csproj" \
             -o artifacts/boards/provider
-          cp -R artifacts/boards/provider/. artifacts/hui-linux-host/publish/
+          for provider_file in artifacts/boards/provider/*; do
+            case "$(basename "$provider_file")" in
+              cakeos-hui-linux-preview|cakeos-hui-linux-preview.deps.json|cakeos-hui-linux-preview.runtimeconfig.json) continue ;;
+            esac
+            cp -R "$provider_file" artifacts/hui-linux-host/publish/
+          done
           test -f artifacts/hui-linux-host/publish/Boards.dll
       - name: Build deterministic Debian package
         env:
