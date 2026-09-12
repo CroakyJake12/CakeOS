@@ -47,6 +47,7 @@ jobs:
 
       - name: Build the HUI host containing the Canvas adapter
         run: |
+          set -euxo pipefail
           command -v jq || sudo apt-get install -y jq
           bash HUI/build-linux-host.sh
           mkdir -p artifacts/hui-preview/publish
