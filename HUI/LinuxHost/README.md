@@ -11,10 +11,12 @@ An application assembly provides one public, parameterless type implementing
 
 ```csharp
 using CakeOS.HuiLinuxHost;
+using CakeOS.Platform;
 using Haven.UI.Components;
 
 public sealed class ApplicationRootProvider : IHuiRootProvider
 {
+    public HuiRootProviderAbi Abi => HuiLinuxHostAbi.Current;
     public Page CreateRoot() => BuildApplicationRoot();
 }
 ```

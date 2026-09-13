@@ -1,4 +1,5 @@
 using System.Runtime.Loader;
+using CakeOS.Platform;
 using Haven.UI.Components;
 
 namespace CakeOS.HuiLinuxHost;
@@ -8,7 +9,15 @@ namespace CakeOS.HuiLinuxHost;
 /// </summary>
 public interface IHuiRootProvider
 {
-    Page CreateRoot();
+    HuiRootProviderAbi Abi { get; }
+    IRootElement CreateRoot(IServiceProvider services);
+    Task<HuiRootLifecycleState> InitializeAsync(IServiceProvider services, CancellationToken cancellationToken = default);
+    Task ActivateAsync(CancellationToken cancellationToken = default);
+    Task DeactivateAsync(CancellationToken cancellationToken = default);
+    Task<HuiRootLifecycleState> GetStateAsync(CancellationToken cancellationToken = default);
+    Task ApplyThemeTokensAsync(HuiThemeTokens tokens, CancellationToken cancellationToken = default);
+    Task ApplyAccessibilityStateAsync(HuiAccessibilityState state, CancellationToken cancellationToken = default);
+    Task<ProviderInjectionResult> InjectProvidersAsync(IReadOnlyCollection<ProviderDescriptor> providers, IReadOnlyCollection<ServiceDescriptor> services, CancellationToken cancellationToken = default);
 }
 
 public static class HuiRootProviderResolver
@@ -63,7 +72,9 @@ public static class HuiRootProviderResolver
         if (!typeof(IHuiRootProvider).IsAssignableFrom(providerType))
             throw new ArgumentException($"Provider type '{typeName}' must implement {nameof(IHuiRootProvider)}.");
 
-        return Activator.CreateInstance(providerType) as IHuiRootProvider
+        var provider = Activator.CreateInstance(providerType) as IHuiRootProvider
             ?? throw new InvalidOperationException($"Provider type '{typeName}' must have a public parameterless constructor.");
+        HuiLinuxHostAbi.RequireCompatible(provider.Abi);
+        return provider;
     }
 }
