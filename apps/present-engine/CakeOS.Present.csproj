@@ -1,0 +1,21 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+    <RootNamespace>CakeOS.Present</RootNamespace>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+  </PropertyGroup>
+  <ItemGroup>
+    <None Include="include\cakeos\present\engine.hpp" Pack="true" PackagePath="include\cakeos\present\" />
+  </ItemGroup>
+  <Target Name="BuildNative" BeforeTargets="Build">
+    <Exec Command="cmake -B build -S . -DCMAKE_BUILD_TYPE=Release" WorkingDirectory="$(MSBuildProjectDirectory)" />
+    <Exec Command="cmake --build build --config Release" WorkingDirectory="$(MSBuildProjectDirectory)" />
+  </Target>
+  <Target Name="CopyNativeLibrary" AfterTargets="BuildNative">
+    <Copy SourceFiles="$(MSBuildProjectDirectory)\build\libcakeos-present-engine.a" DestinationFolder="$(OutDir)" Condition="Exists('$(MSBuildProjectDirectory)\build\libcakeos-present-engine.a')" />
+    <Copy SourceFiles="$(MSBuildProjectDirectory)\build\cakeos-present-engine.lib" DestinationFolder="$(OutDir)" Condition="Exists('$(MSBuildProjectDirectory)\build\cakeos-present-engine.lib')" />
+  </Target>
+</Project>

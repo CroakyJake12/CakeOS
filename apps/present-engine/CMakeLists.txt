@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.20)
-project(cakeos_present_engine LANGUAGES CXX)
+project(cakeos_present_engine LANGUAGES CXX C)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -61,6 +61,20 @@ target_link_libraries(cakeos-present-engine PRIVATE
     nlohmann_json::nlohmann_json
 )
 cakeos_enable_strict_warnings(cakeos-present-engine)
+
+add_library(cakeos-present-engine-c SHARED
+    src/c_wrapper.cpp
+)
+target_link_libraries(cakeos-present-engine-c PRIVATE cakeos-present-engine)
+target_include_directories(cakeos-present-engine-c PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
+set_target_properties(cakeos-present-engine-c PROPERTIES OUTPUT_NAME "cakeos-present-engine" PREFIX "")
+
+add_library(cakeos-write-engine-c SHARED
+    src/write_wrapper.cpp
+)
+target_link_libraries(cakeos-write-engine-c PRIVATE cakeos-present-engine)
+target_include_directories(cakeos-write-engine-c PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
+set_target_properties(cakeos-write-engine-c PROPERTIES OUTPUT_NAME "cakeos-present-engine" PREFIX "")
 
 add_executable(cakeos-present-worker
     src/worker.cpp
