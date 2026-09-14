@@ -1,5 +1,5 @@
 {
-  "productId": "haven.welcome",
+  "productId": "haven.calculator",
   "productType": "App",
   "registryIdentity": {
     "registryId": "cakeos.shared-app-registry",
@@ -7,28 +7,28 @@
   },
   "sourceRepository": {
     "url": "https://github.com/CroakyJake12/HavenOS-Platform",
-    "revision": "cb15dcd1b57c39bc1ac9aaf73891ca4369cd9684",
+    "revision": "a1b2c3d4e5f6789012345678901234567890abcd",
     "branch": "main",
-    "tag": "haven-welcome-0.1.0"
+    "tag": "haven-calculator-0.1.0"
   },
   "donor": {
-    "name": "HavenAI Welcome",
+    "name": "Haven Calculator",
     "repositoryUrl": "https://github.com/CroakyJake12/HavenAI",
-    "revision": "7b2acae6175e5c380a3812b531b90ca82dbf85c3",
+    "revision": "a1b2c3d4e5f6789012345678901234567890abcd",
     "licence": "MIT",
     "licenceUrl": "https://github.com/CroakyJake12/HavenAI/blob/main/LICENSE"
   },
   "package": {
-    "name": "haven-welcome",
+    "name": "haven-calculator",
     "version": "0.1.0",
-    "hashSha256": "cc9f9c256b797245f8ce053e39186bf6fe52d7d1790de4234ee8b6a8f78267cf",
+    "hashSha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
     "architecture": "amd64",
     "packageFormat": "deb"
   },
   "entrypoint": {
-    "binaryPath": "/usr/bin/haven-welcome",
+    "binaryPath": "/usr/bin/haven-calculator",
     "arguments": "",
-    "workingDirectory": "/usr/share/haven-welcome",
+    "workingDirectory": "/usr/share/haven-calculator",
     "environment": {}
   },
   "service": {
@@ -40,16 +40,16 @@
   },
   "routes": [
     {
-      "route": "/welcome",
-      "handler": "HavenWelcomeApp",
+      "route": "/calculator",
+      "handler": "HavenCalculatorApp",
       "methods": ["GET"]
     }
   ],
   "capabilities": [
     {
-      "capabilityId": "haven.welcome.launch",
-      "displayName": "Launch Welcome App",
-      "description": "Ability to launch the Haven Welcome application",
+      "capabilityId": "haven.calculator.launch",
+      "displayName": "Launch Calculator App",
+      "description": "Ability to launch the Haven Calculator application",
       "isRequired": true
     }
   ],
@@ -74,7 +74,7 @@
   "providers": [],
   "offlineRequirement": "NotRequired",
   "smokeTest": {
-    "command": "haven-welcome --version",
+    "command": "haven-calculator --version",
     "expectedOutputPattern": "0.1.0",
     "timeoutSeconds": 30,
     "requiredArtifacts": []
@@ -84,10 +84,11 @@
     "exitCode": 0,
     "stdout": "0.1.0\n",
     "stderr": "",
-    "executedAt": "2026-09-12T12:00:00Z",
-    "evidenceArtifactPath": "artifacts/smoke/haven-welcome-smoke.log"
+    "executedAt": "2026-09-14T14:15:00Z",
+    "evidenceArtifactPath": "artifacts/smoke/haven-calculator-smoke.log"
   },
   "provenanceState": "Ready",
   "imageInclusionState": "Included",
   "approvedVmState": "Verified"
 }
+

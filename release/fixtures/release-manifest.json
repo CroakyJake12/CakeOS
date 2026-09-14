@@ -1,655 +1,2195 @@
-{
-  "releaseId": "havenos-2026.09-alpha",
-  "version": "0.1.0-alpha",
-  "createdAt": "2026-09-12T12:30:00Z",
-  "registryIdentity": {
-    "registryId": "cakeos.shared-app-registry",
-    "registrySchemaVersion": 1
-  },
-  "components": [
-    {
-      "productId": "haven.welcome",
-      "productType": "App",
-      "registryIdentity": {
-        "registryId": "cakeos.shared-app-registry",
-        "registrySchemaVersion": 1
-      },
-      "sourceRepository": {
-        "url": "https://github.com/CroakyJake12/HavenOS-Platform",
-        "revision": "cb15dcd1b57c39bc1ac9aaf73891ca4369cd9684",
-        "branch": "main",
-        "tag": "haven-welcome-0.1.0"
-      },
-      "donor": {
-        "name": "HavenAI Welcome",
-        "repositoryUrl": "https://github.com/CroakyJake12/HavenAI",
-        "revision": "7b2acae6175e5c380a3812b531b90ca82dbf85c3",
-        "licence": "MIT",
-        "licenceUrl": "https://github.com/CroakyJake12/HavenAI/blob/main/LICENSE"
-      },
-      "package": {
-        "name": "haven-welcome",
-        "version": "0.1.0",
-        "hashSha256": "cc9f9c256b797245f8ce053e39186bf6fe52d7d1790de4234ee8b6a8f78267cf",
-        "architecture": "amd64",
-        "packageFormat": "deb"
-      },
-      "entrypoint": {
-        "binaryPath": "/usr/bin/haven-welcome",
-        "arguments": "",
-        "workingDirectory": "/usr/share/haven-welcome",
-        "environment": {}
-      },
-      "service": {
-        "serviceName": "",
-        "socketName": "",
-        "dbusName": "",
-        "socketActivation": false,
-        "requiredServices": []
-      },
-      "routes": [
-        {
-          "route": "/welcome",
-          "handler": "HavenWelcomeApp",
-          "methods": ["GET"]
-        }
-      ],
-      "capabilities": [
-        {
-          "capabilityId": "haven.welcome.launch",
-          "displayName": "Launch Welcome App",
-          "description": "Ability to launch the Haven Welcome application",
-          "isRequired": true
-        }
-      ],
-      "dependencies": [
-        {
-          "dependencyId": "zenity",
-          "kind": "RequiredPackage",
-          "versionConstraint": ">=3.44"
-        }
-      ],
-      "persistence": {
-        "requiresSettings": false,
-        "requiresCache": false,
-        "requiresState": false,
-        "requiresData": false,
-        "customPaths": []
-      },
-      "permissions": {
-        "requiredGrants": [],
-        "optionalGrants": []
-      },
-      "providers": [],
-      "offlineRequirement": "NotRequired",
-      "smokeTest": {
-        "command": "haven-welcome --version",
-        "expectedOutputPattern": "0.1.0",
-        "timeoutSeconds": 30,
-        "requiredArtifacts": []
-      },
-      "smokeEvidence": {
-        "executed": true,
-        "exitCode": 0,
-        "stdout": "0.1.0\n",
-        "stderr": "",
-        "executedAt": "2026-09-12T12:00:00Z",
-        "evidenceArtifactPath": "artifacts/smoke/haven-welcome-smoke.log"
-      },
-      "provenanceState": "Ready",
-      "imageInclusionState": "Included",
-      "approvedVmState": "Verified"
-    },
-    {
-      "productId": "haven.shell",
-      "productType": "SystemSurface",
-      "registryIdentity": {
-        "registryId": "cakeos.shared-app-registry",
-        "registrySchemaVersion": 1
-      },
-      "sourceRepository": {
-        "url": "https://github.com/CroakyJake12/HavenOS-Platform",
-        "revision": "cb15dcd1b57c39bc1ac9aaf73891ca4369cd9684",
-        "branch": "main",
-        "tag": "haven-shell-0.1.0"
-      },
-      "donor": {
-        "name": "HavenOS Shell Extension",
-        "repositoryUrl": "https://github.com/CroakyJake12/gnome-shell",
-        "revision": "1d66bb011e56b1759a65eb8d3e9f194c92523baa",
-        "licence": "GPL-2.0-or-later",
-        "licenceUrl": "https://www.gnu.org/licenses/gpl-2.0.html"
-      },
-      "package": {
-        "name": "havenos-shell",
-        "version": "0.1.0",
-        "hashSha256": "731f63dc99c99e535c3ed74a47c5252ad2912e62994aff377b9b6a6c6a65c816",
-        "architecture": "amd64",
-        "packageFormat": "deb"
-      },
-      "entrypoint": {
-        "binaryPath": "/usr/share/gnome-shell/extensions/haven-shell@havenos/extension.js",
-        "arguments": "",
-        "workingDirectory": "/usr/share/gnome-shell/extensions/haven-shell@havenos",
-        "environment": {}
-      },
-      "service": {
-        "serviceName": "",
-        "socketName": "",
-        "dbusName": "org.gnome.Shell.Extensions.HavenShell",
-        "socketActivation": false,
-        "requiredServices": ["gnome-shell"]
-      },
-      "routes": [
-        {
-          "route": "/shell",
-          "handler": "HavenShellExtension",
-          "methods": ["GET"]
-        }
-      ],
-      "capabilities": [
-        {
-          "capabilityId": "haven.shell.topbar",
-          "displayName": "Top Bar Integration",
-          "description": "Haven-branded top bar with system status",
-          "isRequired": true
-        },
-        {
-          "capabilityId": "haven.shell.overview",
-          "displayName": "Overview Mode",
-          "description": "Custom overview with Haven app grid",
-          "isRequired": true
-        },
-        {
-          "capabilityId": "haven.shell.workspaces",
-          "displayName": "Workspace Management",
-          "description": "Haven workspace switching and management",
-          "isRequired": true
-        }
-      ],
-      "dependencies": [
-        {
-          "dependencyId": "gnome-shell",
-          "kind": "RequiredPackage",
-          "versionConstraint": ">=46.0"
-        },
-        {
-          "dependencyId": "mutter",
-          "kind": "RequiredPackage",
-          "versionConstraint": ">=46.0"
-        }
-      ],
-      "persistence": {
-        "requiresSettings": true,
-        "requiresCache": false,
-        "requiresState": true,
-        "requiresData": false,
-        "customPaths": ["/etc/gnome-shell/extensions/haven-shell@havenos"]
-      },
-      "permissions": {
-        "requiredGrants": ["system.shell.extension"],
-        "optionalGrants": []
-      },
-      "providers": [],
-      "offlineRequirement": "Required",
-      "smokeTest": {
-        "command": "gnome-extensions info haven-shell@havenos",
-        "expectedOutputPattern": "haven-shell@havenos",
-        "timeoutSeconds": 30,
-        "requiredArtifacts": []
-      },
-      "smokeEvidence": {
-        "executed": true,
-        "exitCode": 0,
-        "stdout": "haven-shell@havenos\n",
-        "stderr": "",
-        "executedAt": "2026-09-12T12:05:00Z",
-        "evidenceArtifactPath": "artifacts/smoke/haven-shell-smoke.log"
-      },
-      "provenanceState": "Ready",
-      "imageInclusionState": "Included",
-      "approvedVmState": "Verified"
-    },
-    {
-      "productId": "havenos.studio",
-      "productType": "App",
-      "registryIdentity": {
-        "registryId": "cakeos.shared-app-registry",
-        "registrySchemaVersion": 1
-      },
-      "sourceRepository": {
-        "url": "https://github.com/CroakyJake12/HavenOS-Platform",
-        "revision": "cb15dcd1b57c39bc1ac9aaf73891ca4369cd9684",
-        "branch": "main",
-        "tag": "havenos-studio-0.1.0"
-      },
-      "donor": {
-        "name": "HavenOS Studio",
-        "repositoryUrl": "https://github.com/CroakyJake12/HavenAI",
-        "revision": "7b2acae6175e5c380a3812b531b90ca82dbf85c3",
-        "licence": "MIT",
-        "licenceUrl": "https://github.com/CroakyJake12/HavenAI/blob/main/LICENSE"
-      },
-      "package": {
-        "name": "havenos-studio",
-        "version": "0.1.0",
-        "hashSha256": "7313362c3a783c31dec227c9181a5d4e345d0fa81648b0e59ce84cb794449310",
-        "architecture": "amd64",
-        "packageFormat": "deb"
-      },
-      "entrypoint": {
-        "binaryPath": "/usr/bin/havenos-studio",
-        "arguments": "",
-        "workingDirectory": "/usr/share/havenos-studio",
-        "environment": {}
-      },
-      "service": {
-        "serviceName": "",
-        "socketName": "",
-        "dbusName": "",
-        "socketActivation": false,
-        "requiredServices": []
-      },
-      "routes": [
-        {
-          "route": "/studio",
-          "handler": "HavenOSStudioApp",
-          "methods": ["GET"]
-        }
-      ],
-      "capabilities": [
-        {
-          "capabilityId": "havenos.studio.launch",
-          "displayName": "Launch Studio App",
-          "description": "Ability to launch the HavenOS Studio application",
-          "isRequired": true
-        },
-        {
-          "capabilityId": "havenos.studio.projects",
-          "displayName": "Project Management",
-          "description": "Create and manage HavenOS projects",
-          "isRequired": true
-        }
-      ],
-      "dependencies": [
-        {
-          "dependencyId": "zenity",
-          "kind": "RequiredPackage",
-          "versionConstraint": ">=3.44"
-        },
-        {
-          "dependencyId": "dotnet-sdk",
-          "kind": "RequiredPackage",
-          "versionConstraint": ">=8.0"
-        }
-      ],
-      "persistence": {
-        "requiresSettings": true,
-        "requiresCache": true,
-        "requiresState": true,
-        "requiresData": true,
-        "customPaths": ["/home/haven/.config/havenos-studio", "/home/haven/.local/share/havenos-studio"]
-      },
-      "permissions": {
-        "requiredGrants": ["files.read", "files.write"],
-        "optionalGrants": ["network.access"]
-      },
-      "providers": [],
-      "offlineRequirement": "Preferred",
-      "smokeTest": {
-        "command": "havenos-studio --version",
-        "expectedOutputPattern": "0.1.0",
-        "timeoutSeconds": 30,
-        "requiredArtifacts": []
-      },
-      "smokeEvidence": {
-        "executed": true,
-        "exitCode": 0,
-        "stdout": "0.1.0\n",
-        "stderr": "",
-        "executedAt": "2026-09-12T12:10:00Z",
-        "evidenceArtifactPath": "artifacts/smoke/havenos-studio-smoke.log"
-      },
-      "provenanceState": "Ready",
-      "imageInclusionState": "Included",
-      "approvedVmState": "Verified"
-    },
-    {
-      "productId": "llamacpp.provider",
-      "productType": "Provider",
-      "registryIdentity": {
-        "registryId": "cakeos.shared-app-registry",
-        "registrySchemaVersion": 1
-      },
-      "sourceRepository": {
-        "url": "https://github.com/CroakyJake12/HavenOS-Platform",
-        "revision": "cb15dcd1b57c39bc1ac9aaf73891ca4369cd9684",
-        "branch": "main",
-        "tag": "llamacpp-runtime-0.1.0"
-      },
-      "donor": {
-        "name": "llama.cpp",
-        "repositoryUrl": "https://github.com/ggml-org/llama.cpp",
-        "revision": "5266f24da75dc449bd56cbed7addb9c8e4a6a73e",
-        "licence": "MIT",
-        "licenceUrl": "https://github.com/ggml-org/llama.cpp/blob/master/LICENSE"
-      },
-      "package": {
-        "name": "haven-llamacpp-runtime",
-        "version": "0.1.0",
-        "hashSha256": "a1b2c3d4e5f6789012345678901234567890abcdef1234567890abcdef123456",
-        "architecture": "amd64",
-        "packageFormat": "deb"
-      },
-      "entrypoint": {
-        "binaryPath": "/usr/lib/haven-llamacpp/llama-server",
-        "arguments": "--host 127.0.0.1 --port 8080 --model /var/lib/haven/models/default.gguf",
-        "workingDirectory": "/var/lib/haven/llamacpp",
-        "environment": {
-          "LLAMA_SERVER_HOST": "127.0.0.1",
-          "LLAMA_SERVER_PORT": "8080"
-        }
-      },
-      "service": {
-        "serviceName": "haven-llamacpp-broker",
-        "socketName": "haven-llamacpp.socket",
-        "dbusName": "org.haven.LlamaCpp",
-        "socketActivation": true,
-        "requiredServices": ["systemd-journald"]
-      },
-      "routes": [
-        {
-          "route": "/v1/models",
-          "handler": "ListModelsHandler",
-          "methods": ["GET"]
-        },
-        {
-          "route": "/v1/chat/completions",
-          "handler": "ChatCompletionHandler",
-          "methods": ["POST"]
-        },
-        {
-          "route": "/v1/completions",
-          "handler": "CompletionHandler",
-          "methods": ["POST"]
-        }
-      ],
-      "capabilities": [
-        {
-          "capabilityId": "llamacpp.inference",
-          "displayName": "Local LLM Inference",
-          "description": "CPU/GPU-accelerated local LLM inference via llama.cpp",
-          "isRequired": true
-        },
-        {
-          "capabilityId": "llamacpp.model-management",
-          "displayName": "Model Management",
-          "description": "Download, verify, and manage GGUF models",
-          "isRequired": false
-        }
-      ],
-      "dependencies": [
-        {
-          "dependencyId": "libc6",
-          "kind": "RequiredPackage",
-          "versionConstraint": ">=2.38"
-        },
-        {
-          "dependencyId": "libstdc++6",
-          "kind": "RequiredPackage",
-          "versionConstraint": ">=13"
-        }
-      ],
-      "persistence": {
-        "requiresSettings": true,
-        "requiresCache": true,
-        "requiresState": true,
-        "requiresData": true,
-        "customPaths": ["/var/lib/haven/models", "/var/lib/haven/llamacpp", "/etc/haven/llamacpp"]
-      },
-      "permissions": {
-        "requiredGrants": ["model.inference", "files.read", "files.write"],
-        "optionalGrants": ["network.access", "hardware.gpu"]
-      },
-      "providers": [
-        {
-          "providerId": "llamacpp",
-          "transportType": "http-over-unix",
-          "legacyUnqualifiedProvider": "ollama",
-          "models": ["llama-3.2-3b", "llama-3.1-8b", "mistral-7b", "phi-3-mini"]
-        }
-      ],
-      "offlineRequirement": "Required",
-      "smokeTest": {
-        "command": "haven-modelctl --provider llamacpp list",
-        "expectedOutputPattern": "llamacpp",
-        "timeoutSeconds": 60,
-        "requiredArtifacts": []
-      },
-      "smokeEvidence": {
-        "executed": true,
-        "exitCode": 0,
-        "stdout": "llamacpp: llama-3.2-3b, llama-3.1-8b, mistral-7b, phi-3-mini\n",
-        "stderr": "",
-        "executedAt": "2026-09-12T12:15:00Z",
-        "evidenceArtifactPath": "artifacts/smoke/llamacpp-provider-smoke.log"
-      },
-      "provenanceState": "Ready",
-      "imageInclusionState": "Pending",
-      "approvedVmState": "Partial"
-    },
-    {
-      "productId": "haven.notifications",
-      "productType": "BackgroundComponent",
-      "registryIdentity": {
-        "registryId": "cakeos.shared-app-registry",
-        "registrySchemaVersion": 1
-      },
-      "sourceRepository": {
-        "url": "https://github.com/CroakyJake12/HavenOS-Platform",
-        "revision": "cb15dcd1b57c39bc1ac9aaf73891ca4369cd9684",
-        "branch": "main",
-        "tag": "haven-notifications-0.1.0"
-      },
-      "donor": {
-        "name": "Haven Notifications",
-        "repositoryUrl": "https://github.com/CroakyJake12/HavenAI",
-        "revision": "7b2acae6175e5c380a3812b531b90ca82dbf85c3",
-        "licence": "MIT",
-        "licenceUrl": "https://github.com/CroakyJake12/HavenAI/blob/main/LICENSE"
-      },
-      "package": {
-        "name": "haven-notifications",
-        "version": "0.1.0",
-        "hashSha256": "b2c3d4e5f6789012345678901234567890abcdef1234567890abcdef123456789",
-        "architecture": "amd64",
-        "packageFormat": "deb"
-      },
-      "entrypoint": {
-        "binaryPath": "/usr/lib/haven-notifications/haven-notification-daemon",
-        "arguments": "--daemon",
-        "workingDirectory": "/var/lib/haven/notifications",
-        "environment": {}
-      },
-      "service": {
-        "serviceName": "haven-notifications",
-        "socketName": "haven-notifications.socket",
-        "dbusName": "org.haven.Notifications",
-        "socketActivation": true,
-        "requiredServices": ["dbus", "systemd-journald"]
-      },
-      "routes": [
-        {
-          "route": "/notifications",
-          "handler": "NotificationListHandler",
-          "methods": ["GET"]
-        },
-        {
-          "route": "/notifications/{id}",
-          "handler": "NotificationActionHandler",
-          "methods": ["POST", "DELETE"]
-        }
-      ],
-      "capabilities": [
-        {
-          "capabilityId": "haven.notifications.deliver",
-          "displayName": "Notification Delivery",
-          "description": "Deliver notifications to the user via Haven Shell",
-          "isRequired": true
-        },
-        {
-          "capabilityId": "haven.notifications.history",
-          "displayName": "Notification History",
-          "description": "Maintain and query notification history",
-          "isRequired": false
-        }
-      ],
-      "dependencies": [
-        {
-          "dependencyId": "haven.shell",
-          "kind": "RequiredProduct",
-          "versionConstraint": ">=0.1.0"
-        },
-        {
-          "dependencyId": "libglib2.0-0",
-          "kind": "RequiredPackage",
-          "versionConstraint": ">=2.78"
-        }
-      ],
-      "persistence": {
-        "requiresSettings": true,
-        "requiresCache": false,
-        "requiresState": true,
-        "requiresData": true,
-        "customPaths": ["/home/haven/.local/share/haven/notifications", "/home/haven/.config/haven/notifications"]
-      },
-      "permissions": {
-        "requiredGrants": ["notifications.send", "notifications.read"],
-        "optionalGrants": []
-      },
-      "providers": [],
-      "offlineRequirement": "Required",
-      "smokeTest": {
-        "command": "systemctl --user is-active haven-notifications",
-        "expectedOutputPattern": "active",
-        "timeoutSeconds": 30,
-        "requiredArtifacts": []
-      },
-      "smokeEvidence": {
-        "executed": true,
-        "exitCode": 0,
-        "stdout": "active\n",
-        "stderr": "",
-        "executedAt": "2026-09-12T12:20:00Z",
-        "evidenceArtifactPath": "artifacts/smoke/haven-notifications-smoke.log"
-      },
-      "provenanceState": "Partial",
-      "imageInclusionState": "Excluded",
-      "approvedVmState": "NotTested"
-    },
-    {
-      "productId": "haven.settings",
-      "productType": "Service",
-      "registryIdentity": {
-        "registryId": "cakeos.shared-app-registry",
-        "registrySchemaVersion": 1
-      },
-      "sourceRepository": {
-        "url": "https://github.com/CroakyJake12/HavenOS-Platform",
-        "revision": "cb15dcd1b57c39bc1ac9aaf73891ca4369cd9684",
-        "branch": "main",
-        "tag": "haven-settings-0.1.0"
-      },
-      "donor": {
-        "name": "Haven Settings Service",
-        "repositoryUrl": "https://github.com/CroakyJake12/HavenAI",
-        "revision": "7b2acae6175e5c380a3812b531b90ca82dbf85c3",
-        "licence": "MIT",
-        "licenceUrl": "https://github.com/CroakyJake12/HavenAI/blob/main/LICENSE"
-      },
-      "package": {
-        "name": "haven-settings-service",
-        "version": "0.1.0",
-        "hashSha256": "c3d4e5f6789012345678901234567890abcdef1234567890abcdef1234567890a",
-        "architecture": "amd64",
-        "packageFormat": "deb"
-      },
-      "entrypoint": {
-        "binaryPath": "/usr/lib/haven-settings/haven-settings-daemon",
-        "arguments": "--system",
-        "workingDirectory": "/etc/haven/settings",
-        "environment": {}
-      },
-      "service": {
-        "serviceName": "haven-settings",
-        "socketName": "haven-settings.socket",
-        "dbusName": "org.haven.Settings",
-        "socketActivation": true,
-        "requiredServices": ["dbus", "systemd-journald"]
-      },
-      "routes": [
-        {
-          "route": "/settings",
-          "handler": "SettingsGetHandler",
-          "methods": ["GET"]
-        },
-        {
-          "route": "/settings/{key}",
-          "handler": "SettingsSetHandler",
-          "methods": ["PUT", "PATCH"]
-        }
-      ],
-      "capabilities": [
-        {
-          "capabilityId": "haven.settings.read",
-          "displayName": "Read Settings",
-          "description": "Read system and user settings",
-          "isRequired": true
-        },
-        {
-          "capabilityId": "haven.settings.write",
-          "displayName": "Write Settings",
-          "description": "Write system and user settings",
-          "isRequired": true
-        }
-      ],
-      "dependencies": [
-        {
-          "dependencyId": "libglib2.0-0",
-          "kind": "RequiredPackage",
-          "versionConstraint": ">=2.78"
-        }
-      ],
-      "persistence": {
-        "requiresSettings": true,
-        "requiresCache": false,
-        "requiresState": false,
-        "requiresData": false,
-        "customPaths": ["/etc/haven/settings.v1.json", "/home/haven/.config/haven/settings.v1.json"]
-      },
-      "permissions": {
-        "requiredGrants": ["settings.read", "settings.write"],
-        "optionalGrants": []
-      },
-      "providers": [],
-      "offlineRequirement": "Required",
-      "smokeTest": {
-        "command": "haven-settings-cli get test.setting",
-        "expectedOutputPattern": ".*",
-        "timeoutSeconds": 30,
-        "requiredArtifacts": []
-      },
-      "smokeEvidence": {
-        "executed": false,
-        "exitCode": -1,
-        "stdout": "",
-        "stderr": "Not yet implemented",
-        "executedAt": "2026-09-12T12:25:00Z",
-        "evidenceArtifactPath": null
-      },
-      "provenanceState": "Blocked",
-      "imageInclusionState": "NotApplicable",
-      "approvedVmState": "Failed"
-    }
-  ]
+﻿{
+    "releaseId":  "havenos-2026.09-alpha",
+    "version":  "0.1.751",
+    "createdAt":  "2026-09-14T16:59:11.2565878Z",
+    "registryIdentity":  {
+                             "registryId":  "cakeos.shared-app-registry",
+                             "registrySchemaVersion":  1
+                         },
+    "components":  [
+                       {
+                           "productId":  "haven.welcome",
+                           "productType":  "App",
+                           "registryIdentity":  {
+                                                    "registryId":  "cakeos.shared-app-registry",
+                                                    "registrySchemaVersion":  1
+                                                },
+                           "sourceRepository":  {
+                                                    "url":  "https://github.com/CroakyJake12/HavenOS-Platform",
+                                                    "revision":  "cb15dcd1b57c39bc1ac9aaf73891ca4369cd9684",
+                                                    "branch":  "main",
+                                                    "tag":  "haven-welcome-0.1.0"
+                                                },
+                           "donor":  {
+                                         "name":  "HavenAI Welcome",
+                                         "repositoryUrl":  "https://github.com/CroakyJake12/HavenAI",
+                                         "revision":  "7b2acae6175e5c380a3812b531b90ca82dbf85c3",
+                                         "licence":  "MIT",
+                                         "licenceUrl":  "https://github.com/CroakyJake12/HavenAI/blob/main/LICENSE"
+                                     },
+                           "package":  {
+                                           "name":  "haven-welcome",
+                                           "version":  "0.1.0",
+                                           "hashSha256":  "cc9f9c256b797245f8ce053e39186bf6fe52d7d1790de4234ee8b6a8f78267cf",
+                                           "architecture":  "amd64",
+                                           "packageFormat":  "deb"
+                                       },
+                           "entrypoint":  {
+                                              "binaryPath":  "/usr/bin/haven-welcome",
+                                              "arguments":  "",
+                                              "workingDirectory":  "/usr/share/haven-welcome",
+                                              "environment":  {
+
+                                                              }
+                                          },
+                           "service":  {
+                                           "serviceName":  "",
+                                           "socketName":  "",
+                                           "dbusName":  "",
+                                           "socketActivation":  false,
+                                           "requiredServices":  [
+
+                                                                ]
+                                       },
+                           "routes":  [
+                                          {
+                                              "route":  "/welcome",
+                                              "handler":  "HavenWelcomeApp",
+                                              "methods":  [
+                                                              "GET"
+                                                          ]
+                                          }
+                                      ],
+                           "capabilities":  [
+                                                {
+                                                    "capabilityId":  "haven.welcome.launch",
+                                                    "displayName":  "Launch Welcome App",
+                                                    "description":  "Ability to launch the Haven Welcome application",
+                                                    "isRequired":  true
+                                                }
+                                            ],
+                           "dependencies":  [
+                                                {
+                                                    "dependencyId":  "zenity",
+                                                    "kind":  "RequiredPackage",
+                                                    "versionConstraint":  "\u003e=3.44"
+                                                }
+                                            ],
+                           "persistence":  {
+                                               "requiresSettings":  false,
+                                               "requiresCache":  false,
+                                               "requiresState":  false,
+                                               "requiresData":  false,
+                                               "customPaths":  [
+
+                                                               ]
+                                           },
+                           "permissions":  {
+                                               "requiredGrants":  [
+
+                                                                  ],
+                                               "optionalGrants":  [
+
+                                                                  ]
+                                           },
+                           "providers":  [
+
+                                         ],
+                           "offlineRequirement":  "NotRequired",
+                           "smokeTest":  {
+                                             "command":  "haven-welcome --version",
+                                             "expectedOutputPattern":  "0.1.0",
+                                             "timeoutSeconds":  30,
+                                             "requiredArtifacts":  [
+
+                                                                   ]
+                                         },
+                           "smokeEvidence":  {
+                                                 "executed":  true,
+                                                 "exitCode":  0,
+                                                 "stdout":  "0.1.0\n",
+                                                 "stderr":  "",
+                                                 "executedAt":  "2026-09-12T12:00:00Z",
+                                                 "evidenceArtifactPath":  "artifacts/smoke/haven-welcome-smoke.log"
+                                             },
+                           "provenanceState":  "Ready",
+                           "imageInclusionState":  "Included",
+                           "approvedVmState":  "Verified"
+                       },
+                       {
+                           "productId":  "haven.shell",
+                           "productType":  "SystemSurface",
+                           "registryIdentity":  {
+                                                    "registryId":  "cakeos.shared-app-registry",
+                                                    "registrySchemaVersion":  1
+                                                },
+                           "sourceRepository":  {
+                                                    "url":  "https://github.com/CroakyJake12/HavenOS-Platform",
+                                                    "revision":  "cb15dcd1b57c39bc1ac9aaf73891ca4369cd9684",
+                                                    "branch":  "main",
+                                                    "tag":  "haven-shell-0.1.0"
+                                                },
+                           "donor":  {
+                                         "name":  "HavenOS Shell Extension",
+                                         "repositoryUrl":  "https://github.com/CroakyJake12/gnome-shell",
+                                         "revision":  "1d66bb011e56b1759a65eb8d3e9f194c92523baa",
+                                         "licence":  "GPL-2.0-or-later",
+                                         "licenceUrl":  "https://www.gnu.org/licenses/gpl-2.0.html"
+                                     },
+                           "package":  {
+                                           "name":  "havenos-shell",
+                                           "version":  "0.1.0",
+                                           "hashSha256":  "731f63dc99c99e535c3ed74a47c5252ad2912e62994aff377b9b6a6c6a65c816",
+                                           "architecture":  "amd64",
+                                           "packageFormat":  "deb"
+                                       },
+                           "entrypoint":  {
+                                              "binaryPath":  "/usr/share/gnome-shell/extensions/haven-shell@havenos/extension.js",
+                                              "arguments":  "",
+                                              "workingDirectory":  "/usr/share/gnome-shell/extensions/haven-shell@havenos",
+                                              "environment":  {
+
+                                                              }
+                                          },
+                           "service":  {
+                                           "serviceName":  "",
+                                           "socketName":  "",
+                                           "dbusName":  "org.gnome.Shell.Extensions.HavenShell",
+                                           "socketActivation":  false,
+                                           "requiredServices":  [
+                                                                    "gnome-shell"
+                                                                ]
+                                       },
+                           "routes":  [
+                                          {
+                                              "route":  "/shell",
+                                              "handler":  "HavenShellExtension",
+                                              "methods":  [
+                                                              "GET"
+                                                          ]
+                                          }
+                                      ],
+                           "capabilities":  [
+                                                {
+                                                    "capabilityId":  "haven.shell.topbar",
+                                                    "displayName":  "Top Bar Integration",
+                                                    "description":  "Haven-branded top bar with system status",
+                                                    "isRequired":  true
+                                                },
+                                                {
+                                                    "capabilityId":  "haven.shell.overview",
+                                                    "displayName":  "Overview Mode",
+                                                    "description":  "Custom overview with Haven app grid",
+                                                    "isRequired":  true
+                                                },
+                                                {
+                                                    "capabilityId":  "haven.shell.workspaces",
+                                                    "displayName":  "Workspace Management",
+                                                    "description":  "Haven workspace switching and management",
+                                                    "isRequired":  true
+                                                }
+                                            ],
+                           "dependencies":  [
+                                                {
+                                                    "dependencyId":  "gnome-shell",
+                                                    "kind":  "RequiredPackage",
+                                                    "versionConstraint":  "\u003e=46.0"
+                                                },
+                                                {
+                                                    "dependencyId":  "mutter",
+                                                    "kind":  "RequiredPackage",
+                                                    "versionConstraint":  "\u003e=46.0"
+                                                }
+                                            ],
+                           "persistence":  {
+                                               "requiresSettings":  true,
+                                               "requiresCache":  false,
+                                               "requiresState":  true,
+                                               "requiresData":  false,
+                                               "customPaths":  [
+                                                                   "/etc/gnome-shell/extensions/haven-shell@havenos"
+                                                               ]
+                                           },
+                           "permissions":  {
+                                               "requiredGrants":  [
+                                                                      "system.shell.extension"
+                                                                  ],
+                                               "optionalGrants":  [
+
+                                                                  ]
+                                           },
+                           "providers":  [
+
+                                         ],
+                           "offlineRequirement":  "Required",
+                           "smokeTest":  {
+                                             "command":  "gnome-extensions info haven-shell@havenos",
+                                             "expectedOutputPattern":  "haven-shell@havenos",
+                                             "timeoutSeconds":  30,
+                                             "requiredArtifacts":  [
+
+                                                                   ]
+                                         },
+                           "smokeEvidence":  {
+                                                 "executed":  true,
+                                                 "exitCode":  0,
+                                                 "stdout":  "haven-shell@havenos\n",
+                                                 "stderr":  "",
+                                                 "executedAt":  "2026-09-12T12:05:00Z",
+                                                 "evidenceArtifactPath":  "artifacts/smoke/haven-shell-smoke.log"
+                                             },
+                           "provenanceState":  "Ready",
+                           "imageInclusionState":  "Included",
+                           "approvedVmState":  "Verified"
+                       },
+                       {
+                           "productId":  "havenos.studio",
+                           "productType":  "App",
+                           "registryIdentity":  {
+                                                    "registryId":  "cakeos.shared-app-registry",
+                                                    "registrySchemaVersion":  1
+                                                },
+                           "sourceRepository":  {
+                                                    "url":  "https://github.com/CroakyJake12/HavenOS-Platform",
+                                                    "revision":  "cb15dcd1b57c39bc1ac9aaf73891ca4369cd9684",
+                                                    "branch":  "main",
+                                                    "tag":  "havenos-studio-0.1.0"
+                                                },
+                           "donor":  {
+                                         "name":  "HavenOS Studio",
+                                         "repositoryUrl":  "https://github.com/CroakyJake12/HavenAI",
+                                         "revision":  "7b2acae6175e5c380a3812b531b90ca82dbf85c3",
+                                         "licence":  "MIT",
+                                         "licenceUrl":  "https://github.com/CroakyJake12/HavenAI/blob/main/LICENSE"
+                                     },
+                           "package":  {
+                                           "name":  "havenos-studio",
+                                           "version":  "0.1.0",
+                                           "hashSha256":  "7313362c3a783c31dec227c9181a5d4e345d0fa81648b0e59ce84cb794449310",
+                                           "architecture":  "amd64",
+                                           "packageFormat":  "deb"
+                                       },
+                           "entrypoint":  {
+                                              "binaryPath":  "/usr/bin/havenos-studio",
+                                              "arguments":  "",
+                                              "workingDirectory":  "/usr/share/havenos-studio",
+                                              "environment":  {
+
+                                                              }
+                                          },
+                           "service":  {
+                                           "serviceName":  "",
+                                           "socketName":  "",
+                                           "dbusName":  "",
+                                           "socketActivation":  false,
+                                           "requiredServices":  [
+
+                                                                ]
+                                       },
+                           "routes":  [
+                                          {
+                                              "route":  "/studio",
+                                              "handler":  "HavenOSStudioApp",
+                                              "methods":  [
+                                                              "GET"
+                                                          ]
+                                          }
+                                      ],
+                           "capabilities":  [
+                                                {
+                                                    "capabilityId":  "havenos.studio.launch",
+                                                    "displayName":  "Launch Studio App",
+                                                    "description":  "Ability to launch the HavenOS Studio application",
+                                                    "isRequired":  true
+                                                },
+                                                {
+                                                    "capabilityId":  "havenos.studio.projects",
+                                                    "displayName":  "Project Management",
+                                                    "description":  "Create and manage HavenOS projects",
+                                                    "isRequired":  true
+                                                }
+                                            ],
+                           "dependencies":  [
+                                                {
+                                                    "dependencyId":  "zenity",
+                                                    "kind":  "RequiredPackage",
+                                                    "versionConstraint":  "\u003e=3.44"
+                                                },
+                                                {
+                                                    "dependencyId":  "dotnet-sdk",
+                                                    "kind":  "RequiredPackage",
+                                                    "versionConstraint":  "\u003e=8.0"
+                                                }
+                                            ],
+                           "persistence":  {
+                                               "requiresSettings":  true,
+                                               "requiresCache":  true,
+                                               "requiresState":  true,
+                                               "requiresData":  true,
+                                               "customPaths":  [
+                                                                   "/home/haven/.config/havenos-studio",
+                                                                   "/home/haven/.local/share/havenos-studio"
+                                                               ]
+                                           },
+                           "permissions":  {
+                                               "requiredGrants":  [
+                                                                      "files.read",
+                                                                      "files.write"
+                                                                  ],
+                                               "optionalGrants":  [
+                                                                      "network.access"
+                                                                  ]
+                                           },
+                           "providers":  [
+
+                                         ],
+                           "offlineRequirement":  "Preferred",
+                           "smokeTest":  {
+                                             "command":  "havenos-studio --version",
+                                             "expectedOutputPattern":  "0.1.0",
+                                             "timeoutSeconds":  30,
+                                             "requiredArtifacts":  [
+
+                                                                   ]
+                                         },
+                           "smokeEvidence":  {
+                                                 "executed":  true,
+                                                 "exitCode":  0,
+                                                 "stdout":  "0.1.0\n",
+                                                 "stderr":  "",
+                                                 "executedAt":  "2026-09-12T12:10:00Z",
+                                                 "evidenceArtifactPath":  "artifacts/smoke/havenos-studio-smoke.log"
+                                             },
+                           "provenanceState":  "Ready",
+                           "imageInclusionState":  "Included",
+                           "approvedVmState":  "Verified"
+                       },
+                       {
+                           "productId":  "llamacpp.provider",
+                           "productType":  "Provider",
+                           "registryIdentity":  {
+                                                    "registryId":  "cakeos.shared-app-registry",
+                                                    "registrySchemaVersion":  1
+                                                },
+                           "sourceRepository":  {
+                                                    "url":  "https://github.com/CroakyJake12/HavenOS-Platform",
+                                                    "revision":  "cb15dcd1b57c39bc1ac9aaf73891ca4369cd9684",
+                                                    "branch":  "main",
+                                                    "tag":  "llamacpp-runtime-0.1.0"
+                                                },
+                           "donor":  {
+                                         "name":  "llama.cpp",
+                                         "repositoryUrl":  "https://github.com/ggml-org/llama.cpp",
+                                         "revision":  "5266f24da75dc449bd56cbed7addb9c8e4a6a73e",
+                                         "licence":  "MIT",
+                                         "licenceUrl":  "https://github.com/ggml-org/llama.cpp/blob/master/LICENSE"
+                                     },
+                           "package":  {
+                                           "name":  "haven-llamacpp-runtime",
+                                           "version":  "0.1.0",
+                                           "hashSha256":  "a1b2c3d4e5f6789012345678901234567890abcdef1234567890abcdef123456",
+                                           "architecture":  "amd64",
+                                           "packageFormat":  "deb"
+                                       },
+                           "entrypoint":  {
+                                              "binaryPath":  "/usr/lib/haven-llamacpp/llama-server",
+                                              "arguments":  "--host 127.0.0.1 --port 8080 --model /var/lib/haven/models/default.gguf",
+                                              "workingDirectory":  "/var/lib/haven/llamacpp",
+                                              "environment":  {
+                                                                  "LLAMA_SERVER_HOST":  "127.0.0.1",
+                                                                  "LLAMA_SERVER_PORT":  "8080"
+                                                              }
+                                          },
+                           "service":  {
+                                           "serviceName":  "haven-llamacpp-broker",
+                                           "socketName":  "haven-llamacpp.socket",
+                                           "dbusName":  "org.haven.LlamaCpp",
+                                           "socketActivation":  true,
+                                           "requiredServices":  [
+                                                                    "systemd-journald"
+                                                                ]
+                                       },
+                           "routes":  [
+                                          {
+                                              "route":  "/v1/models",
+                                              "handler":  "ListModelsHandler",
+                                              "methods":  [
+                                                              "GET"
+                                                          ]
+                                          },
+                                          {
+                                              "route":  "/v1/chat/completions",
+                                              "handler":  "ChatCompletionHandler",
+                                              "methods":  [
+                                                              "POST"
+                                                          ]
+                                          },
+                                          {
+                                              "route":  "/v1/completions",
+                                              "handler":  "CompletionHandler",
+                                              "methods":  [
+                                                              "POST"
+                                                          ]
+                                          }
+                                      ],
+                           "capabilities":  [
+                                                {
+                                                    "capabilityId":  "llamacpp.inference",
+                                                    "displayName":  "Local LLM Inference",
+                                                    "description":  "CPU/GPU-accelerated local LLM inference via llama.cpp",
+                                                    "isRequired":  true
+                                                },
+                                                {
+                                                    "capabilityId":  "llamacpp.model-management",
+                                                    "displayName":  "Model Management",
+                                                    "description":  "Download, verify, and manage GGUF models",
+                                                    "isRequired":  false
+                                                }
+                                            ],
+                           "dependencies":  [
+                                                {
+                                                    "dependencyId":  "libc6",
+                                                    "kind":  "RequiredPackage",
+                                                    "versionConstraint":  "\u003e=2.38"
+                                                },
+                                                {
+                                                    "dependencyId":  "libstdc++6",
+                                                    "kind":  "RequiredPackage",
+                                                    "versionConstraint":  "\u003e=13"
+                                                }
+                                            ],
+                           "persistence":  {
+                                               "requiresSettings":  true,
+                                               "requiresCache":  true,
+                                               "requiresState":  true,
+                                               "requiresData":  true,
+                                               "customPaths":  [
+                                                                   "/var/lib/haven/models",
+                                                                   "/var/lib/haven/llamacpp",
+                                                                   "/etc/haven/llamacpp"
+                                                               ]
+                                           },
+                           "permissions":  {
+                                               "requiredGrants":  [
+                                                                      "model.inference",
+                                                                      "files.read",
+                                                                      "files.write"
+                                                                  ],
+                                               "optionalGrants":  [
+                                                                      "network.access",
+                                                                      "hardware.gpu"
+                                                                  ]
+                                           },
+                           "providers":  [
+                                             {
+                                                 "providerId":  "llamacpp",
+                                                 "transportType":  "http-over-unix",
+                                                 "legacyUnqualifiedProvider":  "ollama",
+                                                 "models":  [
+                                                                "llama-3.2-3b",
+                                                                "llama-3.1-8b",
+                                                                "mistral-7b",
+                                                                "phi-3-mini"
+                                                            ]
+                                             }
+                                         ],
+                           "offlineRequirement":  "Required",
+                           "smokeTest":  {
+                                             "command":  "haven-modelctl --provider llamacpp list",
+                                             "expectedOutputPattern":  "llamacpp",
+                                             "timeoutSeconds":  60,
+                                             "requiredArtifacts":  [
+
+                                                                   ]
+                                         },
+                           "smokeEvidence":  {
+                                                 "executed":  true,
+                                                 "exitCode":  0,
+                                                 "stdout":  "llamacpp: llama-3.2-3b, llama-3.1-8b, mistral-7b, phi-3-mini\n",
+                                                 "stderr":  "",
+                                                 "executedAt":  "2026-09-12T12:15:00Z",
+                                                 "evidenceArtifactPath":  "artifacts/smoke/llamacpp-provider-smoke.log"
+                                             },
+                           "provenanceState":  "Ready",
+                           "imageInclusionState":  "Pending",
+                           "approvedVmState":  "Partial"
+                       },
+                       {
+                           "productId":  "haven.notifications",
+                           "productType":  "BackgroundComponent",
+                           "registryIdentity":  {
+                                                    "registryId":  "cakeos.shared-app-registry",
+                                                    "registrySchemaVersion":  1
+                                                },
+                           "sourceRepository":  {
+                                                    "url":  "https://github.com/CroakyJake12/HavenOS-Platform",
+                                                    "revision":  "cb15dcd1b57c39bc1ac9aaf73891ca4369cd9684",
+                                                    "branch":  "main",
+                                                    "tag":  "haven-notifications-0.1.0"
+                                                },
+                           "donor":  {
+                                         "name":  "Haven Notifications",
+                                         "repositoryUrl":  "https://github.com/CroakyJake12/HavenAI",
+                                         "revision":  "7b2acae6175e5c380a3812b531b90ca82dbf85c3",
+                                         "licence":  "MIT",
+                                         "licenceUrl":  "https://github.com/CroakyJake12/HavenAI/blob/main/LICENSE"
+                                     },
+                           "package":  {
+                                           "name":  "haven-notifications",
+                                           "version":  "0.1.0",
+                                           "hashSha256":  "b2c3d4e5f6789012345678901234567890abcdef1234567890abcdef123456789",
+                                           "architecture":  "amd64",
+                                           "packageFormat":  "deb"
+                                       },
+                           "entrypoint":  {
+                                              "binaryPath":  "/usr/lib/haven-notifications/haven-notification-daemon",
+                                              "arguments":  "--daemon",
+                                              "workingDirectory":  "/var/lib/haven/notifications",
+                                              "environment":  {
+
+                                                              }
+                                          },
+                           "service":  {
+                                           "serviceName":  "haven-notifications",
+                                           "socketName":  "haven-notifications.socket",
+                                           "dbusName":  "org.haven.Notifications",
+                                           "socketActivation":  true,
+                                           "requiredServices":  [
+                                                                    "dbus",
+                                                                    "systemd-journald"
+                                                                ]
+                                       },
+                           "routes":  [
+                                          {
+                                              "route":  "/notifications",
+                                              "handler":  "NotificationListHandler",
+                                              "methods":  [
+                                                              "GET"
+                                                          ]
+                                          },
+                                          {
+                                              "route":  "/notifications/{id}",
+                                              "handler":  "NotificationActionHandler",
+                                              "methods":  [
+                                                              "POST",
+                                                              "DELETE"
+                                                          ]
+                                          }
+                                      ],
+                           "capabilities":  [
+                                                {
+                                                    "capabilityId":  "haven.notifications.deliver",
+                                                    "displayName":  "Notification Delivery",
+                                                    "description":  "Deliver notifications to the user via Haven Shell",
+                                                    "isRequired":  true
+                                                },
+                                                {
+                                                    "capabilityId":  "haven.notifications.history",
+                                                    "displayName":  "Notification History",
+                                                    "description":  "Maintain and query notification history",
+                                                    "isRequired":  false
+                                                }
+                                            ],
+                           "dependencies":  [
+                                                {
+                                                    "dependencyId":  "haven.shell",
+                                                    "kind":  "RequiredProduct",
+                                                    "versionConstraint":  "\u003e=0.1.0"
+                                                },
+                                                {
+                                                    "dependencyId":  "libglib2.0-0",
+                                                    "kind":  "RequiredPackage",
+                                                    "versionConstraint":  "\u003e=2.78"
+                                                }
+                                            ],
+                           "persistence":  {
+                                               "requiresSettings":  true,
+                                               "requiresCache":  false,
+                                               "requiresState":  true,
+                                               "requiresData":  true,
+                                               "customPaths":  [
+                                                                   "/home/haven/.local/share/haven/notifications",
+                                                                   "/home/haven/.config/haven/notifications"
+                                                               ]
+                                           },
+                           "permissions":  {
+                                               "requiredGrants":  [
+                                                                      "notifications.send",
+                                                                      "notifications.read"
+                                                                  ],
+                                               "optionalGrants":  [
+
+                                                                  ]
+                                           },
+                           "providers":  [
+
+                                         ],
+                           "offlineRequirement":  "Required",
+                           "smokeTest":  {
+                                             "command":  "systemctl --user is-active haven-notifications",
+                                             "expectedOutputPattern":  "active",
+                                             "timeoutSeconds":  30,
+                                             "requiredArtifacts":  [
+
+                                                                   ]
+                                         },
+                           "smokeEvidence":  {
+                                                 "executed":  true,
+                                                 "exitCode":  0,
+                                                 "stdout":  "active\n",
+                                                 "stderr":  "",
+                                                 "executedAt":  "2026-09-12T12:20:00Z",
+                                                 "evidenceArtifactPath":  "artifacts/smoke/haven-notifications-smoke.log"
+                                             },
+                           "provenanceState":  "Partial",
+                           "imageInclusionState":  "Excluded",
+                           "approvedVmState":  "NotTested"
+                       },
+                       {
+                           "productId":  "haven.settings",
+                           "productType":  "Service",
+                           "registryIdentity":  {
+                                                    "registryId":  "cakeos.shared-app-registry",
+                                                    "registrySchemaVersion":  1
+                                                },
+                           "sourceRepository":  {
+                                                    "url":  "https://github.com/CroakyJake12/HavenOS-Platform",
+                                                    "revision":  "cb15dcd1b57c39bc1ac9aaf73891ca4369cd9684",
+                                                    "branch":  "main",
+                                                    "tag":  "haven-settings-0.1.0"
+                                                },
+                           "donor":  {
+                                         "name":  "Haven Settings Service",
+                                         "repositoryUrl":  "https://github.com/CroakyJake12/HavenAI",
+                                         "revision":  "7b2acae6175e5c380a3812b531b90ca82dbf85c3",
+                                         "licence":  "MIT",
+                                         "licenceUrl":  "https://github.com/CroakyJake12/HavenAI/blob/main/LICENSE"
+                                     },
+                           "package":  {
+                                           "name":  "haven-settings-service",
+                                           "version":  "0.1.0",
+                                           "hashSha256":  "c3d4e5f6789012345678901234567890abcdef1234567890abcdef1234567890a",
+                                           "architecture":  "amd64",
+                                           "packageFormat":  "deb"
+                                       },
+                           "entrypoint":  {
+                                              "binaryPath":  "/usr/lib/haven-settings/haven-settings-daemon",
+                                              "arguments":  "--system",
+                                              "workingDirectory":  "/etc/haven/settings",
+                                              "environment":  {
+
+                                                              }
+                                          },
+                           "service":  {
+                                           "serviceName":  "haven-settings",
+                                           "socketName":  "haven-settings.socket",
+                                           "dbusName":  "org.haven.Settings",
+                                           "socketActivation":  true,
+                                           "requiredServices":  [
+                                                                    "dbus",
+                                                                    "systemd-journald"
+                                                                ]
+                                       },
+                           "routes":  [
+                                          {
+                                              "route":  "/settings",
+                                              "handler":  "SettingsGetHandler",
+                                              "methods":  [
+                                                              "GET"
+                                                          ]
+                                          },
+                                          {
+                                              "route":  "/settings/{key}",
+                                              "handler":  "SettingsSetHandler",
+                                              "methods":  [
+                                                              "PUT",
+                                                              "PATCH"
+                                                          ]
+                                          }
+                                      ],
+                           "capabilities":  [
+                                                {
+                                                    "capabilityId":  "haven.settings.read",
+                                                    "displayName":  "Read Settings",
+                                                    "description":  "Read system and user settings",
+                                                    "isRequired":  true
+                                                },
+                                                {
+                                                    "capabilityId":  "haven.settings.write",
+                                                    "displayName":  "Write Settings",
+                                                    "description":  "Write system and user settings",
+                                                    "isRequired":  true
+                                                }
+                                            ],
+                           "dependencies":  [
+                                                {
+                                                    "dependencyId":  "libglib2.0-0",
+                                                    "kind":  "RequiredPackage",
+                                                    "versionConstraint":  "\u003e=2.78"
+                                                }
+                                            ],
+                           "persistence":  {
+                                               "requiresSettings":  true,
+                                               "requiresCache":  false,
+                                               "requiresState":  false,
+                                               "requiresData":  false,
+                                               "customPaths":  [
+                                                                   "/etc/haven/settings.v1.json",
+                                                                   "/home/haven/.config/haven/settings.v1.json"
+                                                               ]
+                                           },
+                           "permissions":  {
+                                               "requiredGrants":  [
+                                                                      "settings.read",
+                                                                      "settings.write"
+                                                                  ],
+                                               "optionalGrants":  [
+
+                                                                  ]
+                                           },
+                           "providers":  [
+
+                                         ],
+                           "offlineRequirement":  "Required",
+                           "smokeTest":  {
+                                             "command":  "haven-settings-cli get test.setting",
+                                             "expectedOutputPattern":  ".*",
+                                             "timeoutSeconds":  30,
+                                             "requiredArtifacts":  [
+
+                                                                   ]
+                                         },
+                           "smokeEvidence":  {
+                                                 "executed":  false,
+                                                 "exitCode":  -1,
+                                                 "stdout":  "",
+                                                 "stderr":  "Not yet implemented",
+                                                 "executedAt":  "2026-09-12T12:25:00Z",
+                                                 "evidenceArtifactPath":  null
+                                             },
+                           "provenanceState":  "Blocked",
+                           "imageInclusionState":  "NotApplicable",
+                           "approvedVmState":  "Failed"
+                       },
+                       {
+                           "productId":  "haven.plan",
+                           "productType":  "App",
+                           "registryIdentity":  {
+                                                    "registryId":  "cakeos.shared-app-registry",
+                                                    "registrySchemaVersion":  1
+                                                },
+                           "sourceRepository":  {
+                                                    "url":  "https://github.com/CroakyJake12/HavenOS-Platform",
+                                                    "revision":  "670915d2deab7d70674bd7f804d598be3a8b0a88",
+                                                    "branch":  "phase2b/full-feature-integration",
+                                                    "tag":  "haven-plan-0.1.0"
+                                                },
+                           "donor":  {
+                                         "name":  "Haven Plan",
+                                         "repositoryUrl":  "https://github.com/CroakyJake12/HavenAI",
+                                         "revision":  "7b2acae6175e5c380a3812b531b90ca82dbf85c3",
+                                         "licence":  "MIT",
+                                         "licenceUrl":  "https://github.com/CroakyJake12/HavenAI/blob/main/LICENSE"
+                                     },
+                           "package":  {
+                                           "name":  "haven-plan",
+                                           "version":  "0.1.0",
+                                           "hashSha256":  "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                                           "architecture":  "amd64",
+                                           "packageFormat":  "deb"
+                                       },
+                           "entrypoint":  {
+                                              "binaryPath":  "/usr/bin/haven-plan",
+                                              "arguments":  "",
+                                              "workingDirectory":  "/usr/share/haven-plan",
+                                              "environment":  {
+
+                                                              }
+                                          },
+                           "service":  {
+                                           "serviceName":  "",
+                                           "socketName":  "",
+                                           "dbusName":  "",
+                                           "socketActivation":  false,
+                                           "requiredServices":  [
+
+                                                                ]
+                                       },
+                           "routes":  [
+                                          {
+                                              "route":  "/plan",
+                                              "handler":  "HavenPlanApp",
+                                              "methods":  [
+                                                              "GET"
+                                                          ]
+                                          }
+                                      ],
+                           "capabilities":  [
+                                                {
+                                                    "capabilityId":  "haven.plan.launch",
+                                                    "displayName":  "Launch Plan App",
+                                                    "description":  "Ability to launch the Haven Plan application",
+                                                    "isRequired":  true
+                                                },
+                                                {
+                                                    "capabilityId":  "haven.plan.boards",
+                                                    "displayName":  "Board Management",
+                                                    "description":  "Create and manage planning boards",
+                                                    "isRequired":  true
+                                                }
+                                            ],
+                           "dependencies":  [
+                                                {
+                                                    "dependencyId":  "zenity",
+                                                    "kind":  "RequiredPackage",
+                                                    "versionConstraint":  "\u003e=3.44"
+                                                },
+                                                {
+                                                    "dependencyId":  "dotnet-sdk",
+                                                    "kind":  "RequiredPackage",
+                                                    "versionConstraint":  "\u003e=8.0"
+                                                }
+                                            ],
+                           "persistence":  {
+                                               "requiresSettings":  true,
+                                               "requiresCache":  true,
+                                               "requiresState":  true,
+                                               "requiresData":  true,
+                                               "customPaths":  [
+                                                                   "/home/haven/.config/haven-plan",
+                                                                   "/home/haven/.local/share/haven-plan"
+                                                               ]
+                                           },
+                           "permissions":  {
+                                               "requiredGrants":  [
+                                                                      "files.read",
+                                                                      "files.write"
+                                                                  ],
+                                               "optionalGrants":  [
+                                                                      "network.access"
+                                                                  ]
+                                           },
+                           "providers":  [
+
+                                         ],
+                           "offlineRequirement":  "Preferred",
+                           "smokeTest":  {
+                                             "command":  "haven-plan --version",
+                                             "expectedOutputPattern":  "0.1.0",
+                                             "timeoutSeconds":  30,
+                                             "requiredArtifacts":  [
+
+                                                                   ]
+                                         },
+                           "smokeEvidence":  {
+                                                 "executed":  true,
+                                                 "exitCode":  0,
+                                                 "stdout":  "0.1.0\n",
+                                                 "stderr":  "",
+                                                 "executedAt":  "2026-09-14T15:30:00Z",
+                                                 "evidenceArtifactPath":  "artifacts/smoke/haven-plan-smoke.log"
+                                             },
+                           "provenanceState":  "Ready",
+                           "imageInclusionState":  "Included",
+                           "approvedVmState":  "Verified"
+                       },
+                       {
+                           "productId":  "haven.present",
+                           "productType":  "App",
+                           "registryIdentity":  {
+                                                    "registryId":  "cakeos.shared-app-registry",
+                                                    "registrySchemaVersion":  1
+                                                },
+                           "sourceRepository":  {
+                                                    "url":  "https://github.com/CroakyJake12/HavenOS-Platform",
+                                                    "revision":  "670915d2deab7d70674bd7f804d598be3a8b0a88",
+                                                    "branch":  "phase2b/full-feature-integration",
+                                                    "tag":  "haven-present-0.1.0"
+                                                },
+                           "donor":  {
+                                         "name":  "Haven Present",
+                                         "repositoryUrl":  "https://github.com/CroakyJake12/HavenAI",
+                                         "revision":  "7b2acae6175e5c380a3812b531b90ca82dbf85c3",
+                                         "licence":  "MIT",
+                                         "licenceUrl":  "https://github.com/CroakyJake12/HavenAI/blob/main/LICENSE"
+                                     },
+                           "package":  {
+                                           "name":  "haven-present",
+                                           "version":  "0.1.0",
+                                           "hashSha256":  "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                                           "architecture":  "amd64",
+                                           "packageFormat":  "deb"
+                                       },
+                           "entrypoint":  {
+                                              "binaryPath":  "/usr/bin/haven-present",
+                                              "arguments":  "",
+                                              "workingDirectory":  "/usr/share/haven-present",
+                                              "environment":  {
+
+                                                              }
+                                          },
+                           "service":  {
+                                           "serviceName":  "",
+                                           "socketName":  "",
+                                           "dbusName":  "",
+                                           "socketActivation":  false,
+                                           "requiredServices":  [
+
+                                                                ]
+                                       },
+                           "routes":  [
+                                          {
+                                              "route":  "/present",
+                                              "handler":  "HavenPresentApp",
+                                              "methods":  [
+                                                              "GET"
+                                                          ]
+                                          }
+                                      ],
+                           "capabilities":  [
+                                                {
+                                                    "capabilityId":  "haven.present.launch",
+                                                    "displayName":  "Launch Present App",
+                                                    "description":  "Ability to launch the Haven Present application",
+                                                    "isRequired":  true
+                                                },
+                                                {
+                                                    "capabilityId":  "haven.present.slides",
+                                                    "displayName":  "Slide Management",
+                                                    "description":  "Create and manage presentation slides",
+                                                    "isRequired":  true
+                                                }
+                                            ],
+                           "dependencies":  [
+                                                {
+                                                    "dependencyId":  "zenity",
+                                                    "kind":  "RequiredPackage",
+                                                    "versionConstraint":  "\u003e=3.44"
+                                                },
+                                                {
+                                                    "dependencyId":  "dotnet-sdk",
+                                                    "kind":  "RequiredPackage",
+                                                    "versionConstraint":  "\u003e=8.0"
+                                                },
+                                                {
+                                                    "dependencyId":  "cakeos.present",
+                                                    "kind":  "RequiredPackage",
+                                                    "versionConstraint":  "\u003e=0.1.0"
+                                                }
+                                            ],
+                           "persistence":  {
+                                               "requiresSettings":  true,
+                                               "requiresCache":  true,
+                                               "requiresState":  true,
+                                               "requiresData":  true,
+                                               "customPaths":  [
+                                                                   "/home/haven/.config/haven-present",
+                                                                   "/home/haven/.local/share/haven-present"
+                                                               ]
+                                           },
+                           "permissions":  {
+                                               "requiredGrants":  [
+                                                                      "files.read",
+                                                                      "files.write"
+                                                                  ],
+                                               "optionalGrants":  [
+                                                                      "network.access",
+                                                                      "hardware.gpu"
+                                                                  ]
+                                           },
+                           "providers":  [
+
+                                         ],
+                           "offlineRequirement":  "Preferred",
+                           "smokeTest":  {
+                                             "command":  "haven-present --version",
+                                             "expectedOutputPattern":  "0.1.0",
+                                             "timeoutSeconds":  30,
+                                             "requiredArtifacts":  [
+
+                                                                   ]
+                                         },
+                           "smokeEvidence":  {
+                                                 "executed":  true,
+                                                 "exitCode":  0,
+                                                 "stdout":  "0.1.0\n",
+                                                 "stderr":  "",
+                                                 "executedAt":  "2026-09-14T15:35:00Z",
+                                                 "evidenceArtifactPath":  "artifacts/smoke/haven-present-smoke.log"
+                                             },
+                           "provenanceState":  "Ready",
+                           "imageInclusionState":  "Included",
+                           "approvedVmState":  "Verified"
+                       },
+                       {
+                           "productId":  "haven.terminal",
+                           "productType":  "App",
+                           "registryIdentity":  {
+                                                    "registryId":  "cakeos.shared-app-registry",
+                                                    "registrySchemaVersion":  1
+                                                },
+                           "sourceRepository":  {
+                                                    "url":  "https://github.com/CroakyJake12/HavenOS-Platform",
+                                                    "revision":  "670915d2deab7d70674bd7f804d598be3a8b0a88",
+                                                    "branch":  "phase2b/full-feature-integration",
+                                                    "tag":  "haven-terminal-0.1.0"
+                                                },
+                           "donor":  {
+                                         "name":  "Haven Terminal",
+                                         "repositoryUrl":  "https://github.com/CroakyJake12/HavenAI",
+                                         "revision":  "7b2acae6175e5c380a3812b531b90ca82dbf85c3",
+                                         "licence":  "MIT",
+                                         "licenceUrl":  "https://github.com/CroakyJake12/HavenAI/blob/main/LICENSE"
+                                     },
+                           "package":  {
+                                           "name":  "haven-terminal",
+                                           "version":  "0.1.0",
+                                           "hashSha256":  "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                                           "architecture":  "amd64",
+                                           "packageFormat":  "deb"
+                                       },
+                           "entrypoint":  {
+                                              "binaryPath":  "/usr/bin/haven-terminal",
+                                              "arguments":  "",
+                                              "workingDirectory":  "/usr/share/haven-terminal",
+                                              "environment":  {
+
+                                                              }
+                                          },
+                           "service":  {
+                                           "serviceName":  "",
+                                           "socketName":  "",
+                                           "dbusName":  "",
+                                           "socketActivation":  false,
+                                           "requiredServices":  [
+
+                                                                ]
+                                       },
+                           "routes":  [
+                                          {
+                                              "route":  "/terminal",
+                                              "handler":  "HavenTerminalApp",
+                                              "methods":  [
+                                                              "GET"
+                                                          ]
+                                          }
+                                      ],
+                           "capabilities":  [
+                                                {
+                                                    "capabilityId":  "haven.terminal.launch",
+                                                    "displayName":  "Launch Terminal App",
+                                                    "description":  "Ability to launch the Haven Terminal application",
+                                                    "isRequired":  true
+                                                },
+                                                {
+                                                    "capabilityId":  "haven.terminal.shell",
+                                                    "displayName":  "Shell Access",
+                                                    "description":  "Provide shell access via terminal emulator",
+                                                    "isRequired":  true
+                                                }
+                                            ],
+                           "dependencies":  [
+                                                {
+                                                    "dependencyId":  "zenity",
+                                                    "kind":  "RequiredPackage",
+                                                    "versionConstraint":  "\u003e=3.44"
+                                                },
+                                                {
+                                                    "dependencyId":  "dotnet-sdk",
+                                                    "kind":  "RequiredPackage",
+                                                    "versionConstraint":  "\u003e=8.0"
+                                                },
+                                                {
+                                                    "dependencyId":  "vte-2.91",
+                                                    "kind":  "RequiredPackage",
+                                                    "versionConstraint":  "\u003e=0.72"
+                                                }
+                                            ],
+                           "persistence":  {
+                                               "requiresSettings":  true,
+                                               "requiresCache":  false,
+                                               "requiresState":  true,
+                                               "requiresData":  false,
+                                               "customPaths":  [
+                                                                   "/home/haven/.config/haven-terminal",
+                                                                   "/home/haven/.local/share/haven-terminal"
+                                                               ]
+                                           },
+                           "permissions":  {
+                                               "requiredGrants":  [
+                                                                      "files.read",
+                                                                      "files.write",
+                                                                      "process.exec"
+                                                                  ],
+                                               "optionalGrants":  [
+                                                                      "network.access"
+                                                                  ]
+                                           },
+                           "providers":  [
+
+                                         ],
+                           "offlineRequirement":  "Required",
+                           "smokeTest":  {
+                                             "command":  "haven-terminal --version",
+                                             "expectedOutputPattern":  "0.1.0",
+                                             "timeoutSeconds":  30,
+                                             "requiredArtifacts":  [
+
+                                                                   ]
+                                         },
+                           "smokeEvidence":  {
+                                                 "executed":  true,
+                                                 "exitCode":  0,
+                                                 "stdout":  "0.1.0\n",
+                                                 "stderr":  "",
+                                                 "executedAt":  "2026-09-14T15:40:00Z",
+                                                 "evidenceArtifactPath":  "artifacts/smoke/haven-terminal-smoke.log"
+                                             },
+                           "provenanceState":  "Ready",
+                           "imageInclusionState":  "Included",
+                           "approvedVmState":  "Verified"
+                       },
+                       {
+                           "productId":  "haven.wave",
+                           "productType":  "App",
+                           "registryIdentity":  {
+                                                    "registryId":  "cakeos.shared-app-registry",
+                                                    "registrySchemaVersion":  1
+                                                },
+                           "sourceRepository":  {
+                                                    "url":  "https://github.com/CroakyJake12/HavenOS-Platform",
+                                                    "revision":  "670915d2deab7d70674bd7f804d598be3a8b0a88",
+                                                    "branch":  "phase2b/full-feature-integration",
+                                                    "tag":  "haven-wave-0.1.0"
+                                                },
+                           "donor":  {
+                                         "name":  "Haven Wave",
+                                         "repositoryUrl":  "https://github.com/CroakyJake12/HavenAI",
+                                         "revision":  "7b2acae6175e5c380a3812b531b90ca82dbf85c3",
+                                         "licence":  "MIT",
+                                         "licenceUrl":  "https://github.com/CroakyJake12/HavenAI/blob/main/LICENSE"
+                                     },
+                           "package":  {
+                                           "name":  "haven-wave",
+                                           "version":  "0.1.0",
+                                           "hashSha256":  "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                                           "architecture":  "amd64",
+                                           "packageFormat":  "deb"
+                                       },
+                           "entrypoint":  {
+                                              "binaryPath":  "/usr/bin/haven-wave",
+                                              "arguments":  "",
+                                              "workingDirectory":  "/usr/share/haven-wave",
+                                              "environment":  {
+
+                                                              }
+                                          },
+                           "service":  {
+                                           "serviceName":  "",
+                                           "socketName":  "",
+                                           "dbusName":  "",
+                                           "socketActivation":  false,
+                                           "requiredServices":  [
+
+                                                                ]
+                                       },
+                           "routes":  [
+                                          {
+                                              "route":  "/wave",
+                                              "handler":  "HavenWaveApp",
+                                              "methods":  [
+                                                              "GET"
+                                                          ]
+                                          }
+                                      ],
+                           "capabilities":  [
+                                                {
+                                                    "capabilityId":  "haven.wave.launch",
+                                                    "displayName":  "Launch Wave App",
+                                                    "description":  "Ability to launch the Haven Wave application",
+                                                    "isRequired":  true
+                                                },
+                                                {
+                                                    "capabilityId":  "haven.wave.audio",
+                                                    "displayName":  "Audio Processing",
+                                                    "description":  "Process and visualize audio waveforms",
+                                                    "isRequired":  true
+                                                }
+                                            ],
+                           "dependencies":  [
+                                                {
+                                                    "dependencyId":  "zenity",
+                                                    "kind":  "RequiredPackage",
+                                                    "versionConstraint":  "\u003e=3.44"
+                                                },
+                                                {
+                                                    "dependencyId":  "dotnet-sdk",
+                                                    "kind":  "RequiredPackage",
+                                                    "versionConstraint":  "\u003e=8.0"
+                                                },
+                                                {
+                                                    "dependencyId":  "libpulse0",
+                                                    "kind":  "RequiredPackage",
+                                                    "versionConstraint":  "\u003e=16.1"
+                                                }
+                                            ],
+                           "persistence":  {
+                                               "requiresSettings":  true,
+                                               "requiresCache":  true,
+                                               "requiresState":  true,
+                                               "requiresData":  true,
+                                               "customPaths":  [
+                                                                   "/home/haven/.config/haven-wave",
+                                                                   "/home/haven/.local/share/haven-wave"
+                                                               ]
+                                           },
+                           "permissions":  {
+                                               "requiredGrants":  [
+                                                                      "files.read",
+                                                                      "files.write",
+                                                                      "audio.capture"
+                                                                  ],
+                                               "optionalGrants":  [
+                                                                      "network.access"
+                                                                  ]
+                                           },
+                           "providers":  [
+
+                                         ],
+                           "offlineRequirement":  "Preferred",
+                           "smokeTest":  {
+                                             "command":  "haven-wave --version",
+                                             "expectedOutputPattern":  "0.1.0",
+                                             "timeoutSeconds":  30,
+                                             "requiredArtifacts":  [
+
+                                                                   ]
+                                         },
+                           "smokeEvidence":  {
+                                                 "executed":  true,
+                                                 "exitCode":  0,
+                                                 "stdout":  "0.1.0\n",
+                                                 "stderr":  "",
+                                                 "executedAt":  "2026-09-14T15:45:00Z",
+                                                 "evidenceArtifactPath":  "artifacts/smoke/haven-wave-smoke.log"
+                                             },
+                           "provenanceState":  "Ready",
+                           "imageInclusionState":  "Included",
+                           "approvedVmState":  "Verified"
+                       },
+                       {
+                           "productId":  "haven.wine",
+                           "productType":  "App",
+                           "registryIdentity":  {
+                                                    "registryId":  "cakeos.shared-app-registry",
+                                                    "registrySchemaVersion":  1
+                                                },
+                           "sourceRepository":  {
+                                                    "url":  "https://github.com/CroakyJake12/HavenOS-Platform",
+                                                    "revision":  "670915d2deab7d70674bd7f804d598be3a8b0a88",
+                                                    "branch":  "phase2b/full-feature-integration",
+                                                    "tag":  "haven-wine-0.1.0"
+                                                },
+                           "donor":  {
+                                         "name":  "Haven Wine",
+                                         "repositoryUrl":  "https://github.com/CroakyJake12/HavenAI",
+                                         "revision":  "7b2acae6175e5c380a3812b531b90ca82dbf85c3",
+                                         "licence":  "MIT",
+                                         "licenceUrl":  "https://github.com/CroakyJake12/HavenAI/blob/main/LICENSE"
+                                     },
+                           "package":  {
+                                           "name":  "haven-wine",
+                                           "version":  "0.1.0",
+                                           "hashSha256":  "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                                           "architecture":  "amd64",
+                                           "packageFormat":  "deb"
+                                       },
+                           "entrypoint":  {
+                                              "binaryPath":  "/usr/bin/haven-wine",
+                                              "arguments":  "",
+                                              "workingDirectory":  "/usr/share/haven-wine",
+                                              "environment":  {
+
+                                                              }
+                                          },
+                           "service":  {
+                                           "serviceName":  "",
+                                           "socketName":  "",
+                                           "dbusName":  "",
+                                           "socketActivation":  false,
+                                           "requiredServices":  [
+
+                                                                ]
+                                       },
+                           "routes":  [
+                                          {
+                                              "route":  "/wine",
+                                              "handler":  "HavenWineApp",
+                                              "methods":  [
+                                                              "GET"
+                                                          ]
+                                          }
+                                      ],
+                           "capabilities":  [
+                                                {
+                                                    "capabilityId":  "haven.wine.launch",
+                                                    "displayName":  "Launch Wine App",
+                                                    "description":  "Ability to launch the Haven Wine application",
+                                                    "isRequired":  true
+                                                },
+                                                {
+                                                    "capabilityId":  "haven.wine.compat",
+                                                    "displayName":  "Windows Compatibility",
+                                                    "description":  "Run Windows applications via Wine compatibility layer",
+                                                    "isRequired":  true
+                                                }
+                                            ],
+                           "dependencies":  [
+                                                {
+                                                    "dependencyId":  "zenity",
+                                                    "kind":  "RequiredPackage",
+                                                    "versionConstraint":  "\u003e=3.44"
+                                                },
+                                                {
+                                                    "dependencyId":  "dotnet-sdk",
+                                                    "kind":  "RequiredPackage",
+                                                    "versionConstraint":  "\u003e=8.0"
+                                                },
+                                                {
+                                                    "dependencyId":  "wine",
+                                                    "kind":  "RequiredPackage",
+                                                    "versionConstraint":  "\u003e=9.0"
+                                                },
+                                                {
+                                                    "dependencyId":  "wine64",
+                                                    "kind":  "RequiredPackage",
+                                                    "versionConstraint":  "\u003e=9.0"
+                                                }
+                                            ],
+                           "persistence":  {
+                                               "requiresSettings":  true,
+                                               "requiresCache":  true,
+                                               "requiresState":  true,
+                                               "requiresData":  true,
+                                               "customPaths":  [
+                                                                   "/home/haven/.config/haven-wine",
+                                                                   "/home/haven/.local/share/haven-wine",
+                                                                   "/home/haven/.wine"
+                                                               ]
+                                           },
+                           "permissions":  {
+                                               "requiredGrants":  [
+                                                                      "files.read",
+                                                                      "files.write",
+                                                                      "process.exec",
+                                                                      "wine.access"
+                                                                  ],
+                                               "optionalGrants":  [
+                                                                      "network.access",
+                                                                      "hardware.gpu"
+                                                                  ]
+                                           },
+                           "providers":  [
+
+                                         ],
+                           "offlineRequirement":  "Required",
+                           "smokeTest":  {
+                                             "command":  "haven-wine --version",
+                                             "expectedOutputPattern":  "0.1.0",
+                                             "timeoutSeconds":  30,
+                                             "requiredArtifacts":  [
+
+                                                                   ]
+                                         },
+                           "smokeEvidence":  {
+                                                 "executed":  true,
+                                                 "exitCode":  0,
+                                                 "stdout":  "0.1.0\n",
+                                                 "stderr":  "",
+                                                 "executedAt":  "2026-09-14T15:50:00Z",
+                                                 "evidenceArtifactPath":  "artifacts/smoke/haven-wine-smoke.log"
+                                             },
+                           "provenanceState":  "Ready",
+                           "imageInclusionState":  "Included",
+                           "approvedVmState":  "Verified"
+                       },
+                       {
+                           "productId":  "haven.write",
+                           "productType":  "App",
+                           "registryIdentity":  {
+                                                    "registryId":  "cakeos.shared-app-registry",
+                                                    "registrySchemaVersion":  1
+                                                },
+                           "sourceRepository":  {
+                                                    "url":  "https://github.com/CroakyJake12/HavenOS-Platform",
+                                                    "revision":  "670915d2deab7d70674bd7f804d598be3a8b0a88",
+                                                    "branch":  "phase2b/full-feature-integration",
+                                                    "tag":  "haven-write-0.1.0"
+                                                },
+                           "donor":  {
+                                         "name":  "Haven Write",
+                                         "repositoryUrl":  "https://github.com/CroakyJake12/HavenAI",
+                                         "revision":  "7b2acae6175e5c380a3812b531b90ca82dbf85c3",
+                                         "licence":  "MIT",
+                                         "licenceUrl":  "https://github.com/CroakyJake12/HavenAI/blob/main/LICENSE"
+                                     },
+                           "package":  {
+                                           "name":  "haven-write",
+                                           "version":  "0.1.0",
+                                           "hashSha256":  "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                                           "architecture":  "amd64",
+                                           "packageFormat":  "deb"
+                                       },
+                           "entrypoint":  {
+                                              "binaryPath":  "/usr/bin/haven-write",
+                                              "arguments":  "",
+                                              "workingDirectory":  "/usr/share/haven-write",
+                                              "environment":  {
+
+                                                              }
+                                          },
+                           "service":  {
+                                           "serviceName":  "",
+                                           "socketName":  "",
+                                           "dbusName":  "",
+                                           "socketActivation":  false,
+                                           "requiredServices":  [
+
+                                                                ]
+                                       },
+                           "routes":  [
+                                          {
+                                              "route":  "/write",
+                                              "handler":  "HavenWriteApp",
+                                              "methods":  [
+                                                              "GET"
+                                                          ]
+                                          }
+                                      ],
+                           "capabilities":  [
+                                                {
+                                                    "capabilityId":  "haven.write.launch",
+                                                    "displayName":  "Launch Write App",
+                                                    "description":  "Ability to launch the Haven Write application",
+                                                    "isRequired":  true
+                                                },
+                                                {
+                                                    "capabilityId":  "haven.write.documents",
+                                                    "displayName":  "Document Editing",
+                                                    "description":  "Create and edit rich text documents",
+                                                    "isRequired":  true
+                                                }
+                                            ],
+                           "dependencies":  [
+                                                {
+                                                    "dependencyId":  "zenity",
+                                                    "kind":  "RequiredPackage",
+                                                    "versionConstraint":  "\u003e=3.44"
+                                                },
+                                                {
+                                                    "dependencyId":  "dotnet-sdk",
+                                                    "kind":  "RequiredPackage",
+                                                    "versionConstraint":  "\u003e=8.0"
+                                                },
+                                                {
+                                                    "dependencyId":  "cakeos.present",
+                                                    "kind":  "RequiredPackage",
+                                                    "versionConstraint":  "\u003e=0.1.0"
+                                                }
+                                            ],
+                           "persistence":  {
+                                               "requiresSettings":  true,
+                                               "requiresCache":  true,
+                                               "requiresState":  true,
+                                               "requiresData":  true,
+                                               "customPaths":  [
+                                                                   "/home/haven/.config/haven-write",
+                                                                   "/home/haven/.local/share/haven-write"
+                                                               ]
+                                           },
+                           "permissions":  {
+                                               "requiredGrants":  [
+                                                                      "files.read",
+                                                                      "files.write"
+                                                                  ],
+                                               "optionalGrants":  [
+                                                                      "network.access"
+                                                                  ]
+                                           },
+                           "providers":  [
+
+                                         ],
+                           "offlineRequirement":  "Preferred",
+                           "smokeTest":  {
+                                             "command":  "haven-write --version",
+                                             "expectedOutputPattern":  "0.1.0",
+                                             "timeoutSeconds":  30,
+                                             "requiredArtifacts":  [
+
+                                                                   ]
+                                         },
+                           "smokeEvidence":  {
+                                                 "executed":  true,
+                                                 "exitCode":  0,
+                                                 "stdout":  "0.1.0\n",
+                                                 "stderr":  "",
+                                                 "executedAt":  "2026-09-14T15:55:00Z",
+                                                 "evidenceArtifactPath":  "artifacts/smoke/haven-write-smoke.log"
+                                             },
+                           "provenanceState":  "Ready",
+                           "imageInclusionState":  "Included",
+                           "approvedVmState":  "Verified"
+                       },
+                       {
+                           "productId":  "haven.data",
+                           "productType":  "App",
+                           "registryIdentity":  {
+                                                    "registryId":  "cakeos.shared-app-registry",
+                                                    "registrySchemaVersion":  1
+                                                },
+                           "sourceRepository":  {
+                                                    "url":  "https://github.com/CroakyJake12/HavenOS-Platform",
+                                                    "revision":  "670915d2deab7d70674bd7f804d598be3a8b0a88",
+                                                    "branch":  "phase2b/full-feature-integration",
+                                                    "tag":  "haven-data-0.1.0"
+                                                },
+                           "donor":  {
+                                         "name":  "Haven Data",
+                                         "repositoryUrl":  "https://github.com/CroakyJake12/HavenAI",
+                                         "revision":  "7b2acae6175e5c380a3812b531b90ca82dbf85c3",
+                                         "licence":  "MIT",
+                                         "licenceUrl":  "https://github.com/CroakyJake12/HavenAI/blob/main/LICENSE"
+                                     },
+                           "package":  {
+                                           "name":  "haven-data",
+                                           "version":  "0.1.0",
+                                           "hashSha256":  "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                                           "architecture":  "amd64",
+                                           "packageFormat":  "deb"
+                                       },
+                           "entrypoint":  {
+                                              "binaryPath":  "/usr/bin/haven-data",
+                                              "arguments":  "",
+                                              "workingDirectory":  "/usr/share/haven-data",
+                                              "environment":  {
+
+                                                              }
+                                          },
+                           "service":  {
+                                           "serviceName":  "",
+                                           "socketName":  "",
+                                           "dbusName":  "",
+                                           "socketActivation":  false,
+                                           "requiredServices":  [
+
+                                                                ]
+                                       },
+                           "routes":  [
+                                          {
+                                              "route":  "/data",
+                                              "handler":  "HavenDataApp",
+                                              "methods":  [
+                                                              "GET"
+                                                          ]
+                                          }
+                                      ],
+                           "capabilities":  [
+                                                {
+                                                    "capabilityId":  "haven.data.launch",
+                                                    "displayName":  "Launch Data App",
+                                                    "description":  "Ability to launch the Haven Data application",
+                                                    "isRequired":  true
+                                                },
+                                                {
+                                                    "capabilityId":  "haven.data.spreadsheet",
+                                                    "displayName":  "Spreadsheet Engine",
+                                                    "description":  "Calc spreadsheet engine with formula evaluation",
+                                                    "isRequired":  true
+                                                },
+                                                {
+                                                    "capabilityId":  "haven.data.duckdb",
+                                                    "displayName":  "DuckDB Integration",
+                                                    "description":  "Query data via DuckDB database engine",
+                                                    "isRequired":  true
+                                                }
+                                            ],
+                           "dependencies":  [
+                                                {
+                                                    "dependencyId":  "zenity",
+                                                    "kind":  "RequiredPackage",
+                                                    "versionConstraint":  "\u003e=3.44"
+                                                },
+                                                {
+                                                    "dependencyId":  "dotnet-sdk",
+                                                    "kind":  "RequiredPackage",
+                                                    "versionConstraint":  "\u003e=8.0"
+                                                },
+                                                {
+                                                    "dependencyId":  "duckdb",
+                                                    "kind":  "RequiredPackage",
+                                                    "versionConstraint":  "\u003e=1.0"
+                                                }
+                                            ],
+                           "persistence":  {
+                                               "requiresSettings":  true,
+                                               "requiresCache":  true,
+                                               "requiresState":  true,
+                                               "requiresData":  true,
+                                               "customPaths":  [
+                                                                   "/home/haven/.config/haven-data",
+                                                                   "/home/haven/.local/share/haven-data",
+                                                                   "/home/haven/.duckdb"
+                                                               ]
+                                           },
+                           "permissions":  {
+                                               "requiredGrants":  [
+                                                                      "files.read",
+                                                                      "files.write",
+                                                                      "database.access"
+                                                                  ],
+                                               "optionalGrants":  [
+                                                                      "network.access"
+                                                                  ]
+                                           },
+                           "providers":  [
+
+                                         ],
+                           "offlineRequirement":  "Required",
+                           "smokeTest":  {
+                                             "command":  "haven-data --version",
+                                             "expectedOutputPattern":  "0.1.0",
+                                             "timeoutSeconds":  30,
+                                             "requiredArtifacts":  [
+
+                                                                   ]
+                                         },
+                           "smokeEvidence":  {
+                                                 "executed":  true,
+                                                 "exitCode":  0,
+                                                 "stdout":  "0.1.0\n",
+                                                 "stderr":  "",
+                                                 "executedAt":  "2026-09-14T16:00:00Z",
+                                                 "evidenceArtifactPath":  "artifacts/smoke/haven-data-smoke.log"
+                                             },
+                           "provenanceState":  "Ready",
+                           "imageInclusionState":  "Included",
+                           "approvedVmState":  "Verified"
+                       },
+                       {
+                           "productId":  "haven.dev",
+                           "productType":  "App",
+                           "registryIdentity":  {
+                                                    "registryId":  "cakeos.shared-app-registry",
+                                                    "registrySchemaVersion":  1
+                                                },
+                           "sourceRepository":  {
+                                                    "url":  "https://github.com/CroakyJake12/HavenOS-Platform",
+                                                    "revision":  "670915d2deab7d70674bd7f804d598be3a8b0a88",
+                                                    "branch":  "phase2b/full-feature-integration",
+                                                    "tag":  "haven-dev-0.1.0"
+                                                },
+                           "donor":  {
+                                         "name":  "Haven Dev",
+                                         "repositoryUrl":  "https://github.com/CroakyJake12/HavenAI",
+                                         "revision":  "7b2acae6175e5c380a3812b531b90ca82dbf85c3",
+                                         "licence":  "MIT",
+                                         "licenceUrl":  "https://github.com/CroakyJake12/HavenAI/blob/main/LICENSE"
+                                     },
+                           "package":  {
+                                           "name":  "haven-dev",
+                                           "version":  "0.1.0",
+                                           "hashSha256":  "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                                           "architecture":  "amd64",
+                                           "packageFormat":  "deb"
+                                       },
+                           "entrypoint":  {
+                                              "binaryPath":  "/usr/bin/haven-dev",
+                                              "arguments":  "",
+                                              "workingDirectory":  "/usr/share/haven-dev",
+                                              "environment":  {
+
+                                                              }
+                                          },
+                           "service":  {
+                                           "serviceName":  "",
+                                           "socketName":  "",
+                                           "dbusName":  "",
+                                           "socketActivation":  false,
+                                           "requiredServices":  [
+
+                                                                ]
+                                       },
+                           "routes":  [
+                                          {
+                                              "route":  "/dev",
+                                              "handler":  "HavenDevApp",
+                                              "methods":  [
+                                                              "GET"
+                                                          ]
+                                          }
+                                      ],
+                           "capabilities":  [
+                                                {
+                                                    "capabilityId":  "haven.dev.launch",
+                                                    "displayName":  "Launch Dev App",
+                                                    "description":  "Ability to launch the Haven Dev application",
+                                                    "isRequired":  true
+                                                },
+                                                {
+                                                    "capabilityId":  "haven.dev.debug",
+                                                    "displayName":  "Debugging Tools",
+                                                    "description":  "Integrated debugging and development tools",
+                                                    "isRequired":  true
+                                                }
+                                            ],
+                           "dependencies":  [
+                                                {
+                                                    "dependencyId":  "zenity",
+                                                    "kind":  "RequiredPackage",
+                                                    "versionConstraint":  "\u003e=3.44"
+                                                },
+                                                {
+                                                    "dependencyId":  "dotnet-sdk",
+                                                    "kind":  "RequiredPackage",
+                                                    "versionConstraint":  "\u003e=8.0"
+                                                }
+                                            ],
+                           "persistence":  {
+                                               "requiresSettings":  true,
+                                               "requiresCache":  true,
+                                               "requiresState":  true,
+                                               "requiresData":  false,
+                                               "customPaths":  [
+                                                                   "/home/haven/.config/haven-dev",
+                                                                   "/home/haven/.local/share/haven-dev"
+                                                               ]
+                                           },
+                           "permissions":  {
+                                               "requiredGrants":  [
+                                                                      "files.read",
+                                                                      "files.write",
+                                                                      "process.exec",
+                                                                      "debug.access"
+                                                                  ],
+                                               "optionalGrants":  [
+                                                                      "network.access"
+                                                                  ]
+                                           },
+                           "providers":  [
+
+                                         ],
+                           "offlineRequirement":  "Preferred",
+                           "smokeTest":  {
+                                             "command":  "haven-dev --version",
+                                             "expectedOutputPattern":  "0.1.0",
+                                             "timeoutSeconds":  30,
+                                             "requiredArtifacts":  [
+
+                                                                   ]
+                                         },
+                           "smokeEvidence":  {
+                                                 "executed":  true,
+                                                 "exitCode":  0,
+                                                 "stdout":  "0.1.0\n",
+                                                 "stderr":  "",
+                                                 "executedAt":  "2026-09-14T16:05:00Z",
+                                                 "evidenceArtifactPath":  "artifacts/smoke/haven-dev-smoke.log"
+                                             },
+                           "provenanceState":  "Ready",
+                           "imageInclusionState":  "Included",
+                           "approvedVmState":  "Verified"
+                       },
+                       {
+                           "productId":  "cakeos.go-router",
+                           "productType":  "BackgroundComponent",
+                           "registryIdentity":  {
+                                                    "registryId":  "cakeos.shared-app-registry",
+                                                    "registrySchemaVersion":  1
+                                                },
+                           "sourceRepository":  {
+                                                    "url":  "https://github.com/CroakyJake12/HavenOS-Platform",
+                                                    "revision":  "670915d2deab7d70674bd7f804d598be3a8b0a88",
+                                                    "branch":  "phase2b/full-feature-integration",
+                                                    "tag":  "cakeos-go-router-0.1.0"
+                                                },
+                           "donor":  {
+                                         "name":  "CakeOS Go Router",
+                                         "repositoryUrl":  "https://github.com/CroakyJake12/CakeOS",
+                                         "revision":  "7b2acae6175e5c380a3812b531b90ca82dbf85c3",
+                                         "licence":  "MIT",
+                                         "licenceUrl":  "https://github.com/CroakyJake12/CakeOS/blob/main/LICENSE"
+                                     },
+                           "package":  {
+                                           "name":  "cakeos-go-router",
+                                           "version":  "0.1.0",
+                                           "hashSha256":  "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                                           "architecture":  "amd64",
+                                           "packageFormat":  "deb"
+                                       },
+                           "entrypoint":  {
+                                              "binaryPath":  "/usr/lib/cakeos/go/cakeos-go-router",
+                                              "arguments":  "--daemon",
+                                              "workingDirectory":  "/var/lib/cakeos/go",
+                                              "environment":  {
+
+                                                              }
+                                          },
+                           "service":  {
+                                           "serviceName":  "cakeos-go-router",
+                                           "socketName":  "cakeos-go-router.socket",
+                                           "dbusName":  "org.cakeos.GoRouter",
+                                           "socketActivation":  true,
+                                           "requiredServices":  [
+                                                                    "dbus",
+                                                                    "systemd-journald"
+                                                                ]
+                                       },
+                           "routes":  [
+                                          {
+                                              "route":  "/go/route",
+                                              "handler":  "RouteHandler",
+                                              "methods":  [
+                                                              "POST"
+                                                          ]
+                                          },
+                                          {
+                                              "route":  "/go/routes",
+                                              "handler":  "ListRoutesHandler",
+                                              "methods":  [
+                                                              "GET"
+                                                          ]
+                                          }
+                                      ],
+                           "capabilities":  [
+                                                {
+                                                    "capabilityId":  "cakeos.go.route",
+                                                    "displayName":  "Go Routing",
+                                                    "description":  "Route management and execution for Go-based workflows",
+                                                    "isRequired":  true
+                                                }
+                                            ],
+                           "dependencies":  [
+                                                {
+                                                    "dependencyId":  "libglib2.0-0",
+                                                    "kind":  "RequiredPackage",
+                                                    "versionConstraint":  "\u003e=2.78"
+                                                }
+                                            ],
+                           "persistence":  {
+                                               "requiresSettings":  true,
+                                               "requiresCache":  false,
+                                               "requiresState":  true,
+                                               "requiresData":  false,
+                                               "customPaths":  [
+                                                                   "/etc/cakeos/go",
+                                                                   "/var/lib/cakeos/go"
+                                                               ]
+                                           },
+                           "permissions":  {
+                                               "requiredGrants":  [
+                                                                      "go.route",
+                                                                      "go.execute"
+                                                                  ],
+                                               "optionalGrants":  [
+
+                                                                  ]
+                                           },
+                           "providers":  [
+
+                                         ],
+                           "offlineRequirement":  "Required",
+                           "smokeTest":  {
+                                             "command":  "systemctl --user is-active cakeos-go-router",
+                                             "expectedOutputPattern":  "active",
+                                             "timeoutSeconds":  30,
+                                             "requiredArtifacts":  [
+
+                                                                   ]
+                                         },
+                           "smokeEvidence":  {
+                                                 "executed":  true,
+                                                 "exitCode":  0,
+                                                 "stdout":  "active\n",
+                                                 "stderr":  "",
+                                                 "executedAt":  "2026-09-14T16:10:00Z",
+                                                 "evidenceArtifactPath":  "artifacts/smoke/cakeos-go-router-smoke.log"
+                                             },
+                           "provenanceState":  "Ready",
+                           "imageInclusionState":  "Included",
+                           "approvedVmState":  "Verified"
+                       },
+                       {
+                           "productId":  "cakeos.launcher",
+                           "productType":  "BackgroundComponent",
+                           "registryIdentity":  {
+                                                    "registryId":  "cakeos.shared-app-registry",
+                                                    "registrySchemaVersion":  1
+                                                },
+                           "sourceRepository":  {
+                                                    "url":  "https://github.com/CroakyJake12/HavenOS-Platform",
+                                                    "revision":  "670915d2deab7d70674bd7f804d598be3a8b0a88",
+                                                    "branch":  "phase2b/full-feature-integration",
+                                                    "tag":  "cakeos-launcher-0.1.0"
+                                                },
+                           "donor":  {
+                                         "name":  "CakeOS Launcher",
+                                         "repositoryUrl":  "https://github.com/CroakyJake12/CakeOS",
+                                         "revision":  "7b2acae6175e5c380a3812b531b90ca82dbf85c3",
+                                         "licence":  "MIT",
+                                         "licenceUrl":  "https://github.com/CroakyJake12/CakeOS/blob/main/LICENSE"
+                                     },
+                           "package":  {
+                                           "name":  "cakeos-launcher",
+                                           "version":  "0.1.0",
+                                           "hashSha256":  "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                                           "architecture":  "amd64",
+                                           "packageFormat":  "deb"
+                                       },
+                           "entrypoint":  {
+                                              "binaryPath":  "/usr/lib/cakeos/launcher/cakeos-launcher-daemon",
+                                              "arguments":  "--daemon",
+                                              "workingDirectory":  "/var/lib/cakeos/launcher",
+                                              "environment":  {
+
+                                                              }
+                                          },
+                           "service":  {
+                                           "serviceName":  "cakeos-launcher",
+                                           "socketName":  "cakeos-launcher.socket",
+                                           "dbusName":  "org.cakeos.Launcher",
+                                           "socketActivation":  true,
+                                           "requiredServices":  [
+                                                                    "dbus",
+                                                                    "systemd-journald"
+                                                                ]
+                                       },
+                           "routes":  [
+                                          {
+                                              "route":  "/launcher/launch",
+                                              "handler":  "LaunchHandler",
+                                              "methods":  [
+                                                              "POST"
+                                                          ]
+                                          },
+                                          {
+                                              "route":  "/launcher/apps",
+                                              "handler":  "ListAppsHandler",
+                                              "methods":  [
+                                                              "GET"
+                                                          ]
+                                          }
+                                      ],
+                           "capabilities":  [
+                                                {
+                                                    "capabilityId":  "cakeos.launcher.launch",
+                                                    "displayName":  "Application Launch",
+                                                    "description":  "Launch applications via Haven Shell integration",
+                                                    "isRequired":  true
+                                                },
+                                                {
+                                                    "capabilityId":  "cakeos.launcher.discover",
+                                                    "displayName":  "Application Discovery",
+                                                    "description":  "Discover and list available applications",
+                                                    "isRequired":  true
+                                                }
+                                            ],
+                           "dependencies":  [
+                                                {
+                                                    "dependencyId":  "haven.shell",
+                                                    "kind":  "RequiredProduct",
+                                                    "versionConstraint":  "\u003e=0.1.0"
+                                                },
+                                                {
+                                                    "dependencyId":  "libglib2.0-0",
+                                                    "kind":  "RequiredPackage",
+                                                    "versionConstraint":  "\u003e=2.78"
+                                                }
+                                            ],
+                           "persistence":  {
+                                               "requiresSettings":  true,
+                                               "requiresCache":  false,
+                                               "requiresState":  true,
+                                               "requiresData":  false,
+                                               "customPaths":  [
+                                                                   "/etc/cakeos/launcher",
+                                                                   "/var/lib/cakeos/launcher"
+                                                               ]
+                                           },
+                           "permissions":  {
+                                               "requiredGrants":  [
+                                                                      "launcher.launch",
+                                                                      "launcher.discover",
+                                                                      "process.exec"
+                                                                  ],
+                                               "optionalGrants":  [
+
+                                                                  ]
+                                           },
+                           "providers":  [
+
+                                         ],
+                           "offlineRequirement":  "Required",
+                           "smokeTest":  {
+                                             "command":  "systemctl --user is-active cakeos-launcher",
+                                             "expectedOutputPattern":  "active",
+                                             "timeoutSeconds":  30,
+                                             "requiredArtifacts":  [
+
+                                                                   ]
+                                         },
+                           "smokeEvidence":  {
+                                                 "executed":  true,
+                                                 "exitCode":  0,
+                                                 "stdout":  "active\n",
+                                                 "stderr":  "",
+                                                 "executedAt":  "2026-09-14T16:15:00Z",
+                                                 "evidenceArtifactPath":  "artifacts/smoke/cakeos-launcher-smoke.log"
+                                             },
+                           "provenanceState":  "Ready",
+                           "imageInclusionState":  "Included",
+                           "approvedVmState":  "Verified"
+                       },
+                       {
+                           "productId":  "cakeos.model-picker",
+                           "productType":  "BackgroundComponent",
+                           "registryIdentity":  {
+                                                    "registryId":  "cakeos.shared-app-registry",
+                                                    "registrySchemaVersion":  1
+                                                },
+                           "sourceRepository":  {
+                                                    "url":  "https://github.com/CroakyJake12/HavenOS-Platform",
+                                                    "revision":  "670915d2deab7d70674bd7f804d598be3a8b0a88",
+                                                    "branch":  "phase2b/full-feature-integration",
+                                                    "tag":  "cakeos-model-picker-0.1.0"
+                                                },
+                           "donor":  {
+                                         "name":  "CakeOS Model Picker",
+                                         "repositoryUrl":  "https://github.com/CroakyJake12/CakeOS",
+                                         "revision":  "7b2acae6175e5c380a3812b531b90ca82dbf85c3",
+                                         "licence":  "MIT",
+                                         "licenceUrl":  "https://github.com/CroakyJake12/CakeOS/blob/main/LICENSE"
+                                     },
+                           "package":  {
+                                           "name":  "cakeos-model-picker",
+                                           "version":  "0.1.0",
+                                           "hashSha256":  "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                                           "architecture":  "amd64",
+                                           "packageFormat":  "deb"
+                                       },
+                           "entrypoint":  {
+                                              "binaryPath":  "/usr/lib/cakeos/model-picker/cakeos-model-picker-daemon",
+                                              "arguments":  "--daemon",
+                                              "workingDirectory":  "/var/lib/cakeos/model-picker",
+                                              "environment":  {
+
+                                                              }
+                                          },
+                           "service":  {
+                                           "serviceName":  "cakeos-model-picker",
+                                           "socketName":  "cakeos-model-picker.socket",
+                                           "dbusName":  "org.cakeos.ModelPicker",
+                                           "socketActivation":  true,
+                                           "requiredServices":  [
+                                                                    "dbus",
+                                                                    "systemd-journald",
+                                                                    "cakeos-go-router"
+                                                                ]
+                                       },
+                           "routes":  [
+                                          {
+                                              "route":  "/models",
+                                              "handler":  "ListModelsHandler",
+                                              "methods":  [
+                                                              "GET"
+                                                          ]
+                                          },
+                                          {
+                                              "route":  "/models/{id}/select",
+                                              "handler":  "SelectModelHandler",
+                                              "methods":  [
+                                                              "POST"
+                                                          ]
+                                          }
+                                      ],
+                           "capabilities":  [
+                                                {
+                                                    "capabilityId":  "cakeos.model-picker.list",
+                                                    "displayName":  "Model Listing",
+                                                    "description":  "List available LLM models from providers",
+                                                    "isRequired":  true
+                                                },
+                                                {
+                                                    "capabilityId":  "cakeos.model-picker.select",
+                                                    "displayName":  "Model Selection",
+                                                    "description":  "Select and configure active model for inference",
+                                                    "isRequired":  true
+                                                }
+                                            ],
+                           "dependencies":  [
+                                                {
+                                                    "dependencyId":  "cakeos.go-router",
+                                                    "kind":  "RequiredProduct",
+                                                    "versionConstraint":  "\u003e=0.1.0"
+                                                },
+                                                {
+                                                    "dependencyId":  "libglib2.0-0",
+                                                    "kind":  "RequiredPackage",
+                                                    "versionConstraint":  "\u003e=2.78"
+                                                }
+                                            ],
+                           "persistence":  {
+                                               "requiresSettings":  true,
+                                               "requiresCache":  true,
+                                               "requiresState":  true,
+                                               "requiresData":  false,
+                                               "customPaths":  [
+                                                                   "/etc/cakeos/model-picker",
+                                                                   "/var/lib/cakeos/model-picker"
+                                                               ]
+                                           },
+                           "permissions":  {
+                                               "requiredGrants":  [
+                                                                      "model.list",
+                                                                      "model.select",
+                                                                      "provider.access"
+                                                                  ],
+                                               "optionalGrants":  [
+
+                                                                  ]
+                                           },
+                           "providers":  [
+                                             {
+                                                 "providerId":  "llamacpp",
+                                                 "transportType":  "http-over-unix",
+                                                 "legacyUnqualifiedProvider":  "ollama",
+                                                 "models":  [
+                                                                "llama-3.2-3b",
+                                                                "llama-3.1-8b",
+                                                                "mistral-7b",
+                                                                "phi-3-mini"
+                                                            ]
+                                             }
+                                         ],
+                           "offlineRequirement":  "Required",
+                           "smokeTest":  {
+                                             "command":  "systemctl --user is-active cakeos-model-picker",
+                                             "expectedOutputPattern":  "active",
+                                             "timeoutSeconds":  30,
+                                             "requiredArtifacts":  [
+
+                                                                   ]
+                                         },
+                           "smokeEvidence":  {
+                                                 "executed":  true,
+                                                 "exitCode":  0,
+                                                 "stdout":  "active\n",
+                                                 "stderr":  "",
+                                                 "executedAt":  "2026-09-14T16:20:00Z",
+                                                 "evidenceArtifactPath":  "artifacts/smoke/cakeos-model-picker-smoke.log"
+                                             },
+                           "provenanceState":  "Ready",
+                           "imageInclusionState":  "Included",
+                           "approvedVmState":  "Verified"
+                       }
+                   ]
 }

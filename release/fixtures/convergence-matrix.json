@@ -1,78 +1,199 @@
-{
-  "releaseId": "havenos-2026.09-alpha",
-  "generatedAt": "2026-09-12T12:30:00Z",
-  "productStates": [
-    {
-      "productId": "haven.welcome",
-      "productType": "App",
-      "provenanceState": "Ready",
-      "imageInclusionState": "Included",
-      "approvedVmState": "Verified",
-      "offlineRequirementMet": true,
-      "smokeTestPassed": true,
-      "blockingReason": null,
-      "isConverged": true
-    },
-    {
-      "productId": "haven.shell",
-      "productType": "SystemSurface",
-      "provenanceState": "Ready",
-      "imageInclusionState": "Included",
-      "approvedVmState": "Verified",
-      "offlineRequirementMet": true,
-      "smokeTestPassed": true,
-      "blockingReason": null,
-      "isConverged": true
-    },
-    {
-      "productId": "havenos.studio",
-      "productType": "App",
-      "provenanceState": "Ready",
-      "imageInclusionState": "Included",
-      "approvedVmState": "Verified",
-      "offlineRequirementMet": true,
-      "smokeTestPassed": true,
-      "blockingReason": null,
-      "isConverged": true
-    },
-    {
-      "productId": "llamacpp.provider",
-      "productType": "Provider",
-      "provenanceState": "Ready",
-      "imageInclusionState": "Pending",
-      "approvedVmState": "Partial",
-      "offlineRequirementMet": true,
-      "smokeTestPassed": true,
-      "blockingReason": null,
-      "isConverged": false
-    },
-    {
-      "productId": "haven.notifications",
-      "productType": "BackgroundComponent",
-      "provenanceState": "Partial",
-      "imageInclusionState": "Excluded",
-      "approvedVmState": "NotTested",
-      "offlineRequirementMet": true,
-      "smokeTestPassed": true,
-      "blockingReason": null,
-      "isConverged": false
-    },
-    {
-      "productId": "haven.settings",
-      "productType": "Service",
-      "provenanceState": "Blocked",
-      "imageInclusionState": "NotApplicable",
-      "approvedVmState": "Failed",
-      "offlineRequirementMet": false,
-      "smokeTestPassed": false,
-      "blockingReason": "Provenance incomplete",
-      "isConverged": false
-    }
-  ],
-  "totalProducts": 6,
-  "convergedProducts": 3,
-  "partialProducts": 2,
-  "blockedProducts": 1,
-  "unknownProducts": 0,
-  "convergencePercentage": 50.0
+﻿{
+    "totalProducts":  17,
+    "releaseId":  "havenos-2026.09-alpha",
+    "productStates":  [
+                          {
+                              "isConverged":  true,
+                              "blockingReason":  null,
+                              "provenanceState":  "Ready",
+                              "productType":  "App",
+                              "productId":  "haven.welcome",
+                              "offlineRequirementMet":  true,
+                              "imageInclusionState":  "Included",
+                              "smokeTestPassed":  true,
+                              "approvedVmState":  "Verified"
+                          },
+                          {
+                              "isConverged":  true,
+                              "blockingReason":  null,
+                              "provenanceState":  "Ready",
+                              "productType":  "SystemSurface",
+                              "productId":  "haven.shell",
+                              "offlineRequirementMet":  true,
+                              "imageInclusionState":  "Included",
+                              "smokeTestPassed":  true,
+                              "approvedVmState":  "Verified"
+                          },
+                          {
+                              "isConverged":  true,
+                              "blockingReason":  null,
+                              "provenanceState":  "Ready",
+                              "productType":  "App",
+                              "productId":  "havenos.studio",
+                              "offlineRequirementMet":  true,
+                              "imageInclusionState":  "Included",
+                              "smokeTestPassed":  true,
+                              "approvedVmState":  "Verified"
+                          },
+                          {
+                              "isConverged":  false,
+                              "blockingReason":  "Image inclusion pending",
+                              "provenanceState":  "Ready",
+                              "productType":  "Provider",
+                              "productId":  "llamacpp.provider",
+                              "offlineRequirementMet":  true,
+                              "imageInclusionState":  "Pending",
+                              "smokeTestPassed":  true,
+                              "approvedVmState":  "Partial"
+                          },
+                          {
+                              "isConverged":  false,
+                              "blockingReason":  "VM not tested",
+                              "provenanceState":  "Partial",
+                              "productType":  "BackgroundComponent",
+                              "productId":  "haven.notifications",
+                              "offlineRequirementMet":  true,
+                              "imageInclusionState":  "Excluded",
+                              "smokeTestPassed":  true,
+                              "approvedVmState":  "NotTested"
+                          },
+                          {
+                              "isConverged":  false,
+                              "blockingReason":  "Provenance incomplete",
+                              "provenanceState":  "Blocked",
+                              "productType":  "Service",
+                              "productId":  "haven.settings",
+                              "offlineRequirementMet":  false,
+                              "imageInclusionState":  "NotApplicable",
+                              "smokeTestPassed":  false,
+                              "approvedVmState":  "Failed"
+                          },
+                          {
+                              "isConverged":  true,
+                              "blockingReason":  null,
+                              "provenanceState":  "Ready",
+                              "productType":  "App",
+                              "productId":  "haven.plan",
+                              "offlineRequirementMet":  true,
+                              "imageInclusionState":  "Included",
+                              "smokeTestPassed":  true,
+                              "approvedVmState":  "Verified"
+                          },
+                          {
+                              "isConverged":  true,
+                              "blockingReason":  null,
+                              "provenanceState":  "Ready",
+                              "productType":  "App",
+                              "productId":  "haven.present",
+                              "offlineRequirementMet":  true,
+                              "imageInclusionState":  "Included",
+                              "smokeTestPassed":  true,
+                              "approvedVmState":  "Verified"
+                          },
+                          {
+                              "isConverged":  true,
+                              "blockingReason":  null,
+                              "provenanceState":  "Ready",
+                              "productType":  "App",
+                              "productId":  "haven.terminal",
+                              "offlineRequirementMet":  true,
+                              "imageInclusionState":  "Included",
+                              "smokeTestPassed":  true,
+                              "approvedVmState":  "Verified"
+                          },
+                          {
+                              "isConverged":  true,
+                              "blockingReason":  null,
+                              "provenanceState":  "Ready",
+                              "productType":  "App",
+                              "productId":  "haven.wave",
+                              "offlineRequirementMet":  true,
+                              "imageInclusionState":  "Included",
+                              "smokeTestPassed":  true,
+                              "approvedVmState":  "Verified"
+                          },
+                          {
+                              "isConverged":  true,
+                              "blockingReason":  null,
+                              "provenanceState":  "Ready",
+                              "productType":  "App",
+                              "productId":  "haven.wine",
+                              "offlineRequirementMet":  true,
+                              "imageInclusionState":  "Included",
+                              "smokeTestPassed":  true,
+                              "approvedVmState":  "Verified"
+                          },
+                          {
+                              "isConverged":  true,
+                              "blockingReason":  null,
+                              "provenanceState":  "Ready",
+                              "productType":  "App",
+                              "productId":  "haven.write",
+                              "offlineRequirementMet":  true,
+                              "imageInclusionState":  "Included",
+                              "smokeTestPassed":  true,
+                              "approvedVmState":  "Verified"
+                          },
+                          {
+                              "isConverged":  true,
+                              "blockingReason":  null,
+                              "provenanceState":  "Ready",
+                              "productType":  "App",
+                              "productId":  "haven.data",
+                              "offlineRequirementMet":  true,
+                              "imageInclusionState":  "Included",
+                              "smokeTestPassed":  true,
+                              "approvedVmState":  "Verified"
+                          },
+                          {
+                              "isConverged":  true,
+                              "blockingReason":  null,
+                              "provenanceState":  "Ready",
+                              "productType":  "App",
+                              "productId":  "haven.dev",
+                              "offlineRequirementMet":  true,
+                              "imageInclusionState":  "Included",
+                              "smokeTestPassed":  true,
+                              "approvedVmState":  "Verified"
+                          },
+                          {
+                              "isConverged":  true,
+                              "blockingReason":  null,
+                              "provenanceState":  "Ready",
+                              "productType":  "BackgroundComponent",
+                              "productId":  "cakeos.go-router",
+                              "offlineRequirementMet":  true,
+                              "imageInclusionState":  "Included",
+                              "smokeTestPassed":  true,
+                              "approvedVmState":  "Verified"
+                          },
+                          {
+                              "isConverged":  true,
+                              "blockingReason":  null,
+                              "provenanceState":  "Ready",
+                              "productType":  "BackgroundComponent",
+                              "productId":  "cakeos.launcher",
+                              "offlineRequirementMet":  true,
+                              "imageInclusionState":  "Included",
+                              "smokeTestPassed":  true,
+                              "approvedVmState":  "Verified"
+                          },
+                          {
+                              "isConverged":  true,
+                              "blockingReason":  null,
+                              "provenanceState":  "Ready",
+                              "productType":  "BackgroundComponent",
+                              "productId":  "cakeos.model-picker",
+                              "offlineRequirementMet":  true,
+                              "imageInclusionState":  "Included",
+                              "smokeTestPassed":  true,
+                              "approvedVmState":  "Verified"
+                          }
+                      ],
+    "partialProducts":  2,
+    "generatedAt":  "2026-09-14T16:59:11.2997308Z",
+    "convergencePercentage":  82.4,
+    "convergedProducts":  14,
+    "unknownProducts":  0,
+    "blockedProducts":  1
 }

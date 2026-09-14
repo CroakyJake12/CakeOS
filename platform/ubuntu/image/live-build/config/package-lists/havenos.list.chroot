@@ -5,3 +5,28 @@ gdm3
 network-manager
 pipewire
 wireplumber
+
+# Data app: DuckDB Python worker runtime
+python3-duckdb
+
+# Present/Write apps: LibreOfficeKit development headers
+libreofficekit-dev
+
+# Terminal app: libvterm for terminal emulation
+libvterm-dev
+
+# Plan app: Evolution Data Server + libical for calendar/contacts
+libical-dev
+libebook-1.2-dev
+libecal-2.0-dev
+
+# Wave/Motion apps: GStreamer + GES for media editing
+gstreamer1.0-dev
+libgstreamer-plugins-base1.0-dev
+libges-1.0-dev
+
+# WinBoat: container/VM runtime dependencies
+podman
+qemu-kvm
+libvirt-daemon-system
+freerdp2-x11
