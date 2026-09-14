@@ -212,6 +212,9 @@ if ($firstRegistry -ne 'cakeos.shared-app-registry:1') {
 }
 Write-Host "  Single Worker 3 registry referenced by all components: cakeos.shared-app-registry v1" -ForegroundColor Green
 
+Write-Host "`n[9/9] Validating complete full-roadmap convergence coverage..." -ForegroundColor Yellow
+& (Join-Path $PSScriptRoot 'validate-full-roadmap.ps1')
+
 Write-Host "`n=== ALL VALIDATIONS PASSED ===" -ForegroundColor Cyan
 Write-Host "Release Metadata / Convergence State schema implementation complete." -ForegroundColor Green
 Write-Host "No ISO build performed." -ForegroundColor Green
