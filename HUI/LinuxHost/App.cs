@@ -1,7 +1,7 @@
 using Avalonia;
+using Avalonia.Controls;
 using Avalonia.Controls.ApplicationLifetimes;
 using Avalonia.Threading;
-using CakeOS.HuiLinuxHost.Canvas;
 using CakeOS.Platform;
 using Microsoft.Extensions.DependencyInjection;
 
@@ -20,36 +20,14 @@ public sealed class App : Application
             ConfigureServices(serviceCollection);
             Services = serviceCollection.BuildServiceProvider();
 
-            if (Environment.GetEnvironmentVariable("CAKEOS_HUI_CANVAS_PREVIEW") == "1")
-                CanvasManagedBoundaryProof.Run();
-
-            var root = RootProvider is null
-                ? null
-                : RootProvider.CreateRoot(Services) ?? throw new InvalidOperationException("HUI root provider returned null.");
-            var window = new PreviewWindow(root);
-            desktop.MainWindow = window;
-
-            window.Opened += async (_, _) =>
+            // Adapter test window
+            var window = new Window
             {
-                if (RootProvider is not null)
-                {
-                    var initState = await RootProvider.InitializeAsync(Services).ConfigureAwait(false);
-                    if (initState != HuiRootLifecycleState.Active)
-                    {
-                        await RootProvider.ActivateAsync().ConfigureAwait(false);
-                    }
-                }
-
-                if (Environment.GetEnvironmentVariable("CAKEOS_HUI_PREVIEW_SELF_TEST") == "1")
-                    Dispatcher.UIThread.Post(window.RunInputSelfTest, DispatcherPriority.Background);
-
-                if (int.TryParse(Environment.GetEnvironmentVariable("CAKEOS_HUI_PREVIEW_AUTO_EXIT_MS"), out var ms) && ms > 0)
-                {
-                    var timer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(ms) };
-                    timer.Tick += (_, _) => { timer.Stop(); window.Close(); };
-                    timer.Start();
-                }
+                Title = "CakeOS Linux Adapters",
+                Width = 800,
+                Height = 600
             };
+            desktop.MainWindow = window;
         }
 
         base.OnFrameworkInitializationCompleted();
@@ -70,5 +48,15 @@ public sealed class App : Application
         services.AddSingleton<IProductRegistry, ProductRegistry>();
         services.AddSingleton<IProductRouter, RegistryBackedRouter>(sp =>
             new RegistryBackedRouter(sp.GetRequiredService<IProductRegistry>()));
+        
+        // Linux adapters
+        services.AddSingleton<ISecretStore, Adapters.LibsecretSecretStore>();
+        services.AddSingleton<IFilePicker, Adapters.PortalFilePicker>();
+        services.AddSingleton<IAudioManager, Adapters.PipeWireAudioManager>();
+        services.AddSingleton<IScreenShare, Adapters.PortalScreenShare>();
+        services.AddSingleton<IGlobalShortcuts, Adapters.PortalGlobalShortcuts>();
+        services.AddSingleton<IOverlayManager, Adapters.PortalOverlayManager>();
+        services.AddSingleton<INotificationTransport, Adapters.FreedesktopNotificationTransport>();
+        services.AddSingleton<IScheduler, Adapters.SystemdScheduler>();
     }
 }
