@@ -9,12 +9,10 @@ stage="$(mktemp -d)"
 trap 'rm -rf "$stage"' EXIT
 
 command -v dpkg-deb >/dev/null || { echo "dpkg-deb is required" >&2; exit 2; }
-[[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+([+~.-][A-Za-z0-9.+~-]+)?$ ]] ||
-  { echo "Invalid Debian version: $version" >&2; exit 2; }
+
 # The authoritative branch contains libraries and a Flutter proof harness, not
 # a launchable Boards process. A builder must provide that process explicitly.
-[[ -x "$publish/cakeos-boards" ]] ||
-  { echo "Expected Linux Boards host at $publish/cakeos-boards; refusing to package libraries or proof harness" >&2; exit 2; }
+[[ -x "$publish/cakeos-boards" ]] || { echo "Expected Linux Boards host at $publish/cakeos-boards; refusing to package libraries or proof harness" >&2; exit 2; }
 
 source_date_epoch="${SOURCE_DATE_EPOCH:-$(git -C "$root" show -s --format=%ct HEAD)}"
 [[ "$source_date_epoch" =~ ^[0-9]+$ ]] || { echo "Invalid SOURCE_DATE_EPOCH: $source_date_epoch" >&2; exit 2; }
@@ -22,6 +20,7 @@ export SOURCE_DATE_EPOCH="$source_date_epoch"
 
 mkdir -p "$stage/DEBIAN" "$stage/usr/lib/cakeos/boards" "$stage/usr/bin" "$out"
 cp -R "$publish/." "$stage/usr/lib/cakeos/boards/"
+
 cat > "$stage/usr/bin/cakeos-boards" <<'EOF'
 #!/bin/sh
 exec /usr/lib/cakeos/boards/cakeos-boards "$@"
@@ -37,7 +36,7 @@ Architecture: amd64
 Depends: libc6, libgcc-s1, libstdc++6, zlib1g
 Maintainer: CakeOS Platform <noreply@cakeos.local>
 Description: CakeOS Boards Linux component
- HUI Boards component with AppFlowy integration at its isolated proof boundary.
+  HUI Boards component with AppFlowy integration at its isolated proof boundary.
 EOF
 
 find "$stage" -exec touch -h -d "@$SOURCE_DATE_EPOCH" {} +

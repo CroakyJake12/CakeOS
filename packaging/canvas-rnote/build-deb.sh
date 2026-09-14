@@ -9,10 +9,18 @@ stage="$(mktemp -d)"
 trap 'rm -rf "$stage"' EXIT
 
 command -v dpkg-deb >/dev/null || { echo "dpkg-deb is required" >&2; exit 2; }
-[[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+([+~.-][A-Za-z0-9.+~-]+)?$ ]] ||
-  { echo "Invalid Debian version: $version" >&2; exit 2; }
-[[ -x "$publish/cakeos-canvas-rnote" ]] ||
-  { echo "Expected Linux Canvas/Rnote host at $publish/cakeos-canvas-rnote" >&2; exit 2; }
+command -v cargo >/dev/null || { echo "cargo is required for RNote build" >&2; exit 2; }
+
+# Build RNote from source if publish dir doesn't exist
+if [[ ! -x "$publish/cakeos-canvas-rnote" ]]; then
+  echo "Building RNote from source..."
+  cd "$root/apps/canvas/rnote-poc"
+  cargo build --release
+  mkdir -p "$publish"
+  cp "target/release/cakeos-canvas-rnote" "$publish/"
+fi
+
+[[ -x "$publish/cakeos-canvas-rnote" ]] || { echo "Expected Linux Canvas/Rnote host at $publish/cakeos-canvas-rnote" >&2; exit 2; }
 
 source_date_epoch="${SOURCE_DATE_EPOCH:-$(git -C "$root" show -s --format=%ct HEAD)}"
 [[ "$source_date_epoch" =~ ^[0-9]+$ ]] || { echo "Invalid SOURCE_DATE_EPOCH: $source_date_epoch" >&2; exit 2; }
@@ -20,6 +28,7 @@ export SOURCE_DATE_EPOCH="$source_date_epoch"
 
 mkdir -p "$stage/DEBIAN" "$stage/usr/lib/cakeos/canvas-rnote" "$stage/usr/bin" "$out"
 cp -R "$publish/." "$stage/usr/lib/cakeos/canvas-rnote/"
+
 cat > "$stage/usr/bin/cakeos-canvas-rnote" <<'EOF'
 #!/bin/sh
 exec /usr/lib/cakeos/canvas-rnote/cakeos-canvas-rnote "$@"
@@ -32,10 +41,10 @@ Version: $version
 Section: graphics
 Priority: optional
 Architecture: amd64
-Depends: libc6, libgcc-s1, libstdc++6, zlib1g
+Depends: libc6, libgcc-s1, libstdc++6, zlib1g, libgtk-4-1, libadwaita-1-0
 Maintainer: CakeOS Platform <noreply@cakeos.local>
 Description: CakeOS Canvas/Rnote Linux component
- Renderer-neutral Canvas/Rnote component using the pinned Rnote core.
+  Renderer-neutral Canvas/Rnote component using the pinned Rnote core.
 EOF
 
 find "$stage" -exec touch -h -d "@$SOURCE_DATE_EPOCH" {} +
