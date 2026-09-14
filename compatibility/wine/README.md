@@ -174,7 +174,8 @@ Manifest-path `plan`, `launch`, `status`, `stop`, `logs`, and `reset` commands r
 
 - Linux/x86-64 target
 - Bubblewrap
-- managed Wine runtimes
+- managed Wine runtimes, including whether each `bin/wine` is executable and
+  the reported `wine --version`
 - Wayland socket
 - user systemd tools and manager reachability
 - render nodes
@@ -183,7 +184,9 @@ Manifest-path `plan`, `launch`, `status`, `stop`, `logs`, and `reset` commands r
 - KVM usability
 - Podman/Docker and FreeRDP presence for future WinBoat work
 
-Passing preflight is not runtime proof.
+Passing preflight is not runtime proof. A discovered but non-executable Wine
+file does not satisfy the managed-runtime prerequisite and is rejected before
+the broker builds a launch plan.
 
 ## Tests
 

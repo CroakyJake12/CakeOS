@@ -180,7 +180,7 @@ Numeric/date/text-length/custom validation remain separate deferred capabilities
 ## Database/query behaviour
 
 - local DuckDB database;
-- DuckDB 1.5.5 pinned in CI/runtime proof;
+- DuckDB 1.5.5 pinned in CI/runtime proof and enforced by the worker before it opens a database;
 - external access, extension autoload/install, community extensions and persistent secrets disabled;
 - bounded memory/thread defaults followed by locked DuckDB configuration;
 - raw query text restricted to one `SELECT` or `EXPLAIN` statement;
@@ -199,6 +199,10 @@ Numeric/date/text-length/custom validation remain separate deferred capabilities
 - worker-side table/shape validation;
 - quoted SQL identifiers, parameterised values and transactional replacement;
 - raw user/model SQL remains read-only.
+
+The worker's `runtimeInfo` request reports the exact accepted DuckDB runtime
+version. It fails before serving requests when the installed binding is not
+DuckDB 1.5.5, rather than claiming compatibility with an unproven version.
 
 Current publication is intentionally display-string based. Typed date/error/value preservation is a later compatibility milestone.
 

@@ -134,6 +134,8 @@ class CompatibilityBroker:
         wine_bin = runtime_dir / "bin" / "wine"
         if not wine_bin.is_file():
             raise CompatibilityError(f"Wine runtime is unavailable: {wine_bin}")
+        if not os.access(wine_bin, os.X_OK):
+            raise CompatibilityError(f"Wine runtime is not executable: {wine_bin}")
 
         xdg_runtime_dir, wayland_display, wayland_socket = _wayland_socket()
 
