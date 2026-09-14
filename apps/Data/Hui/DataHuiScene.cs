@@ -1,3 +1,4 @@
+using CakeOS.Platform;
 using Haven.UI;
 using Haven.UI.Components;
 using HuiButton = Haven.UI.Components.Button;
@@ -10,6 +11,55 @@ public enum DataHuiAction
     EditSelected,
     SortAscending,
     SaveAndReopen,
+}
+
+/// <summary>Shared registry metadata for the Data HUI surface.</summary>
+public static class DataHuiProduct
+{
+    public const string ProductId = "haven.data";
+    public const string Entrypoint = "HavenOS.Apps.Data.Hui.DataHuiProduct";
+
+    public static ProductRegistration CreateRegistration() => new(
+        ProductId,
+        "Data",
+        ProductType.App,
+        "/apps/data",
+        CreateRoot,
+        Entrypoint,
+        new ProductCapabilities(true, false, false, false, ["workbook"]),
+        new ProductDependencies([], [], []),
+        new ProductPersistence(true, true, true, true),
+        new ProductPermissions(["files.read", "files.write"], []),
+        [],
+        [
+            AppLifecycleOperation.Create,
+            AppLifecycleOperation.Activate,
+            AppLifecycleOperation.Open,
+            AppLifecycleOperation.Suspend,
+            AppLifecycleOperation.Resume,
+            AppLifecycleOperation.RequestClose,
+            AppLifecycleOperation.Recover,
+        ],
+        LaunchAvailability.Always);
+
+    public static void Register(IProductRegistry registry)
+    {
+        ArgumentNullException.ThrowIfNull(registry);
+        registry.Register(CreateRegistration());
+    }
+
+    public static IRootElement CreateRoot(IServiceProvider services)
+    {
+        ArgumentNullException.ThrowIfNull(services);
+        return new DataHuiRootElement(new DataHuiScene().Root);
+    }
+}
+
+/// <summary>HUI framework root exposed through the shared platform root contract.</summary>
+public sealed class DataHuiRootElement(Page root) : IHuiRootElement
+{
+    public Page Root { get; } = root ?? throw new ArgumentNullException(nameof(root));
+    public object NativeRoot => Root;
 }
 
 /// <summary>

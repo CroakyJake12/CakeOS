@@ -76,6 +76,8 @@ internal sealed class PlatformFoundationSuite
     private static void VerifyHuiHostAbi()
     {
         HuiLinuxHostAbi.RequireCompatible(HuiLinuxHostAbi.Current);
+        var root = new TestHuiRootElement();
+        NotNull(root.NativeRoot, "HUI root exposes native element");
         Throws<NotSupportedException>(
             () => HuiLinuxHostAbi.RequireCompatible(new HuiRootProviderAbi(HuiLinuxHostAbi.ContractId, HuiLinuxHostAbi.CurrentVersion + 1)),
             "future HUI ABI must be rejected");
@@ -266,4 +268,8 @@ internal sealed class PlatformFoundationSuite
 
     private sealed record TestSetting(string Value);
     private sealed class TestRootElement : IRootElement { }
+    private sealed class TestHuiRootElement : IHuiRootElement
+    {
+        public object NativeRoot { get; } = new();
+    }
 }
