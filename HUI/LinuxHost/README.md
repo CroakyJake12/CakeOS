@@ -2,28 +2,30 @@
 
 This is the first graphical Linux backend slice for HUI. It is intentionally a normal unprivileged desktop process: it does not replace GNOME Shell or Mutter, install a GDM session, or call privileged OS services.
 
-The host consumes the platform-neutral `Haven.UI` source pinned by `havenos.lock`. The initial renderer deliberately implements only the HUI draw-command subset used by this preview and throws on unsupported commands so a partial backend cannot be mistaken for full HUI compatibility.
+The host consumes the platform-neutral `Haven.UI` source supplied explicitly through `HavenUiProject`. The initial renderer deliberately implements only the HUI draw-command subset used by this preview and throws on unsupported commands so a partial backend cannot be mistaken for full HUI compatibility.
 
 ## External application launcher contract
 
 An application assembly provides one public, parameterless type implementing
-`CakeOS.HuiLinuxHost.IHuiRootProvider`:
+`CakeOS.Platform.IHuiRootProvider`. Its `CreateRoot(IServiceProvider)` result must implement
+`CakeOS.Platform.IHuiRootElement` and expose a `Haven.UI.Components.Page` as
+`NativeRoot`; the host rejects unsupported roots rather than opening an empty
+window. The provider implements the remaining lifecycle, theme, accessibility,
+and provider-injection members from the shared interface.
 
 ```csharp
-using CakeOS.HuiLinuxHost;
 using CakeOS.Platform;
 using Haven.UI.Components;
 
-public sealed class ApplicationRootProvider : IHuiRootProvider
+public sealed class ApplicationRoot(Page page) : IHuiRootElement
 {
-    public HuiRootProviderAbi Abi => HuiLinuxHostAbi.Current;
-    public Page CreateRoot() => BuildApplicationRoot();
+    public object NativeRoot => page;
 }
 ```
 
-The application assembly must reference `cakeos-hui-linux-preview` so its
-provider implements the exact host interface. Launch it through the shared
-host, using an absolute provider assembly path and its fully-qualified type:
+The application assembly references `CakeOS.Platform` for the shared provider
+contract. Launch it through the shared host, using an absolute provider assembly
+path and its fully-qualified type:
 
 ```sh
 cakeos-hui-linux-preview \
@@ -32,8 +34,8 @@ cakeos-hui-linux-preview \
 ```
 
 `HuiRootProviderResolver.Resolve` loads that type, and
-`App.OnFrameworkInitializationCompleted` mounts its `CreateRoot()` result via
-`new HuiPreviewSurface(root)`. Omitting both options retains the current
+`App.OnFrameworkInitializationCompleted` mounts its compatible native page in
+the existing preview surface. Omitting both options retains the current
 preview-scene launcher; specifying either option without the other is an
 error. Arguments other than these two options continue to Avalonia.
 

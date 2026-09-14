@@ -1,8 +1,8 @@
 using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Media;
-using CakeOS.Platform;
 using Haven.UI.Components;
+using HuiPage = Haven.UI.Components.Page;
 
 namespace CakeOS.HuiLinuxHost;
 
@@ -11,15 +11,15 @@ public sealed class PreviewWindow : Window
     private readonly bool _canvasMode = Environment.GetEnvironmentVariable("CAKEOS_HUI_CANVAS_PREVIEW") == "1";
     private readonly HuiPreviewSurface _surface;
 
-    public PreviewWindow() : this((IRootElement?)null)
+    public PreviewWindow() : this((HuiPage?)null)
     {
     }
 
-    public PreviewWindow(IRootElement? root)
+    public PreviewWindow(HuiPage? root)
     {
-        if (root is Page page)
+        if (root is not null)
         {
-            _surface = new HuiPreviewSurface(page);
+            _surface = new HuiPreviewSurface(root);
         }
         else
         {

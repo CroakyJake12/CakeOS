@@ -9,6 +9,7 @@
   </PropertyGroup>
   <ItemGroup>
     <ProjectReference Include="../App/HavenOS.Data.App.csproj" />
+    <ProjectReference Include="../../../HUI/Platform/CakeOS.Platform.csproj" />
     <ProjectReference Include="$(HavenUiProject)" Condition="'$(HavenUiProject)' != ''" />
   </ItemGroup>
   <Target Name="RequireHavenUiProject" BeforeTargets="PrepareForBuild">
