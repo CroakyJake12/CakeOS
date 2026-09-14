@@ -91,7 +91,7 @@ def evaluate_preflight(facts: dict[str, Any]) -> dict[str, Any]:
         wine_missing.append("bubblewrap")
     if not session.get("waylandSocketExists"):
         wine_missing.append("wayland-socket")
-    if not runtimes:
+    if not any(runtime.get("executable") for runtime in runtimes):
         wine_missing.append("managed-wine-runtime")
     if not all(commands.get(name) for name in ("systemd-run", "systemctl", "journalctl", "env")):
         wine_missing.append("systemd-user-supervisor-tools")
@@ -175,10 +175,12 @@ def _managed_runtimes(runtime_root: Path) -> list[dict[str, Any]]:
     for child in sorted(runtime_root.iterdir()):
         wine = child / "bin" / "wine"
         if child.is_dir() and wine.is_file():
+            executable = os.access(wine, os.X_OK)
             result.append({
                 "id": child.name,
                 "winePath": str(wine),
-                "executable": os.access(wine, os.X_OK),
+                "executable": executable,
+                "version": _command_version(str(wine), "--version") if executable else None,
             })
     return result
 

@@ -14,8 +14,20 @@ import re
 import sys
 from pathlib import Path
 
+REQUIRED_DUCKDB_VERSION = "1.5.5"
+
+
+def _validate_duckdb_version(version: object) -> str:
+    if not isinstance(version, str) or version != REQUIRED_DUCKDB_VERSION:
+        raise RuntimeError(
+            f"DuckDB {REQUIRED_DUCKDB_VERSION} is required; found {version!r}."
+        )
+    return version
+
+
 try:
     import duckdb
+    DUCKDB_RUNTIME_VERSION = _validate_duckdb_version(getattr(duckdb, "__version__", None))
 except Exception as exc:  # pragma: no cover - runtime dependency gate
     print(json.dumps({"id": 0, "error": f"duckdb is unavailable: {exc}", "result": None}), flush=True)
     raise SystemExit(78)
@@ -186,7 +198,9 @@ def serve() -> int:
                 if method == "shutdown":
                     print(json.dumps({"id": request_id, "error": None, "result": {"ok": True}}), flush=True)
                     return 0
-                if method == "open":
+                if method == "runtimeInfo":
+                    result = {"engine": "duckdb", "version": DUCKDB_RUNTIME_VERSION}
+                elif method == "open":
                     result = runtime.open(params["databasePath"])
                 elif method == "replaceTable":
                     result = runtime.replace_table(params["table"])

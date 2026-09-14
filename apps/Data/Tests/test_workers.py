@@ -96,6 +96,8 @@ def test_duckdb() -> None:
     with tempfile.TemporaryDirectory(prefix="haven-data-duckdb-test-") as directory:
         database = str(Path(directory) / "fixture.duckdb")
         with Worker(DUCKDB_WORKER) as worker:
+            runtime = worker.call("runtimeInfo")
+            require(runtime == {"engine": "duckdb", "version": "1.5.5"}, "DuckDB runtime version is not the proven dependency.")
             worker.call("open", {"databasePath": database})
             result = worker.call("query", {"sql": "SELECT 42 AS answer", "maxRows": 20})
             require(result["columns"] == ["answer"], "DuckDB column metadata mismatch.")
