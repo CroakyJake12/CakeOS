@@ -61,6 +61,8 @@ jobs:
       - name: Build AppFlowy Flutter Linux
         run: |
           cd apps/Boards/appflowy_poc
+          flutter config --enable-linux-desktop
+          flutter create --platforms=linux .
           flutter pub get
           flutter build linux --release
 
