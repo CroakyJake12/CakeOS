@@ -183,7 +183,7 @@ class _HavenBoardsPocPageState extends State<HavenBoardsPocPage> {
     final viewport = ink?.viewport() ?? const BoardWorldViewport(centerX: 304, centerY: 204, zoom: 1);
     await _documentStore.save(snapshot: snapshot.toJson(), rnoteBytes: bytes, viewport: viewport);
     if (mounted) {
-      final suffix = ink is null ? 'AppFlowy structure saved; Rnote unavailable' : 'saved locally with Rnote ink';
+      final suffix = ink == null ? 'AppFlowy structure saved; Rnote unavailable' : 'saved locally with Rnote ink';
       setState(() => _status = '$reason · $suffix');
     }
   }

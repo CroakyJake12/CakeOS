@@ -87,7 +87,7 @@ class BoardInkSurfaceState extends State<BoardInkSurface> {
   void _onPointerMove(PointerMoveEvent event) {
     if (widget.panMode) {
       final previous = _panStart;
-      if (previous is null) return;
+      if (previous == null) return;
       final viewport = widget.engine.viewport();
       final delta = event.localPosition - previous;
       widget.engine.panBy(-delta.dx / viewport.zoom, -delta.dy / viewport.zoom);
