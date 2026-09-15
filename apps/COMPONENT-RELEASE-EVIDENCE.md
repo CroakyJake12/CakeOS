@@ -69,20 +69,15 @@ apps/data` found no Write source, package, launcher, or handoff artifact.
 **BLOCKED — NO AUTHORITATIVE IMPLEMENTATION RECOVERED.** Write is not
 inferred from unrelated components.
 
-## Ubuntu cohort packaging
+## Package admission
 
-`.github/workflows/cohort-packages.yml` runs on Ubuntu 24.04 and invokes
-`packaging/cohort/build-debs.sh`. It builds:
+The previous Data/Present/Wine cohort recipe produced source-carrier archives,
+not proven functional application packages. It omitted the required DuckDB
+binding, did not install the packages, and did not launch an application. The
+recipe is retired rather than being used as package evidence.
 
-- `havenos-data_<version>_amd64.deb`, launcher
-  `/usr/bin/haven-data-calc-worker`;
-- `havenos-present_<version>_amd64.deb`, launcher
-  `/usr/bin/cakeos-present-worker`;
-- `havenos-wine-compat_<version>_amd64.deb`, user service
-  `/usr/lib/systemd/user/haven-compatd.service`.
-
-The workflow records per-package SHA-256 values in `SHA256SUMS`, dependency
-metadata in `cohort.json`, and the GitHub artifact ID/digest in the release
-record. `packaging/cohort/verify-debs.sh` extracts each package into a clean
-root, checks installed paths, verifies the rendered Wine unit has no
-placeholders, runs Python syntax smoke checks, and verifies checksums.
+`packaging/cohort/ADMISSION.md` is the current cohort record. It admits only
+the two immutable, hash-locked package artifacts recorded in
+`packaging/llamacpp/cohort-artifact.lock.json`. Data, Present, and Wine remain
+source/runtime evidence only until their package-specific admission blockers
+are directly resolved and tested.

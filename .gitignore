@@ -6,6 +6,7 @@ build/
 cache/
 **/bin/
 **/obj/
+__pycache__/
 *.iso
 *.qcow2
 *.vdi

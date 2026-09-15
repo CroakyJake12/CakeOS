@@ -1,4 +1,4 @@
-name: HavenOS cohort packages
+name: HavenOS package admission
 
 on:
   workflow_dispatch:
@@ -14,39 +14,20 @@ permissions:
   contents: read
 
 jobs:
-  package:
+  admission:
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-dotnet@v4
-        with:
-          dotnet-version: "10.0.x"
-      - name: Install package build dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y dpkg-dev python3 python3-uno libreoffice-calc-nogui libreoffice-impress-nogui libreofficekit-dev nlohmann-json3-dev bubblewrap systemd
-      - name: Build Data release source
-        run: dotnet build apps/Data/App/HavenOS.Data.App.csproj -c Release --nologo
-      - name: Build Present worker
-        run: cmake -S apps/present-engine -B build/present -DCMAKE_BUILD_TYPE=Release && cmake --build build/present --parallel
-      - name: Build cohort Debian artifacts
-        run: VERSION="0.1.${GITHUB_RUN_NUMBER}" PRESENT_BUILD_DIR="$PWD/build/present" bash packaging/cohort/build-debs.sh artifacts/cohort
-      - name: Verify clean extraction and runtime contracts
-        run: bash packaging/cohort/verify-debs.sh artifacts/cohort
-      - name: Upload immutable cohort
-        id: upload
+      - name: Validate immutable package admission metadata
+        run: python3 packaging/cohort/verify-admission.py
+      - name: Validate immutable package staging helper syntax
+        run: bash -n packaging/llamacpp/stage-cohort.sh
+      - name: Upload package admission record
         uses: actions/upload-artifact@v4
         with:
-          name: havenos-cohort-${{ github.sha }}
-          path: artifacts/cohort
+          name: havenos-cohort-admission-${{ github.sha }}
+          path: |
+            packaging/cohort/ADMISSION.md
+            packaging/llamacpp/cohort-artifact.lock.json
           if-no-files-found: error
           retention-days: 30
-      - name: Publish artifact identity
-        run: |
-          printf 'artifact_id=%s\nartifact_digest=%s\n' \
-            '${{ steps.upload.outputs.artifact-id }}' \
-            '${{ steps.upload.outputs.artifact-digest }}' >> artifacts/cohort/package-release-record.txt
-      - uses: actions/upload-artifact@v4
-        with:
-          name: havenos-cohort-release-record-${{ github.sha }}
-          path: artifacts/cohort/package-release-record.txt
