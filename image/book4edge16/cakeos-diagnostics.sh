@@ -31,6 +31,12 @@ collect dpkg-cakeos.txt sh -c 'dpkg -l | grep -i cakeos || true'
 collect kernel-modules-qcom.txt sh -c 'lsmod | grep -Ei "qcom|ath12k|i2c_hid|hid|venus|remoteproc" || true'
 collect firmware-qcom.txt sh -c 'ls -R /lib/firmware/qcom 2>/dev/null | head -100 || true'
 collect dtb-loaded.txt sh -c 'ls -l /sys/firmware/devicetree/base/compatible /proc/device-tree 2>/dev/null; find /proc/device-tree -maxdepth 2 -name compatible | head -40 || true'
+collect i2c-devices.txt sh -c 'ls -l /sys/bus/i2c/devices/ || true'
+collect input-by-path.txt sh -c 'ls -l /dev/input/by-path/ 2>/dev/null || true'
+collect remoteproc.txt sh -c 'for d in /sys/class/remoteproc/*; do echo "== $d"; cat "$d/name" "$d/state" "$d/firmware" 2>/dev/null; done; ls -l /dev/fastrpc* /dev/*cdsp* /dev/*adsp* 2>/dev/null || true'
+collect npu-dmesg.txt sh -c 'dmesg | grep -Ei "remoteproc|fastrpc|cdsp|adsp|npu|dspqueue|aic100|qaic" || true'
+collect wifi-fw.txt sh -c 'dmesg | grep -Ei "ath12k|wcn7850|board-2.bin|BDF|calibration|Direct firmware load.*failed" | head -30 || true'
+collect usb-video.txt sh -c 'ls -l /dev/video* /dev/media* 2>/dev/null; v4l2-ctl --list-devices 2>/dev/null || true'
 
 if command -v cakeos-canvas-rnote >/dev/null 2>&1; then
     collect canvas-version.txt sh -c 'dpkg-query -W -f="${Version}\n" cakeos-canvas-rnote'
