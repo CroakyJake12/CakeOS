@@ -8,10 +8,10 @@ on:
         required: true
         default: 'emergency/preview-0.1'
       canvas_run_id:
-        description: 'Canvas workflow run ID to download artifact from'
+        description: 'Canvas workflow RUN ID (not artifact ID)'
         required: false
       boards_run_id:
-        description: 'Boards workflow run ID to download artifact from'
+        description: 'Boards workflow RUN ID (not artifact ID)'
         required: false
 
 jobs:
@@ -34,7 +34,7 @@ jobs:
         if: github.event.inputs.canvas_run_id != ''
         uses: actions/download-artifact@v4
         with:
-          name: cakeos-canvas-rnote-debian-${{ github.event.inputs.canvas_run_id }}
+          name: cakeos-canvas-rnote-debian
           path: artifacts/packages
           repository: CroakyJake12/CakeOS
           run-id: ${{ github.event.inputs.canvas_run_id }}
@@ -43,7 +43,7 @@ jobs:
         if: github.event.inputs.boards_run_id != ''
         uses: actions/download-artifact@v4
         with:
-          name: cakeos-boards-debian-${{ github.event.inputs.boards_run_id }}
+          name: cakeos-boards-debian
           path: artifacts/packages
           repository: CroakyJake12/CakeOS
           run-id: ${{ github.event.inputs.boards_run_id }}

@@ -53,10 +53,10 @@ jobs:
         run: |
           command -v jq || { sudo apt-get update; sudo apt-get install -y jq; }
           bash HUI/build-linux-host.sh
-          mkdir -p artifacts/boards-host/publish
+          mkdir -p artifacts/boards/publish
           cp artifacts/hui-linux-host/publish/cakeos-hui-linux-preview \
-            artifacts/boards-host/publish/cakeos-boards
-          chmod 0755 artifacts/boards-host/publish/cakeos-boards
+            artifacts/boards/publish/cakeos-boards
+          chmod 0755 artifacts/boards/publish/cakeos-boards
 
       - name: Build AppFlowy Flutter Linux
         run: |
@@ -64,9 +64,20 @@ jobs:
           flutter pub get
           flutter build linux --release
 
+      - name: Stage AppFlowy + Rnote into Boards package
+        run: |
+          mkdir -p artifacts/boards/publish/appflowy
+          cp -R apps/Boards/appflowy_poc/build/linux/x64/release/bundle/* \
+            artifacts/boards/publish/appflowy/
+          # Copy Rnote native library for shared ink
+          mkdir -p artifacts/boards/publish/rnote
+          cp apps/canvas/rnote-poc/target/release/libcakeos_canvas_rnote_poc.so \
+            artifacts/boards/publish/rnote/ 2>/dev/null || echo "Rnote lib not yet built; will be in host"
+
       - name: Build genuine Boards .deb
         env:
           CAKEOS_BOARDS_VERSION: 0.1.0+boards.${{ github.run_number }}
+          CAKEOS_BOARDS_PUBLISH: ${{ github.workspace }}/artifacts/boards/publish
           SOURCE_DATE_EPOCH: 0
         run: |
           bash packaging/boards-appflowy/build-deb.sh
@@ -93,6 +104,6 @@ jobs:
       - name: Upload Boards package and metadata
         uses: actions/upload-artifact@v4
         with:
-          name: cakeos-boards-debian-${{ github.run_number }}
+          name: cakeos-boards-debian
           path: artifacts/packages/
           if-no-files-found: error

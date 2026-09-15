@@ -47,14 +47,15 @@ jobs:
         run: |
           command -v jq || { sudo apt-get update; sudo apt-get install -y jq; }
           bash HUI/build-linux-host.sh
-          mkdir -p artifacts/canvas-host/publish
+          mkdir -p artifacts/canvas-rnote/publish
           cp artifacts/hui-linux-host/publish/cakeos-hui-linux-preview \
-            artifacts/canvas-host/publish/cakeos-canvas-rnote
-          chmod 0755 artifacts/canvas-host/publish/cakeos-canvas-rnote
+            artifacts/canvas-rnote/publish/cakeos-canvas-rnote
+          chmod 0755 artifacts/canvas-rnote/publish/cakeos-canvas-rnote
 
       - name: Build genuine Canvas .deb
         env:
-          CAKEOS_CANVAS_VERSION: 0.1.0+canvas.${{ github.run_number }}
+          CAKEOS_CANVAS_RNOTE_VERSION: 0.1.0+canvas.${{ github.run_number }}
+          CAKEOS_CANVAS_RNOTE_PUBLISH: ${{ github.workspace }}/artifacts/canvas-rnote/publish
           SOURCE_DATE_EPOCH: 0
         run: |
           bash packaging/canvas-rnote/build-deb.sh
@@ -81,6 +82,6 @@ jobs:
       - name: Upload Canvas package and metadata
         uses: actions/upload-artifact@v4
         with:
-          name: cakeos-canvas-rnote-debian-${{ github.run_number }}
+          name: cakeos-canvas-rnote-debian
           path: artifacts/packages/
           if-no-files-found: error
