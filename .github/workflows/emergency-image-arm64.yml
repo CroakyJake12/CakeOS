@@ -114,6 +114,7 @@ jobs:
           sudo cp image/book4edge16/cakeos-diagnostics.sh work/rootfs/usr/libexec/cakeos/cakeos-diagnostics
           sudo chmod 0755 work/rootfs/usr/libexec/cakeos/cakeos-diagnostics
           sudo ln -sf /usr/libexec/cakeos/cakeos-diagnostics work/rootfs/usr/bin/cakeos-diagnostics
+          sudo mkdir -p work/rootfs/dev work/rootfs/proc work/rootfs/sys work/rootfs/dev/pts
           sudo mount --bind /dev work/rootfs/dev
           sudo mount --bind /proc work/rootfs/proc
           sudo mount --bind /sys work/rootfs/sys
