@@ -77,6 +77,8 @@ jobs:
             cakeos-canvas-rnote > artifacts/packages/runtime.log 2>&1
           status=$?
           set -e
+          echo "canvas smoke status=$status"
+          cat artifacts/packages/runtime.log || true
           test "$status" = 0 -o "$status" = 1 -o "$status" = 124
 
       - name: Upload Canvas package and metadata

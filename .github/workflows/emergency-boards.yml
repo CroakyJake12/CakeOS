@@ -31,7 +31,7 @@ jobs:
       - uses: dtolnay/rust-toolchain@1.92.0
       - uses: subosito/flutter-action@v2
         with:
-          flutter-version: '3.24.0'
+          flutter-version: '3.47.4'
           channel: 'stable'
 
       - name: Install native build and package tools
