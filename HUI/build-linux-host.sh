@@ -2,7 +2,12 @@
 set -euo pipefail
 
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-bash "$root/HUI/stage-donor.sh"
+
+# Only stage donor if HUI vendor not already present
+if [[ ! -f "$root/HUI/vendor/Haven.UI/Haven.UI.csproj" ]]; then
+    bash "$root/HUI/stage-donor.sh"
+fi
+
 python3 "$root/HUI/patches/apply-linux-migration-patches.py"
 
 out="$root/artifacts/hui-linux-host/publish"
