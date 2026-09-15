@@ -1,5 +1,8 @@
 using CakeOS.Platform;
 using Microsoft.Extensions.DependencyInjection;
+using System.IO.Compression;
+using System.Security.Cryptography;
+using System.Text;
 using System.Text.Json;
 
 var suite = new PlatformFoundationSuite();
@@ -18,6 +21,7 @@ internal sealed class PlatformFoundationSuite
             await VerifyPersistenceAndPermissionsAsync();
             await VerifyProviderRegistryAndGovernanceAsync();
             await VerifyNotificationEventsAsync();
+            await VerifyLocalCakeUpdateFlowAsync();
             Console.WriteLine("CakeOS shared platform foundation tests passed.");
         }
         finally
@@ -213,6 +217,103 @@ internal sealed class PlatformFoundationSuite
         Equal(1, cleared, "cleared dismissed count");
     }
 
+    private async Task VerifyLocalCakeUpdateFlowAsync()
+    {
+        var bundleDirectory = Path.Combine(_dataRoot, "bundles");
+        var trustedBundlePath = Path.Combine(bundleDirectory, "trusted-local-test.cakeupdate");
+        await CreateTestBundleAsync(trustedBundlePath);
+
+        var validator = new CakeUpdateBundleValidator(new StaticCakeOsSystemInfoProvider(new CakeOsSystemInfo("1.0.0", "amd64")));
+        var history = new CakeUpdateHistoryStore(Path.Combine(_dataRoot, "system-updates"));
+        var successfulInstaller = new TestUpdateInstaller(true);
+        var updates = new SettingsUpdatesModel(validator, successfulInstaller, history, () => DateTimeOffset.UnixEpoch);
+
+        Equal("Install Update From File", updates.InstallUpdateFromFile.Title, "updates file picker title");
+        Equal(CakeUpdateBundleValidator.BundleExtension, updates.InstallUpdateFromFile.AllowedExtensions.Single(), "updates file picker extension");
+        var selection = await updates.SelectUpdateFileAsync(trustedBundlePath);
+        True(selection.RequiresConfirmation, "validated bundle requires explicit confirmation");
+        Equal(0, successfulInstaller.Requests.Count, "selection does not invoke privileged installer");
+        NotNull(selection.Confirmation, "validated bundle confirmation");
+        Equal("trusted-local-test", selection.Confirmation!.BundleId, "validated bundle id");
+        Equal(2, selection.Confirmation.PackageCount, "validated package count");
+
+        var installed = await updates.ConfirmInstallAsync(selection.Confirmation.Id);
+        Equal(UpdateInstallStatus.Succeeded, installed.Status, "confirmed update status");
+        True(installed.HistoryRecorded, "successful update history recorded");
+        Equal(1, successfulInstaller.Requests.Count, "confirmation invokes privileged installer once");
+        Equal(Path.GetFullPath(trustedBundlePath), successfulInstaller.Requests[0].BundlePath, "privileged installer receives selected bundle path");
+        Equal(1, (await updates.GetHistoryAsync()).Count, "successful update history count");
+        Equal(UpdateInstallStatus.Succeeded, (await updates.GetHistoryAsync())[0].Status, "successful update history status");
+        Equal(UpdateInstallStatus.Failed, (await updates.ConfirmInstallAsync(selection.Confirmation.Id)).Status, "confirmation cannot be reused");
+
+        var failureHistory = new CakeUpdateHistoryStore(Path.Combine(_dataRoot, "failed-system-updates"));
+        var failedUpdates = new SettingsUpdatesModel(validator, new TestUpdateInstaller(false), failureHistory, () => DateTimeOffset.UnixEpoch);
+        var failedSelection = await failedUpdates.SelectUpdateFileAsync(trustedBundlePath);
+        NotNull(failedSelection.Confirmation, "failure-path confirmation");
+        var failedInstall = await failedUpdates.ConfirmInstallAsync(failedSelection.Confirmation!.Id);
+        Equal(UpdateInstallStatus.Failed, failedInstall.Status, "failed installer status");
+        True(failedInstall.HistoryRecorded, "failed update history recorded");
+        Equal(UpdateInstallStatus.Failed, (await failureHistory.GetAsync()).Single().Status, "failed update history status");
+
+        var tamperedBundlePath = Path.Combine(bundleDirectory, "tampered-local-test.cakeupdate");
+        await CreateTestBundleAsync(tamperedBundlePath, mismatchedPackageHash: true);
+        False((await updates.SelectUpdateFileAsync(tamperedBundlePath)).RequiresConfirmation, "tampered package hash is rejected");
+
+        var scriptBundlePath = Path.Combine(bundleDirectory, "script-local-test.cakeupdate");
+        await CreateTestBundleAsync(scriptBundlePath, addScript: true);
+        False((await updates.SelectUpdateFileAsync(scriptBundlePath)).RequiresConfirmation, "embedded scripts are rejected");
+
+        var missingDependencyBundlePath = Path.Combine(bundleDirectory, "missing-dependency-local-test.cakeupdate");
+        await CreateTestBundleAsync(missingDependencyBundlePath, missingDependency: true);
+        False((await updates.SelectUpdateFileAsync(missingDependencyBundlePath)).RequiresConfirmation, "missing package dependency is rejected");
+
+        var traversalBundlePath = Path.Combine(bundleDirectory, "traversal-local-test.cakeupdate");
+        await CreateTestBundleAsync(traversalBundlePath, addTraversalEntry: true);
+        False((await updates.SelectUpdateFileAsync(traversalBundlePath)).RequiresConfirmation, "archive traversal entry is rejected");
+
+        Console.WriteLine($"Validated harmless .cakeupdate package integrity: {trustedBundlePath}");
+    }
+
+    private static async Task CreateTestBundleAsync(string bundlePath, bool mismatchedPackageHash = false, bool addScript = false, bool missingDependency = false, bool addTraversalEntry = false)
+    {
+        Directory.CreateDirectory(Path.GetDirectoryName(bundlePath)!);
+        var runtimePackage = Encoding.UTF8.GetBytes("harmless CakeOS runtime test package\n");
+        var shellPackage = Encoding.UTF8.GetBytes("harmless CakeOS shell test package\n");
+        var declaredRuntimeHash = Sha256(runtimePackage);
+        var runtimePayload = mismatchedPackageHash ? Encoding.UTF8.GetBytes("harmless CakeOS runtime test package!\n") : runtimePackage;
+        var packages = new[]
+        {
+            new TestBundlePackage("cakeos-fixture-runtime", "1.0.1", "all", "packages/cakeos-fixture-runtime_1.0.1_all.deb", declaredRuntimeHash, runtimePayload.LongLength, []),
+            new TestBundlePackage("cakeos-fixture-shell", "1.0.1", "amd64", "packages/cakeos-fixture-shell_1.0.1_amd64.deb", Sha256(shellPackage), shellPackage.LongLength, [missingDependency ? "cakeos-fixture-missing" : "cakeos-fixture-runtime"])
+        };
+        var manifest = new TestBundleManifest(
+            1,
+            "trusted-local-test",
+            "1.0.1",
+            new TestBundleCompatibility("1.0.0", "1.0.0", ["amd64"]),
+            packages);
+        var manifestBytes = JsonSerializer.SerializeToUtf8Bytes(manifest, new JsonSerializerOptions { PropertyNamingPolicy = JsonNamingPolicy.CamelCase });
+
+        await using var stream = new FileStream(bundlePath, FileMode.Create, FileAccess.Write, FileShare.None, 81920, useAsync: true);
+        using var archive = new ZipArchive(stream, ZipArchiveMode.Create, leaveOpen: true);
+        await WriteEntryAsync(archive, "manifest.json", manifestBytes);
+        await WriteEntryAsync(archive, packages[0].Path, runtimePayload);
+        await WriteEntryAsync(archive, packages[1].Path, shellPackage);
+        if (addScript)
+            await WriteEntryAsync(archive, "scripts/install.sh", Encoding.UTF8.GetBytes("#!/bin/sh\nexit 0\n"));
+        if (addTraversalEntry)
+            await WriteEntryAsync(archive, "packages/../outside.deb", Encoding.UTF8.GetBytes("not a package\n"));
+    }
+
+    private static async Task WriteEntryAsync(ZipArchive archive, string path, byte[] content)
+    {
+        var entry = archive.CreateEntry(path, CompressionLevel.NoCompression);
+        await using var stream = entry.Open();
+        await stream.WriteAsync(content);
+    }
+
+    private static string Sha256(byte[] content) => Convert.ToHexString(SHA256.HashData(content)).ToLowerInvariant();
+
     private static string RepositoryRoot()
     {
         for (DirectoryInfo? directory = new DirectoryInfo(Directory.GetCurrentDirectory()); directory is not null; directory = directory.Parent)
@@ -267,6 +368,21 @@ internal sealed class PlatformFoundationSuite
     }
 
     private sealed record TestSetting(string Value);
+    private sealed record TestBundleManifest(int SchemaVersion, string BundleId, string Version, TestBundleCompatibility Compatibility, TestBundlePackage[] Packages);
+    private sealed record TestBundleCompatibility(string MinimumInstalledVersion, string MaximumInstalledVersion, string[] Architectures);
+    private sealed record TestBundlePackage(string Id, string Version, string Architecture, string Path, string Sha256, long SizeBytes, string[] DependsOn);
+    private sealed class TestUpdateInstaller(bool succeeds) : IPrivilegedCakeUpdateInstaller
+    {
+        public List<CakeUpdateInstallRequest> Requests { get; } = [];
+
+        public Task<PrivilegedInstallerResult> InstallAsync(CakeUpdateInstallRequest request, CancellationToken cancellationToken = default)
+        {
+            Requests.Add(request);
+            return Task.FromResult(succeeds
+                ? new PrivilegedInstallerResult(true, "Test privileged boundary accepted the validated bundle.")
+                : new PrivilegedInstallerResult(false, "Test privileged boundary rejected the validated bundle."));
+        }
+    }
     private sealed class TestRootElement : IRootElement { }
     private sealed class TestHuiRootElement : IHuiRootElement
     {

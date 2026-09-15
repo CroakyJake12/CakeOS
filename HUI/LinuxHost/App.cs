@@ -95,6 +95,10 @@ public sealed class App : Application
         });
         services.AddSingleton<IPermissionService, PermissionService>();
         services.AddSingleton<INotificationService, NotificationService>();
+        services.AddSingleton<ISettingsUpdatesModel>(_ => new SettingsUpdatesModel(
+            new CakeUpdateBundleValidator(new CakeOsReleaseSystemInfoProvider()),
+            new PkexecCakeUpdateInstaller(),
+            new CakeUpdateHistoryStore()));
         services.AddSingleton<IProviderRegistry, ProviderRegistry>();
         services.AddSingleton<IModelGovernance, ModelGovernance>();
         services.AddSingleton<IProductRegistry, ProductRegistry>();
