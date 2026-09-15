@@ -3,7 +3,6 @@ using Avalonia.Controls.ApplicationLifetimes;
 using Avalonia.Threading;
 using CakeOS.HuiLinuxHost.Canvas;
 using CakeOS.Platform;
-using Haven.UI.Components;
 using Microsoft.Extensions.DependencyInjection;
 
 namespace CakeOS.HuiLinuxHost;
@@ -27,57 +26,28 @@ public sealed class App : Application
             var root = RootProvider is null
                 ? null
                 : RootProvider.CreateRoot(Services) ?? throw new InvalidOperationException("HUI root provider returned null.");
-            var window = root is null
-                ? new PreviewWindow()
-                : new PreviewWindow(RequireHuiPage(root));
+            var window = new PreviewWindow(root);
             desktop.MainWindow = window;
 
             window.Opened += async (_, _) =>
             {
-                try
+                if (RootProvider is not null)
                 {
-                    if (RootProvider is not null)
+                    var initState = await RootProvider.InitializeAsync(Services).ConfigureAwait(false);
+                    if (initState != HuiRootLifecycleState.Active)
                     {
-                        var initState = await RootProvider.InitializeAsync(Services);
-                        if (initState == HuiRootLifecycleState.Unavailable)
-                            throw new InvalidOperationException("HUI root provider is unavailable.");
-                        if (initState != HuiRootLifecycleState.Active)
-                        {
-                            await RootProvider.ActivateAsync();
-                            if (await RootProvider.GetStateAsync() != HuiRootLifecycleState.Active)
-                                throw new InvalidOperationException("HUI root provider did not become active.");
-                        }
-                    }
-
-                    if (Environment.GetEnvironmentVariable("CAKEOS_HUI_PREVIEW_SELF_TEST") == "1")
-                        Dispatcher.UIThread.Post(window.RunInputSelfTest, DispatcherPriority.Background);
-
-                    if (int.TryParse(Environment.GetEnvironmentVariable("CAKEOS_HUI_PREVIEW_AUTO_EXIT_MS"), out var ms) && ms > 0)
-                    {
-                        var timer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(ms) };
-                        timer.Tick += (_, _) => { timer.Stop(); window.Close(); };
-                        timer.Start();
+                        await RootProvider.ActivateAsync().ConfigureAwait(false);
                     }
                 }
-                catch (Exception exception)
-                {
-                    Console.Error.WriteLine($"HUI root provider initialization failed: {exception.Message}");
-                    window.Close();
-                }
-            };
 
-            window.Closed += async (_, _) =>
-            {
-                if (RootProvider is null)
-                    return;
+                if (Environment.GetEnvironmentVariable("CAKEOS_HUI_PREVIEW_SELF_TEST") == "1")
+                    Dispatcher.UIThread.Post(window.RunInputSelfTest, DispatcherPriority.Background);
 
-                try
+                if (int.TryParse(Environment.GetEnvironmentVariable("CAKEOS_HUI_PREVIEW_AUTO_EXIT_MS"), out var ms) && ms > 0)
                 {
-                    await RootProvider.DeactivateAsync().ConfigureAwait(false);
-                }
-                catch (Exception exception)
-                {
-                    Console.Error.WriteLine($"HUI root provider deactivation failed: {exception.Message}");
+                    var timer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(ms) };
+                    timer.Tick += (_, _) => { timer.Stop(); window.Close(); };
+                    timer.Start();
                 }
             };
         }
@@ -104,13 +74,5 @@ public sealed class App : Application
         services.AddSingleton<IProductRegistry, ProductRegistry>();
         services.AddSingleton<IProductRouter, RegistryBackedRouter>(sp =>
             new RegistryBackedRouter(sp.GetRequiredService<IProductRegistry>()));
-    }
-
-    private static Page RequireHuiPage(IRootElement root)
-    {
-        if (root is IHuiRootElement { NativeRoot: Page page })
-            return page;
-
-        throw new NotSupportedException("The Linux HUI host requires an IHuiRootElement backed by Haven.UI.Components.Page.");
     }
 }
