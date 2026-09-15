@@ -22,6 +22,14 @@ fi
 
 [[ -x "$publish/cakeos-canvas-rnote" ]] || { echo "Expected Linux Canvas/Rnote host at $publish/cakeos-canvas-rnote" >&2; exit 2; }
 
+# Stage the Rnote native shared library alongside the managed host so
+# DllImport("cakeos_canvas_rnote_poc") resolves at runtime.
+echo "Building Canvas Rnote native library from source..."
+cargo build --release --manifest-path "$root/apps/canvas/rnote-poc/Cargo.toml"
+native_lib="$root/apps/canvas/rnote-poc/target/release/libcakeos_canvas_rnote_poc.so"
+[[ -f "$native_lib" ]] || { echo "Expected Rnote native library at $native_lib" >&2; exit 2; }
+cp "$native_lib" "$publish/"
+
 source_date_epoch="${SOURCE_DATE_EPOCH:-$(git -C "$root" show -s --format=%ct HEAD)}"
 [[ "$source_date_epoch" =~ ^[0-9]+$ ]] || { echo "Invalid SOURCE_DATE_EPOCH: $source_date_epoch" >&2; exit 2; }
 export SOURCE_DATE_EPOCH="$source_date_epoch"
