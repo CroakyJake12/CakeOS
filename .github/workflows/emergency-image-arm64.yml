@@ -160,14 +160,16 @@ jobs:
           sudo rm -rf "$W/base0" "$W/base1" "$W/top" "$W/merged" "$W/ovwork"
           df -h /
           cp work/grub.cfg work/grub-new.cfg
+          chmod u+w work/grub-new.cfg
+          ls -l work/grub.cfg work/grub-new.cfg
           if [ -n "$DTB_URL" ]; then
             mkdir -p work/dtbs/qcom
             curl -fSL --retry 3 -o work/dtbs/qcom/x1e84100-samsung-galaxy-book4-edge-16.dtb "$DTB_URL"
-            cat image/book4edge16/grub-cakeos.cfg >> work/grub-new.cfg
+            cat image/book4edge16/grub-cakeos.cfg | sudo tee -a work/grub-new.cfg > /dev/null
             echo "DTB integrated from $DTB_URL"
           else
             echo "WARNING: no DTB URL provided" | tee work/CakeOS-DTB-MISSING.txt
-            cat >> work/grub-new.cfg <<'EOF'
+            sudo tee -a work/grub-new.cfg > /dev/null <<'EOF'
 
           menuentry "CakeOS Emergency (Book4 Edge 16\" ARM64, no DTB override)" {
               set gfxpayload=keep
