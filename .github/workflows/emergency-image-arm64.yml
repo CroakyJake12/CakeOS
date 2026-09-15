@@ -73,8 +73,9 @@ jobs:
           mkdir -p work
           base=""
           for url in \
-            "https://people.canonical.com/~platform/images/ubuntu-concept/plucky-desktop-arm64+x1e.iso" \
+            "https://cdimage.ubuntu.com/ubuntu/releases/24.04/release/ubuntu-24.04.4-desktop-arm64.iso" \
             "https://people.canonical.com/~platform/images/ubuntu-concept/plucky-desktop-arm64+x1e-20250827.iso" \
+            "https://people.canonical.com/~platform/images/ubuntu-concept/plucky-desktop-arm64+x1e.iso" \
             "https://cdimage.ubuntu.com/ubuntu/releases/25.10/release/ubuntu-25.10-desktop-arm64.iso"; do
             echo "Trying $url"
             if curl -fSL --retry 3 -o work/base.iso "$url"; then
@@ -91,7 +92,9 @@ jobs:
         run: |
           mkdir -p work/iso work/rootfs
           xorriso -osirrox on -indev work/base.iso -extract / work/iso
-          ls work/iso work/iso/casper | head -30
+          ls -la work/iso
+          ls -la work/iso/casper
+          ls -la work/iso/boot/grub || true
           test -f work/iso/casper/filesystem.squashfs
           sudo unsquashfs -d work/rootfs work/iso/casper/filesystem.squashfs
           df -h /
