@@ -1,0 +1,169 @@
+name: Emergency Book4Edge16 Image (ARM64)
+
+on:
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: 'Git ref to build (branch or SHA)'
+        required: true
+        default: 'emergency/book4edge16-arm64'
+      canvas_run_id:
+        description: 'Canvas ARM64 workflow RUN ID (not artifact ID)'
+        required: false
+        default: '35018713590'
+      boards_run_id:
+        description: 'Boards ARM64 workflow RUN ID (not artifact ID)'
+        required: false
+        default: '35018713472'
+      dtb_url:
+        description: 'Optional 16-inch DTB URL to integrate'
+        required: false
+        default: ''
+
+jobs:
+  image-arm64:
+    name: Assemble Book4Edge16 ARM64 image
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 120
+    permissions:
+      contents: read
+      actions: read
+    steps:
+      - name: Checkout ARM64 branch
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.inputs.ref }}
+          fetch-depth: 1
+          submodules: false
+
+      - name: Free disk and install image tools
+        run: |
+          df -h /
+          docker system prune -af || true
+          sudo rm -rf /usr/share/dotnet /opt/hostedtoolcache /usr/local/lib/android || true
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends squashfs-tools xorriso curl ca-certificates
+          df -h /
+
+      - name: Download CakeOS ARM64 packages
+        uses: actions/download-artifact@v4
+        with:
+          name: cakeos-canvas-rnote-debian-arm64
+          path: artifacts/cakeos-arm64
+          repository: CroakyJake12/CakeOS
+          run-id: ${{ github.event.inputs.canvas_run_id }}
+      - name: Download Boards ARM64 packages
+        uses: actions/download-artifact@v4
+        with:
+          name: cakeos-boards-debian-arm64
+          path: artifacts/cakeos-arm64
+          repository: CroakyJake12/CakeOS
+          run-id: ${{ github.event.inputs.boards_run_id }}
+      - name: Verify package architectures
+        run: |
+          ls -l artifacts/cakeos-arm64
+          for deb in artifacts/cakeos-arm64/*.deb; do
+            echo "== $deb"
+            dpkg-deb --field "$deb" Package Version Architecture
+          done
+
+      - name: Fetch Ubuntu Concept ARM64 base ISO
+        run: |
+          mkdir -p work
+          base=""
+          for url in \
+            "https://people.canonical.com/~platform/images/ubuntu-concept/plucky-desktop-arm64+x1e.iso" \
+            "https://people.canonical.com/~platform/images/ubuntu-concept/plucky-desktop-arm64+x1e-20250827.iso" \
+            "https://cdimage.ubuntu.com/ubuntu/releases/25.10/release/ubuntu-25.10-desktop-arm64.iso"; do
+            echo "Trying $url"
+            if curl -fSL --retry 3 -o work/base.iso "$url"; then
+              base="$url"
+              break
+            fi
+            rm -f work/base.iso
+          done
+          test -n "$base" || { echo "No base ISO URL worked" >&2; exit 1; }
+          echo "$base" | tee work/base-iso-url.txt
+          ls -l work/base.iso
+
+      - name: Extract base ISO and root filesystem
+        run: |
+          mkdir -p work/iso work/rootfs
+          xorriso -osirrox -indev work/base.iso -extract / work/iso
+          ls work/iso work/iso/casper | head -30
+          test -f work/iso/casper/filesystem.squashfs
+          sudo unsquashfs -d work/rootfs work/iso/casper/filesystem.squashfs
+          df -h /
+
+      - name: Install CakeOS packages into rootfs
+        run: |
+          sudo mkdir -p work/rootfs/tmp/cakeos
+          sudo cp artifacts/cakeos-arm64/*.deb work/rootfs/tmp/cakeos/
+          sudo mkdir -p work/rootfs/usr/libexec/cakeos
+          sudo cp image/book4edge16/cakeos-diagnostics.sh work/rootfs/usr/libexec/cakeos/cakeos-diagnostics
+          sudo chmod 0755 work/rootfs/usr/libexec/cakeos/cakeos-diagnostics
+          sudo ln -sf /usr/libexec/cakeos/cakeos-diagnostics work/rootfs/usr/bin/cakeos-diagnostics
+          sudo mount --bind /dev work/rootfs/dev
+          sudo mount --bind /proc work/rootfs/proc
+          sudo mount --bind /sys work/rootfs/sys
+          sudo mount --bind /dev/pts work/rootfs/dev/pts
+          cleanup() {
+            sudo umount work/rootfs/dev/pts || true
+            sudo umount work/rootfs/sys || true
+            sudo umount work/rootfs/proc || true
+            sudo umount work/rootfs/dev || true
+          }
+          trap cleanup EXIT
+          sudo chroot work/rootfs env DEBIAN_FRONTEND=noninteractive apt-get install -y /tmp/cakeos/*.deb
+          sudo chroot work/rootfs env DEBIAN_FRONTEND=noninteractive apt-get install -y ubuntu-x1e-settings hwe-qcom-x1e-meta qcom-firmware-extract || echo "WARNING: Concept X1E packages unavailable on this base"
+          sudo chroot work/rootfs dpkg-query -W --showformat='${Package}\t${Version}\n' | sudo tee work/iso/casper/filesystem.manifest > /dev/null
+          sudo rm -rf work/rootfs/tmp/cakeos
+          cleanup
+          trap - EXIT
+
+      - name: Integrate 16-inch DTB and CakeOS boot entries
+        env:
+          DTB_URL: ${{ github.event.inputs.dtb_url }}
+        run: |
+          dtbdir="work/iso/casper/dtbs/qcom"
+          mkdir -p "$dtbdir"
+          if [ -n "$DTB_URL" ]; then
+            curl -fSL --retry 3 -o "$dtbdir/x1e84100-samsung-galaxy-book4-edge-16.dtb" "$DTB_URL"
+            cat image/book4edge16/grub-cakeos.cfg >> work/iso/boot/grub/grub.cfg
+            echo "DTB integrated from $DTB_URL"
+          else
+            echo "WARNING: no DTB URL provided; image ships without 16-inch DTB override" | tee work/iso/CakeOS-DTB-MISSING.txt
+            cat >> work/iso/boot/grub/grub.cfg <<'EOF'
+
+          menuentry "CakeOS Emergency (Book4 Edge 16\" ARM64, no DTB override)" {
+              set gfxpayload=keep
+              linux /casper/vmlinuz clk_ignore_unused pd_ignore_unused quiet splash ---
+              initrd /casper/initrd
+          }
+          EOF
+          fi
+          grep -n "CakeOS Emergency" work/iso/boot/grub/grub.cfg
+
+      - name: Rebuild squashfs and ISO
+        run: |
+          sudo mksquashfs work/rootfs work/iso/casper/filesystem.squashfs -comp xz -b 1M -noappend
+          printf "%s" "$(sudo du -sx --block-size=1 work/rootfs | cut -f1)" | sudo tee work/iso/casper/filesystem.size > /dev/null
+          cp work/iso/boot/grub/efi.img work/esp.img
+          (cd work/iso && find . -type f -print0 | grep -vz -e ./md5sum.txt -e ./boot.catalog | xargs -0 md5sum | sort -k2 > md5sum.txt)
+          xorriso -as mkisofs -r -V "CakeOS Book4Edge16" \
+            -e boot/grub/efi.img -no-emul-boot \
+            -append_partition 2 0xef work/esp.img -appended_part_as_gpt \
+            -o work/cakeos-book4edge16-arm64.iso work/iso
+          ls -l work/cakeos-book4edge16-arm64.iso
+          sha256sum work/cakeos-book4edge16-arm64.iso | tee work/cakeos-book4edge16-arm64.iso.sha256
+          cat work/base-iso-url.txt work/cakeos-book4edge16-arm64.iso.sha256 | tee work/image-provenance.txt
+
+      - name: Upload Book4Edge16 image
+        uses: actions/upload-artifact@v4
+        with:
+          name: cakeos-book4edge16-arm64-iso
+          path: |
+            work/cakeos-book4edge16-arm64.iso
+            work/cakeos-book4edge16-arm64.iso.sha256
+            work/image-provenance.txt
+          if-no-files-found: error
