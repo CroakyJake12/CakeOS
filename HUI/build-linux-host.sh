@@ -16,7 +16,7 @@ mkdir -p "$out"
 
 dotnet publish "$root/HUI/LinuxHost/CakeOS.HuiLinuxHost.csproj" \
   -c Release \
-  -r linux-x64 \
+  -r "${HUI_RID:-linux-x64}" \
   --self-contained true \
   -p:ContinuousIntegrationBuild=true \
   -p:DebugType=None \
