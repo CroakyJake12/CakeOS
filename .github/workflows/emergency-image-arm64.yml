@@ -136,6 +136,7 @@ jobs:
           }
           trap cleanup EXIT
           sudo chroot "$W/merged" /bin/bash -c 'env DEBIAN_FRONTEND=noninteractive apt-get install -y /tmp/cakeos/*.deb'
+          sudo chroot "$W/merged" env DEBIAN_FRONTEND=noninteractive apt-get update
           sudo chroot "$W/merged" env DEBIAN_FRONTEND=noninteractive apt-get install -y openssh-server evtest libinput-tools v4l-utils
           sudo cp image/book4edge16/cakeos-rescue-boot.sh "$W/merged/usr/libexec/cakeos/cakeos-rescue-boot.sh"
           sudo chmod 0755 "$W/merged/usr/libexec/cakeos/cakeos-rescue-boot.sh"
