@@ -46,19 +46,19 @@ jobs:
           df -h /
 
       - name: Download CakeOS ARM64 packages
-        uses: actions/download-artifact@v4
-        with:
-          name: cakeos-canvas-rnote-debian-arm64
-          path: artifacts/cakeos-arm64
-          repository: CroakyJake12/CakeOS
-          run-id: ${{ github.event.inputs.canvas_run_id }}
-      - name: Download Boards ARM64 packages
-        uses: actions/download-artifact@v4
-        with:
-          name: cakeos-boards-debian-arm64
-          path: artifacts/cakeos-arm64
-          repository: CroakyJake12/CakeOS
-          run-id: ${{ github.event.inputs.boards_run_id }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mkdir -p artifacts/cakeos-arm64
+          gh run download "${{ github.event.inputs.canvas_run_id }}" \
+            --repo CroakyJake12/CakeOS \
+            --name cakeos-canvas-rnote-debian-arm64 \
+            --dir artifacts/cakeos-arm64
+          gh run download "${{ github.event.inputs.boards_run_id }}" \
+            --repo CroakyJake12/CakeOS \
+            --name cakeos-boards-debian-arm64 \
+            --dir artifacts/cakeos-arm64
+          ls -l artifacts/cakeos-arm64
       - name: Verify package architectures
         run: |
           ls -l artifacts/cakeos-arm64
