@@ -4,6 +4,12 @@
 # or internal storage; live session only.
 set -eu
 
+# The live-session user is created at boot by casper, so its rescue password
+# can only be set here (chpasswd fails at image build time: no such user yet).
+if id ubuntu >/dev/null 2>&1; then
+    echo 'ubuntu:cakeos-rescue' | chpasswd || true
+fi
+
 echo "CakeOS rescue: waiting for network..." > /dev/console
 for _ in $(seq 1 30); do
     if ip -4 route show default 2>/dev/null | grep -q .; then
