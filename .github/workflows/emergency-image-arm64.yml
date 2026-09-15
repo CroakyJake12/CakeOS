@@ -49,15 +49,16 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          mkdir -p artifacts/cakeos-arm64
+          mkdir -p artifacts/dl-canvas artifacts/dl-boards artifacts/cakeos-arm64
           gh run download "${{ github.event.inputs.canvas_run_id }}" \
             --repo CroakyJake12/CakeOS \
             --name cakeos-canvas-rnote-debian-arm64 \
-            --dir artifacts/cakeos-arm64
+            --dir artifacts/dl-canvas
           gh run download "${{ github.event.inputs.boards_run_id }}" \
             --repo CroakyJake12/CakeOS \
             --name cakeos-boards-debian-arm64 \
-            --dir artifacts/cakeos-arm64
+            --dir artifacts/dl-boards
+          cp artifacts/dl-canvas/*.deb artifacts/dl-boards/*.deb artifacts/cakeos-arm64/
           ls -l artifacts/cakeos-arm64
       - name: Verify package architectures
         run: |
