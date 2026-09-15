@@ -73,7 +73,6 @@ jobs:
           mkdir -p work
           base=""
           for url in \
-            "https://cdimage.ubuntu.com/ubuntu/releases/24.04/release/ubuntu-24.04.4-desktop-arm64.iso" \
             "https://people.canonical.com/~platform/images/ubuntu-concept/plucky-desktop-arm64+x1e-20250827.iso" \
             "https://people.canonical.com/~platform/images/ubuntu-concept/plucky-desktop-arm64+x1e.iso" \
             "https://cdimage.ubuntu.com/ubuntu/releases/25.10/release/ubuntu-25.10-desktop-arm64.iso"; do
@@ -94,9 +93,17 @@ jobs:
           xorriso -osirrox on -indev work/base.iso -extract / work/iso
           ls -la work/iso
           ls -la work/iso/casper
-          ls -la work/iso/boot/grub || true
-          test -f work/iso/casper/filesystem.squashfs
-          sudo unsquashfs -d work/rootfs work/iso/casper/filesystem.squashfs
+          if [ -f work/iso/casper/filesystem.squashfs ]; then
+            LIVE_SQFS=filesystem.squashfs
+          elif [ -f work/iso/casper/minimal.standard.live.squashfs ]; then
+            LIVE_SQFS=minimal.standard.live.squashfs
+          else
+            echo "ERROR: unknown live layer layout" >&2
+            exit 1
+          fi
+          echo "Live layer: $LIVE_SQFS"
+          echo "LIVE_SQFS=$LIVE_SQFS" >> "$GITHUB_ENV"
+          sudo unsquashfs -d work/rootfs "work/iso/casper/$LIVE_SQFS"
           df -h /
 
       - name: Install CakeOS packages into rootfs
@@ -120,7 +127,7 @@ jobs:
           trap cleanup EXIT
           sudo chroot work/rootfs env DEBIAN_FRONTEND=noninteractive apt-get install -y /tmp/cakeos/*.deb
           sudo chroot work/rootfs env DEBIAN_FRONTEND=noninteractive apt-get install -y ubuntu-x1e-settings hwe-qcom-x1e-meta qcom-firmware-extract || echo "WARNING: Concept X1E packages unavailable on this base"
-          sudo chroot work/rootfs dpkg-query -W --showformat='${Package}\t${Version}\n' | sudo tee work/iso/casper/filesystem.manifest > /dev/null
+          sudo chroot work/rootfs dpkg-query -W --showformat='${Package}\t${Version}\n' | sudo tee "work/iso/casper/${LIVE_SQFS%.squashfs}.manifest" > /dev/null
           sudo rm -rf work/rootfs/tmp/cakeos
           cleanup
           trap - EXIT
@@ -131,13 +138,16 @@ jobs:
         run: |
           dtbdir="work/iso/casper/dtbs/qcom"
           mkdir -p "$dtbdir"
+          GRUB_CFG="$(find work/iso -name grub.cfg | head -1)"
+          test -n "$GRUB_CFG" || { echo "ERROR: no grub.cfg in base ISO" >&2; exit 1; }
+          echo "GRUB config: $GRUB_CFG"
           if [ -n "$DTB_URL" ]; then
             curl -fSL --retry 3 -o "$dtbdir/x1e84100-samsung-galaxy-book4-edge-16.dtb" "$DTB_URL"
-            cat image/book4edge16/grub-cakeos.cfg >> work/iso/boot/grub/grub.cfg
+            cat image/book4edge16/grub-cakeos.cfg >> "$GRUB_CFG"
             echo "DTB integrated from $DTB_URL"
           else
             echo "WARNING: no DTB URL provided; image ships without 16-inch DTB override" | tee work/iso/CakeOS-DTB-MISSING.txt
-            cat >> work/iso/boot/grub/grub.cfg <<'EOF'
+            cat >> "$GRUB_CFG" <<'EOF'
 
           menuentry "CakeOS Emergency (Book4 Edge 16\" ARM64, no DTB override)" {
               set gfxpayload=keep
@@ -146,18 +156,28 @@ jobs:
           }
           EOF
           fi
-          grep -n "CakeOS Emergency" work/iso/boot/grub/grub.cfg
+          grep -n "CakeOS Emergency" "$GRUB_CFG"
 
-      - name: Rebuild squashfs and ISO
+      - name: Rebuild live layer and ISO
         run: |
-          sudo mksquashfs work/rootfs work/iso/casper/filesystem.squashfs -comp xz -b 1M -noappend
-          printf "%s" "$(sudo du -sx --block-size=1 work/rootfs | cut -f1)" | sudo tee work/iso/casper/filesystem.size > /dev/null
-          cp work/iso/boot/grub/efi.img work/esp.img
-          (cd work/iso && find . -type f -print0 | grep -vz -e ./md5sum.txt -e ./boot.catalog | xargs -0 md5sum | sort -k2 > md5sum.txt)
-          xorriso -as mkisofs -r -V "CakeOS Book4Edge16" \
-            -e boot/grub/efi.img -no-emul-boot \
-            -append_partition 2 0xef work/esp.img -appended_part_as_gpt \
-            -o work/cakeos-book4edge16-arm64.iso work/iso
+          sudo mksquashfs work/rootfs "work/iso/casper/$LIVE_SQFS" -comp xz -b 1M -noappend
+          printf "%s" "$(sudo du -sx --block-size=1 work/rootfs | cut -f1)" | sudo tee "work/iso/casper/${LIVE_SQFS%.squashfs}.size" > /dev/null
+          (cd work/iso && find . -type f ! -name md5sum.txt -print0 | xargs -0 md5sum | sort -k2 > md5sum.txt)
+          GRUB_CFG="$(find work/iso -name grub.cfg | head -1)"
+          xorriso -indev work/base.iso -outdev work/cakeos-book4edge16-arm64.iso \
+            -map "work/iso/casper/$LIVE_SQFS" "/casper/$LIVE_SQFS" \
+            -map "work/iso/casper/${LIVE_SQFS%.squashfs}.manifest" "/casper/${LIVE_SQFS%.squashfs}.manifest" \
+            -map "work/iso/casper/${LIVE_SQFS%.squashfs}.size" "/casper/${LIVE_SQFS%.squashfs}.size" \
+            -map "$GRUB_CFG" "/${GRUB_CFG#work/iso/}" \
+            -map work/iso/md5sum.txt /md5sum.txt \
+            -map work/iso/casper/dtbs /casper/dtbs \
+            -boot_image any replay
+          if [ -f work/iso/CakeOS-DTB-MISSING.txt ]; then
+            xorriso -indev work/cakeos-book4edge16-arm64.iso -outdev work/cakeos-tmp.iso \
+              -map work/iso/CakeOS-DTB-MISSING.txt /CakeOS-DTB-MISSING.txt \
+              -boot_image any replay
+            mv work/cakeos-tmp.iso work/cakeos-book4edge16-arm64.iso
+          fi
           ls -l work/cakeos-book4edge16-arm64.iso
           sha256sum work/cakeos-book4edge16-arm64.iso | tee work/cakeos-book4edge16-arm64.iso.sha256
           cat work/base-iso-url.txt work/cakeos-book4edge16-arm64.iso.sha256 | tee work/image-provenance.txt
