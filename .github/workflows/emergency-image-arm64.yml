@@ -118,6 +118,7 @@ jobs:
         run: |
           W="$GITHUB_WORKSPACE/work"
           sudo mkdir -p "$W/merged/tmp/cakeos"
+          sudo cp /etc/resolv.conf "$W/merged/etc/resolv.conf"
           sudo cp artifacts/cakeos-arm64/*.deb "$W/merged/tmp/cakeos/"
           sudo mkdir -p "$W/merged/usr/libexec/cakeos"
           sudo cp image/book4edge16/cakeos-diagnostics.sh "$W/merged/usr/libexec/cakeos/cakeos-diagnostics"
