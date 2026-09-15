@@ -37,6 +37,9 @@ collect remoteproc.txt sh -c 'for d in /sys/class/remoteproc/*; do echo "== $d";
 collect npu-dmesg.txt sh -c 'dmesg | grep -Ei "remoteproc|fastrpc|cdsp|adsp|npu|dspqueue|aic100|qaic" || true'
 collect wifi-fw.txt sh -c 'dmesg | grep -Ei "ath12k|wcn7850|board-2.bin|BDF|calibration|Direct firmware load.*failed" | head -30 || true'
 collect usb-video.txt sh -c 'ls -l /dev/video* /dev/media* 2>/dev/null; v4l2-ctl --list-devices 2>/dev/null || true'
+collect battery.txt sh -c 'for d in /sys/class/power_supply/*; do echo "== $d"; cat "$d/type" "$d/status" "$d/capacity" "$d/voltage_now" "$d/current_now" 2>/dev/null; done; upower -d 2>/dev/null | head -40 || true'
+collect audio.txt sh -c 'aplay -l 2>/dev/null; arecord -l 2>/dev/null; wpctl status 2>/dev/null | head -30 || true'
+collect touch-evtest.txt sh -c 'evtest --list 2>/dev/null || libinput list-devices 2>/dev/null | grep -iE "touch|pen|finger" || true'
 
 if command -v cakeos-canvas-rnote >/dev/null 2>&1; then
     collect canvas-version.txt sh -c 'dpkg-query -W -f="${Version}\n" cakeos-canvas-rnote'
