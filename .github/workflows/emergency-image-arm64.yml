@@ -134,7 +134,13 @@ jobs:
             sudo umount "$W/merged/dev" || true
           }
           trap cleanup EXIT
-          sudo chroot "$W/merged" env DEBIAN_FRONTEND=noninteractive apt-get install -y /tmp/cakeos/*.deb
+          sudo chroot "$W/merged" /bin/bash -c 'env DEBIAN_FRONTEND=noninteractive apt-get install -y /tmp/cakeos/*.deb'
+          sudo chroot "$W/merged" env DEBIAN_FRONTEND=noninteractive apt-get install -y openssh-server
+          sudo cp image/book4edge16/cakeos-rescue-boot.sh "$W/merged/usr/libexec/cakeos/cakeos-rescue-boot.sh"
+          sudo chmod 0755 "$W/merged/usr/libexec/cakeos/cakeos-rescue-boot.sh"
+          sudo cp image/book4edge16/cakeos-rescue-net.service "$W/merged/etc/systemd/system/cakeos-rescue-net.service"
+          sudo chroot "$W/merged" systemctl enable ssh cakeos-rescue-net.service
+          echo 'ubuntu:cakeos-rescue' | sudo chroot "$W/merged" chpasswd
           sudo chroot "$W/merged" env DEBIAN_FRONTEND=noninteractive apt-get install -y ubuntu-x1e-settings hwe-qcom-x1e-meta qcom-firmware-extract || echo "WARNING: Concept X1E packages unavailable on this base"
           sudo chroot "$W/merged" dpkg-query -W -f='${Package}\t${Version}\n' 'cakeos-*' | sudo tee "$W/cakeos-versions.txt" > /dev/null
           cat "$W/cakeos-versions.txt"
