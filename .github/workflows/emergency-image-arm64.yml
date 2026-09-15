@@ -90,7 +90,7 @@ jobs:
       - name: Extract base ISO and root filesystem
         run: |
           mkdir -p work/iso work/rootfs
-          xorriso -osirrox -indev work/base.iso -extract / work/iso
+          xorriso -osirrox on -indev work/base.iso -extract / work/iso
           ls work/iso work/iso/casper | head -30
           test -f work/iso/casper/filesystem.squashfs
           sudo unsquashfs -d work/rootfs work/iso/casper/filesystem.squashfs
