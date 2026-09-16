@@ -8,11 +8,26 @@
 
 **Migration boundary**: This crate sits at the HUI → Rnote boundary. It owns:
 - Canvas document coordinate normalization
-- Rnote tool/style mapping (pen, marker highlighter, eraser, selector/lasso, and shape)
-- SVG export via `rnote_engine::engine::export`
+- Rnote tool/style mapping (brush incl. marker/highlighter + textured, all 13
+  shape builders, typewriter, eraser incl. split mode, selector incl. all
+  capture styles, and utility tools)
+- Brush/shaper stroke width + stroke/fill colours, eraser width, shaper
+  constraints, selector aspect lock, typewriter metrics
+- Document layout, background (colour/pattern/size), page format/DPI, snap,
+  and doc export prefs
+- SVG/PDF/XOPP document export plus selector selection SVG export via
+  `rnote_engine::engine::export`
 - Rnote payload save/load via `EngineSnapshot`
 - Rnote camera viewport, zoom, and pan state
 - Same-directory atomic Rnote replacement for Canvas file persistence
+
+**C ABI**: v3 (`CAKE_CANVAS_ABI_VERSION 3`, min 2). v2 numbering for the
+original five tools and first four shapes is preserved; v3 adds the
+typewriter/util tools, remaining nine shape builders, the full config
+surface, and multi-format export. Managed bridges accept ABI 2..3 so an
+ABI-2 native library keeps the original stroke/viewport/history/render
+surface working; parity-config calls report a rebuild diagnostic instead
+of faking state.
 
 It does NOT own:
 - GTK/Libadwaita integration (explicitly forbidden)

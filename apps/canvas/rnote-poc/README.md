@@ -24,11 +24,14 @@ This crate provides a renderer-neutral bridge between the Rnote 0.14.2 engine co
 The stable C ABI (`include/cakeos_canvas.h`) exposes:
 
 - **Engine lifecycle**: `cake_canvas_engine_new`, `cake_canvas_engine_free`, `cake_canvas_engine_from_rnote`
-- **Rnote tools**: `cake_canvas_set_stroke_tool` (pen, marker highlighter, eraser, selector/lasso, and shape), plus `cake_canvas_set_shape`
+- **Rnote tools**: `cake_canvas_set_stroke_tool` (brush/pen, marker highlighter, shaper, typewriter, eraser, selector, utility tools), plus `cake_canvas_set_shape` (all 13 donor shape builders)
+- **Pen config**: brush style/builder, stroke width + stroke/fill colours, eraser width/style, shaper style/constraints, selector style/aspect lock, tools style, typewriter font size/text width (each with getters)
+- **Document**: layout, background colour/pattern/size, page format size/DPI, snap, export prefs
 - **Stroke events**: `begin_stroke`, `update_stroke`, `end_stroke`
 - **History**: `undo`, `redo`, `can_undo`, `can_redo`
 - **Viewport**: `cake_canvas_set_viewport_size`, `cake_canvas_zoom_to`, `cake_canvas_pan_by`, and `cake_canvas_set_viewport_center`
 - **Rendering**: `cake_canvas_render_frame` (returns SVG + document-space bounds)
+- **Export**: `cake_canvas_export_doc` (SVG/PDF/XOPP) and `cake_canvas_export_selection_svg` (`NoChange` when nothing is selected)
 - **Persistence**: `cake_canvas_save_rnote`, `cake_canvas_buffer_release`
 
 All coordinates are in **Canvas document space** (Rnote's infinite coordinate system). The render frame carries the original document-space content rectangle while the SVG bytes are normalized to a zero-based viewBox. HUI subtracts the frame origin when selecting a source rectangle and keeps its viewport in document coordinates.

@@ -3,8 +3,10 @@
 Windows port of the HUI preview host. It runs the **real** Cake engines, not mocks:
 
 - Canvas: `apps/canvas/rnote-poc` Rust cdylib (`cakeos_canvas_rnote_poc.dll` on
-  Windows, ABI v2) through `Canvas/CanvasNativeBridge.cs`, rendered as SVG via
-  Avalonia + `Svg.Controls.Skia.Avalonia` — the same boundary the Linux host uses.
+  Windows, ABI v3 with v2 back-compat) through `Canvas/CanvasNativeBridge.cs`,
+  rendered as SVG via Avalonia + `Svg.Controls.Skia.Avalonia` — the same
+  boundary the Linux host uses. Parity-config calls against an ABI-2 library
+  report a native-rebuild diagnostic; nothing is faked.
 - Layout/input/product code: shared `HUI/Platform` + vendored `Haven.UI` sources,
   unchanged. Layout passes `HavenPlatform.Windows`.
 

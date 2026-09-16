@@ -28,9 +28,16 @@ public sealed class HuiPreviewSurface : Control, IHavenMeasureContext, IDisposab
     private readonly HavenSceneRenderer _renderer = new();
     private readonly HavenInputRouter _input;
     private readonly bool _canvasMode;
-    private readonly CanvasNativeSession? _canvasSession;
+    private CanvasNativeSession? _canvasSession;
+    private bool _canvasDirty;
+    private string? _canvasDocumentPath;
     private readonly HuiImage? _canvasElement;
     private readonly CanvasToolStrip? _canvasTools;
+    private readonly CanvasHeaderBar? _canvasHeader;
+    private readonly CanvasPenConfigPanel? _canvasPenConfig;
+    private readonly CanvasColorPanel? _canvasColors;
+    private readonly CanvasDocumentPanel? _canvasDocument;
+    private CanvasController? _canvasController;
     private SvgSource? _canvasSvgSource;
     private SvgImage? _canvasSvgImage;
     private CanvasDocumentBounds? _canvasDocumentBounds;
@@ -59,8 +66,16 @@ public sealed class HuiPreviewSurface : Control, IHavenMeasureContext, IDisposab
             _status = scene.Status;
             _canvasElement = scene.Canvas;
             _canvasTools = scene.Tools;
+            _canvasHeader = scene.Header;
+            _canvasPenConfig = scene.PenConfig;
+            _canvasColors = scene.Colors;
+            _canvasDocument = scene.Document;
             _canvasSession = new CanvasNativeSession();
-            WireCanvasTools(_canvasTools, _canvasSession);
+            _canvasController = new CanvasController(
+                _canvasSession, _canvasHeader, _canvasTools, _canvasPenConfig, _canvasColors, _canvasDocument);
+            WireCanvasController(_canvasController);
+            scene.Save.Invoked += (_, _) => SaveCanvasDocument();
+            scene.Open.Invoked += (_, _) => OpenCanvasDocument();
             InitializeCanvasFrame(_canvasSession);
         }
         else
@@ -338,53 +353,333 @@ public sealed class HuiPreviewSurface : Control, IHavenMeasureContext, IDisposab
         GC.SuppressFinalize(this);
     }
 
-    private void WireCanvasTools(CanvasToolStrip tools, CanvasNativeSession session)
-    {
-        tools.ToolRequested += tool => SetCanvasTool(session, tool);
-        tools.UndoRequested += (_, _) => CanvasUndo(session);
-        tools.RedoRequested += (_, _) => CanvasRedo(session);
-    }
+    private static string DefaultCanvasDocumentPath() =>
+        Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments),
+            "CakeOS", "Canvas", "canvas.rnote");
 
-    private void SetCanvasTool(CanvasNativeSession session, CanvasTool tool)
+    private void SaveCanvasDocument()
     {
+        if (!_canvasMode || _canvasSession is null)
+            return;
         if (_canvasStrokeActive || _canvasPanActive)
         {
-            _status.Content = "Finish the active Canvas gesture before changing tools.";
+            _status.Content = "Finish the active Canvas gesture before saving.";
             return;
         }
 
-        session.SetTool(tool);
-        _canvasStrokeTool = tool;
-        _canvasTools?.SetTool(tool);
-        _status.Content = $"{tool} selected";
-        Console.WriteLine($"CANVAS_RNOTE_TOOL_SELECTED tool={tool}");
+        try
+        {
+            var path = _canvasDocumentPath ??= DefaultCanvasDocumentPath();
+            if (!_canvasDirty && File.Exists(path))
+            {
+                _status.Content = $"No changes since last save ({path})";
+                Console.WriteLine($"CANVAS_RNOTE_DOCUMENT_SAVE_SKIPPED path={path}");
+                InvalidateVisual();
+                return;
+            }
+
+            var payload = _canvasSession.SaveRnote();
+            Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+            var temporaryPath = path + ".tmp";
+            using (var stream = new FileStream(temporaryPath, FileMode.Create, FileAccess.Write, FileShare.None))
+            {
+                stream.Write(payload, 0, payload.Length);
+                stream.Flush(true);
+            }
+            File.Move(temporaryPath, path, overwrite: true);
+            if (new FileInfo(path).Length != payload.Length)
+                throw new InvalidDataException("Saved Canvas file size does not match the Rnote payload.");
+            _canvasDirty = false;
+            _canvasHeader?.SetDocument(Path.GetFileName(path), dirty: false);
+            _status.Content = $"Saved {payload.Length} bytes to {path}";
+            Console.WriteLine($"CANVAS_RNOTE_DOCUMENT_SAVED bytes={payload.Length} path={path}");
+            InvalidateVisual();
+        }
+        catch (Exception exception)
+        {
+            _status.Content = $"Save failed: {exception.Message}";
+            Console.WriteLine($"CANVAS_RNOTE_DOCUMENT_SAVE_FAILED reason={exception.Message}");
+            InvalidateVisual();
+        }
+    }
+
+    private void OpenCanvasDocument()
+    {
+        if (!_canvasMode)
+            return;
+        if (_canvasStrokeActive || _canvasPanActive)
+        {
+            _status.Content = "Finish the active Canvas gesture before opening a document.";
+            return;
+        }
+
+        var path = _canvasDocumentPath ??= DefaultCanvasDocumentPath();
+        try
+        {
+            if (!File.Exists(path))
+            {
+                _status.Content = $"No saved Canvas document at {path} yet. Draw, then Save.";
+                Console.WriteLine($"CANVAS_RNOTE_DOCUMENT_REOPEN_EMPTY path={path}");
+                InvalidateVisual();
+                return;
+            }
+
+            var bytes = File.ReadAllBytes(path);
+            var restored = CanvasNativeSession.FromRnote(bytes);
+            var frame = restored.RenderSvg();
+            if (frame.Bounds.Width <= 0 || frame.Bounds.Height <= 0)
+            {
+                restored.Dispose();
+                throw new InvalidDataException("Saved Canvas document produced invalid render bounds.");
+            }
+
+            var previous = _canvasSession;
+            _canvasSession = restored;
+            previous?.Dispose();
+            _canvasController?.Retarget(restored);
+            _canvasHeader?.SetDocument(Path.GetFileName(path), dirty: false);
+            _canvasViewportInitialized = false;
+            RefreshCanvasFrame(_canvasSession);
+            RefreshCanvasHistory(_canvasSession);
+            _canvasDirty = false;
+            _status.Content = $"Reopened {bytes.Length} bytes from {path}";
+            Console.WriteLine(
+                $"CANVAS_RNOTE_DOCUMENT_REOPENED bytes={bytes.Length} width={frame.Bounds.Width:0.###} height={frame.Bounds.Height:0.###} path={path}");
+            InvalidateMeasure();
+            InvalidateVisual();
+        }
+        catch (Exception exception)
+        {
+            _status.Content = $"Reopen failed: {exception.Message}";
+            Console.WriteLine($"CANVAS_RNOTE_DOCUMENT_REOPEN_FAILED path={path} reason={exception.Message}");
+            InvalidateVisual();
+        }
+    }
+
+    private void WireCanvasController(CanvasController controller)
+    {
+        controller.ToolChanged += tool =>
+        {
+            _canvasStrokeTool = tool;
+            InvalidateVisual();
+        };
+        controller.StatusChanged += message =>
+        {
+            _status.Content = message;
+            InvalidateVisual();
+        };
+        controller.RenderingInvalidated += () =>
+        {
+            if (_canvasSession is null) return;
+            RefreshCanvasFrame(_canvasSession);
+            RefreshCanvasHistory(_canvasSession);
+            _canvasDirty = true;
+            InvalidateMeasure();
+            InvalidateVisual();
+        };
+        controller.HistoryChanged += () =>
+        {
+            if (_canvasSession is null) return;
+            RefreshCanvasFrame(_canvasSession);
+            RefreshCanvasHistory(_canvasSession);
+            _canvasDirty = true;
+            InvalidateMeasure();
+            InvalidateVisual();
+        };
+        controller.ZoomStepRequested += ZoomCanvasStep;
+        controller.MenuRequested += ShowCanvasMenu;
+        controller.ExportRequested += ExportCanvasDocument;
+        controller.SelectionExportRequested += ExportCanvasSelection;
+    }
+
+    private void ZoomCanvasStep(int direction)
+    {
+        if (!_canvasMode || _canvasElement is null || _canvasStrokeActive || _canvasPanActive)
+            return;
+        var target = Rect(_canvasElement.Bounds);
+        if (target.Width <= 0 || target.Height <= 0)
+            return;
+        ZoomCanvasViewport(
+            new Point(target.X + target.Width / 2d, target.Y + target.Height / 2d),
+            direction);
         InvalidateVisual();
     }
 
-    private void CanvasUndo(CanvasNativeSession session)
+    private void ShowCanvasMenu(string menu)
     {
-        if (_canvasStrokeActive || _canvasPanActive) return;
-        var changed = session.Undo();
-        if (changed)
-            RefreshCanvasFrame(session);
-        RefreshCanvasHistory(session);
-        _status.Content = changed ? "Canvas undo" : "Nothing to undo";
-        Console.WriteLine($"CANVAS_RNOTE_HISTORY action=undo changed={(changed ? 1 : 0)}");
+        if (!_canvasMode || _canvasSession is null || _canvasHeader is null)
+            return;
+        HavenElement anchor = menu switch
+        {
+            "File" => _canvasHeader.FileButton,
+            "Edit" => _canvasHeader.EditButton,
+            "View" => _canvasHeader.ViewButton,
+            _ => _canvasHeader.HelpButton,
+        };
+        var session = _canvasSession;
+        var controller = _canvasController;
+        List<PopupMenuItem> items = menu switch
+        {
+            "File" => new List<PopupMenuItem>
+            {
+                new("New", NewCanvasDocument),
+                new("Open…", OpenCanvasDocument),
+                new("Save", SaveCanvasDocument),
+                new("Export SVG", () => ExportCanvasDocument(CanvasDocExportFormat.Svg)),
+                new("Export PDF", () => ExportCanvasDocument(CanvasDocExportFormat.Pdf)),
+                new("Export XOPP", () => ExportCanvasDocument(CanvasDocExportFormat.Xopp)),
+                new("Export selection SVG", ExportCanvasSelection),
+            },
+            "Edit" => new List<PopupMenuItem>
+            {
+                new("Undo", () => { controller?.Undo(); }, Enabled: session.CanUndo),
+                new("Redo", () => { controller?.Redo(); }, Enabled: session.CanRedo),
+                // Selector clipboard (cut/copy/paste/duplicate) needs a platform
+                // clipboard + selection-rendering host: NEEDS-FROM-W4, not faked.
+                new("Clipboard (needs W4 host)", () => { }, Enabled: false),
+            },
+            "View" => new List<PopupMenuItem>
+            {
+                new("Zoom in", () => ZoomCanvasStep(+1)),
+                new("Zoom out", () => ZoomCanvasStep(-1)),
+                new("Reset zoom 4x", () =>
+                {
+                    _canvasZoom = CanvasInitialZoom;
+                    _canvasHeader?.SetZoom(_canvasZoom);
+                    _status.Content = $"HUI viewport {_canvasZoom:0.##}x";
+                    InvalidateVisual();
+                }),
+            },
+            _ => new List<PopupMenuItem>
+            {
+                // Shortcuts/about dialogs need a shared HUI dialog host:
+                // NEEDS-FROM-W4. Phase 1 surfaces the content via status.
+                new("Keyboard shortcuts", ShowCanvasShortcuts),
+                new("About Rnote donor", ShowCanvasAbout),
+            },
+        };
+        var popup = new PopupMenu(anchor, _root, items, 250d, $"{menu} menu");
+        _root.Add(popup);
+        InvalidateVisual();
+    }
+
+    private void ShowCanvasShortcuts()
+    {
+        _status.Content = "Shortcuts: B pen, M marker, E eraser, S selector, H shaper, T text, Y tools, Ctrl+Z/Y undo/redo, wheel zoom, drag pan";
+        Console.WriteLine("CANVAS_RNOTE_SHORTCUTS_SHOWN dialog=needs-w4-host");
+        InvalidateVisual();
+    }
+
+    private void ShowCanvasAbout()
+    {
+        _status.Content = "CakeOS Canvas — Rnote rnote-engine/rnote-compose v0.14.2 rev 8cac558, translated into HUI (no GTK)";
+        Console.WriteLine("CANVAS_RNOTE_ABOUT_SHOWN dialog=needs-w4-host");
+        InvalidateVisual();
+    }
+
+    private void NewCanvasDocument()
+    {
+        if (!_canvasMode || _canvasSession is null)
+            return;
+        if (_canvasStrokeActive || _canvasPanActive)
+        {
+            _status.Content = "Finish the active Canvas gesture before creating a document.";
+            return;
+        }
+
+        var fresh = new CanvasNativeSession();
+        var previous = _canvasSession;
+        _canvasSession = fresh;
+        previous.Dispose();
+        _canvasController?.Retarget(fresh);
+        _canvasDocumentPath = null;
+        _canvasViewportInitialized = false;
+        RefreshCanvasHistory(fresh);
+        try
+        {
+            var frame = RefreshCanvasFrame(fresh);
+            _canvasHeader?.SetDocument("Untitled.rnote", dirty: true);
+            _status.Content = $"New document {frame.Bounds.Width:0} x {frame.Bounds.Height:0}; unsaved changes";
+        }
+        catch
+        {
+            _canvasHeader?.SetDocument("Untitled.rnote", dirty: true);
+            _status.Content = "New empty document (no renderable content yet)";
+        }
+        _canvasDirty = true;
+        Console.WriteLine("CANVAS_RNOTE_DOCUMENT_NEW");
         InvalidateMeasure();
         InvalidateVisual();
     }
 
-    private void CanvasRedo(CanvasNativeSession session)
+    private void ExportCanvasDocument(CanvasDocExportFormat format)
     {
-        if (_canvasStrokeActive || _canvasPanActive) return;
-        var changed = session.Redo();
-        if (changed)
-            RefreshCanvasFrame(session);
-        RefreshCanvasHistory(session);
-        _status.Content = changed ? "Canvas redo" : "Nothing to redo";
-        Console.WriteLine($"CANVAS_RNOTE_HISTORY action=redo changed={(changed ? 1 : 0)}");
-        InvalidateMeasure();
-        InvalidateVisual();
+        if (!_canvasMode || _canvasSession is null)
+            return;
+        if (_canvasStrokeActive || _canvasPanActive)
+        {
+            _status.Content = "Finish the active Canvas gesture before exporting.";
+            return;
+        }
+
+        try
+        {
+            var bytes = _canvasSession.ExportDoc(format);
+            var ext = format switch
+            {
+                CanvasDocExportFormat.Pdf => "pdf",
+                CanvasDocExportFormat.Xopp => "xopp",
+                _ => "svg",
+            };
+            var path = Path.ChangeExtension(_canvasDocumentPath ?? DefaultCanvasDocumentPath(), ext);
+            Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+            File.WriteAllBytes(path, bytes);
+            _status.Content = $"Exported {bytes.Length} bytes ({ext}) to {path}";
+            Console.WriteLine($"CANVAS_RNOTE_DOCUMENT_EXPORTED format={ext} bytes={bytes.Length} path={path}");
+            InvalidateVisual();
+        }
+        catch (Exception exception)
+        {
+            _status.Content = $"Export failed: {exception.Message}";
+            Console.WriteLine($"CANVAS_RNOTE_DOCUMENT_EXPORT_FAILED reason={exception.Message}");
+            InvalidateVisual();
+        }
+    }
+
+    private void ExportCanvasSelection()
+    {
+        if (!_canvasMode || _canvasSession is null)
+            return;
+        if (_canvasStrokeActive || _canvasPanActive)
+        {
+            _status.Content = "Finish the active Canvas gesture before exporting.";
+            return;
+        }
+
+        try
+        {
+            var bytes = _canvasSession.TryExportSelectionSvg();
+            if (bytes is null)
+            {
+                _status.Content = "Nothing selected — draw a selector stroke around strokes first.";
+                Console.WriteLine("CANVAS_RNOTE_SELECTION_EXPORT_EMPTY");
+                InvalidateVisual();
+                return;
+            }
+            var path = Path.ChangeExtension(_canvasDocumentPath ?? DefaultCanvasDocumentPath(), "selection.svg");
+            Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+            File.WriteAllBytes(path, bytes);
+            _status.Content = $"Exported selection ({bytes.Length} bytes) to {path}";
+            Console.WriteLine($"CANVAS_RNOTE_SELECTION_EXPORTED bytes={bytes.Length} path={path}");
+            InvalidateVisual();
+        }
+        catch (Exception exception)
+        {
+            _status.Content = $"Selection export failed: {exception.Message}";
+            Console.WriteLine($"CANVAS_RNOTE_SELECTION_EXPORT_FAILED reason={exception.Message}");
+            InvalidateVisual();
+        }
     }
 
     private void RefreshCanvasHistory(CanvasNativeSession session) =>
@@ -411,6 +706,25 @@ public sealed class HuiPreviewSurface : Control, IHavenMeasureContext, IDisposab
         InvokeHuiButton(_canvasTools.RedoButton);
         if (!_canvasSession.CanUndo)
             throw new InvalidOperationException("HUI Redo button did not restore undo history.");
+
+        // Parity tools need a native ABI-3 library; against ABI-2 the strip
+        // honestly reports the failure and this gate skips the assertions.
+        if (CanvasNativeSession.SupportsParityConfig)
+        {
+            InvokeHuiButton(_canvasTools.TypewriterButton);
+            if (_canvasStrokeTool != CanvasTool.Typewriter)
+                throw new InvalidOperationException("HUI Text button did not select the native typewriter tool.");
+
+            InvokeHuiButton(_canvasTools.ToolsButton);
+            if (_canvasStrokeTool != CanvasTool.Tools)
+                throw new InvalidOperationException("HUI Tools button did not select the native utility tool.");
+
+            InvokeHuiButton(_canvasTools.PenButton);
+            if (_canvasStrokeTool != CanvasTool.Pen)
+                throw new InvalidOperationException("HUI Pen button did not restore the native pen tool.");
+
+            Console.WriteLine("CANVAS_RNOTE_HUI_PARITY_READY typewriter=1 tools=1 shaper=1 config=1");
+        }
 
         Console.WriteLine("CANVAS_RNOTE_HUI_TOOLBAR_READY pen=1 eraser=1 undo=1 redo=1");
     }
@@ -439,9 +753,12 @@ public sealed class HuiPreviewSurface : Control, IHavenMeasureContext, IDisposab
         _canvasTools?.SetTool(CanvasTool.Pen);
         RefreshCanvasHistory(session);
         var frame = RefreshCanvasFrame(session);
-        _status.Content = $"Rnote ABI 2 / SVG / document {frame.Bounds.Width:0} x {frame.Bounds.Height:0} / viewport {_canvasZoom:0.##}x";
+        var abi = CanvasNativeSession.SupportsParityConfig ? 3u : 2u;
+        _canvasHeader?.SetZoom(_canvasZoom);
+        _canvasHeader?.SetDocument("Untitled.rnote", dirty: false);
+        _status.Content = $"Rnote ABI {abi} / SVG / document {frame.Bounds.Width:0} x {frame.Bounds.Height:0} / viewport {_canvasZoom:0.##}x";
         Console.WriteLine(
-            $"CANVAS_RNOTE_HUI_RENDER_READY abi=2 format=svg coordinate=document width={frame.Bounds.Width:0.###} height={frame.Bounds.Height:0.###}");
+            $"CANVAS_RNOTE_HUI_RENDER_READY abi={abi} format=svg coordinate=document width={frame.Bounds.Width:0.###} height={frame.Bounds.Height:0.###}");
     }
 
     private CanvasSvgFrame RefreshCanvasFrame(CanvasNativeSession session)
@@ -521,6 +838,7 @@ public sealed class HuiPreviewSurface : Control, IHavenMeasureContext, IDisposab
         _canvasStrokeActive = false;
         var frame = RefreshCanvasFrame(_canvasSession);
         RefreshCanvasHistory(_canvasSession);
+        _canvasDirty = true;
         _status.Content = $"Pointer {_canvasStrokeTool} committed through HUI to Rnote; viewport {_canvasZoom:0.##}x";
         Console.WriteLine(
             $"CANVAS_RNOTE_POINTER_STROKE_COMMITTED pointer={e.Pointer.Type} tool={_canvasStrokeTool} pressure={pressure:0.###} width={frame.Bounds.Width:0.###} height={frame.Bounds.Height:0.###} zoom={_canvasZoom:0.###}");
@@ -601,6 +919,7 @@ public sealed class HuiPreviewSurface : Control, IHavenMeasureContext, IDisposab
         _canvasViewportCenterX = documentX - (u - 0.5d) * nextSize.Width;
         _canvasViewportCenterY = documentY - (v - 0.5d) * nextSize.Height;
         var viewport = CanvasViewport(target);
+        _canvasHeader?.SetZoom(_canvasZoom);
         _status.Content = $"HUI viewport {_canvasZoom:0.##}x";
         Console.WriteLine(
             $"CANVAS_RNOTE_VIEWPORT_ZOOM zoom={_canvasZoom:0.###} x={viewport.X:0.###} y={viewport.Y:0.###} width={viewport.Width:0.###} height={viewport.Height:0.###}");
@@ -735,7 +1054,7 @@ public sealed class HuiPreviewSurface : Control, IHavenMeasureContext, IDisposab
         return (root, action, status);
     }
 
-    private static (HuiPage Root, HuiButton Action, HuiText Status, HuiImage Canvas, CanvasToolStrip Tools) BuildCanvasScene()
+    private static (HuiPage Root, HuiButton Action, HuiText Status, HuiImage Canvas, CanvasToolStrip Tools, HuiButton Save, HuiButton Open, CanvasHeaderBar Header, CanvasPenConfigPanel PenConfig, CanvasColorPanel Colors, CanvasDocumentPanel Document) BuildCanvasScene()
     {
         var root = new HuiPage { Name = "CanvasPreviewRoot", Layout = HavenLayout.Vertical };
         root.SetValue(HavenProperties.Width, HavenLength.Percent(100));
@@ -753,16 +1072,45 @@ public sealed class HuiPreviewSurface : Control, IHavenMeasureContext, IDisposab
 
         var body = new HuiText
         {
-            Content = "HUI owns tools, ink and viewport state. Wheel zoom is cursor-anchored; touch or middle/right drag pans; primary mouse and pen contact use the selected Rnote tool."
+            Content = "Rnote translated into HUI: header menus, six pens with per-tool config, stroke/fill colour, page/background/format, zoom. Wheel zoom is cursor-anchored; touch or middle/right drag pans; primary mouse and pen contact use the selected Rnote tool."
         };
         body.SetValue(HavenProperties.FontSize, 14d);
         body.SetValue(HavenProperties.Foreground, "TextSecondary");
 
+        var header = new CanvasHeaderBar();
         var tools = new CanvasToolStrip();
+
+        var persistenceRow = new Container { Name = "Canvas.Persistence", Layout = HavenLayout.Horizontal };
+        persistenceRow.SetValue(HavenProperties.Width, HavenLength.Percent(100));
+        persistenceRow.SetValue(HavenProperties.Height, HavenLength.Px(42));
+        persistenceRow.SetValue(HavenProperties.Gap, HavenLength.Px(8));
+        persistenceRow.SetValue(HavenProperties.VerticalAlignment, HavenVerticalAlignment.Center);
+
+        var save = CreateCanvasCommandButton("Canvas.Document.Save", "Save");
+        var open = CreateCanvasCommandButton("Canvas.Document.Open", "Open");
+        persistenceRow.Add(save);
+        persistenceRow.Add(open);
+
+        var penConfig = new CanvasPenConfigPanel();
+        var colors = new CanvasColorPanel();
+        var document = new CanvasDocumentPanel();
+        var sidePanel = new Container { Name = "Canvas.SidePanel", Layout = HavenLayout.Vertical };
+        sidePanel.SetValue(HavenProperties.Width, HavenLength.Px(300));
+        sidePanel.SetValue(HavenProperties.Gap, HavenLength.Px(8));
+        sidePanel.SetValue(HavenProperties.Overflow, HavenOverflow.Scroll);
+        sidePanel.Add(penConfig);
+        sidePanel.Add(colors);
+        sidePanel.Add(document);
 
         var canvas = new HuiImage { Name = "CanvasFrame", Source = CanvasFrameSource, Fit = HavenImageFit.Contain };
         canvas.SetValue(HavenProperties.Width, HavenLength.Percent(100));
         canvas.SetValue(HavenProperties.Height, HavenLength.Px(310));
+
+        var contentRow = new Container { Name = "Canvas.Content", Layout = HavenLayout.Horizontal };
+        contentRow.SetValue(HavenProperties.Width, HavenLength.Percent(100));
+        contentRow.SetValue(HavenProperties.Gap, HavenLength.Px(10));
+        contentRow.Add(sidePanel);
+        contentRow.Add(canvas);
 
         var action = new HuiButton { Name = "Action", Content = "Test HUI input" };
         action.SetValue(HavenProperties.Width, HavenLength.Px(190));
@@ -776,11 +1124,25 @@ public sealed class HuiPreviewSurface : Control, IHavenMeasureContext, IDisposab
         root.Add(eyebrow);
         root.Add(title);
         root.Add(body);
+        root.Add(header);
         root.Add(tools);
-        root.Add(canvas);
+        root.Add(persistenceRow);
+        root.Add(contentRow);
         root.Add(action);
         root.Add(status);
-        return (root, action, status, canvas, tools);
+        return (root, action, status, canvas, tools, save, open, header, penConfig, colors, document);
+    }
+
+    private static HuiButton CreateCanvasCommandButton(string name, string content)
+    {
+        var button = new HuiButton { Name = name, Content = content };
+        button.SetValue(HavenProperties.Width, HavenLength.Px(120));
+        button.SetValue(HavenProperties.Height, HavenLength.Px(36));
+        button.SetValue(HavenProperties.MinHeight, HavenLength.Px(36));
+        button.SetValue(HavenProperties.Padding, HavenThickness.Parse("0px 10px"));
+        button.SetValue(HavenProperties.FontSize, 13d);
+        button.Accessibility.AccessibleName = content;
+        return button;
     }
 
     private static HavenSize MeasureText(HuiText text, HavenSize available)
