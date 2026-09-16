@@ -41,12 +41,29 @@ Windows port of the HUI preview host. It runs the **real** Cake engines, not moc
 cargo build --release --manifest-path apps/canvas/rnote-poc/Cargo.toml
 # Managed host (self-contained win-arm64), DLL beside the exe for DllImport
 dotnet publish HUI/WindowsHost/CakeOS.HuiWindowsHost.csproj -c Release -r win-arm64 --self-contained true -o artifacts\hui-windows-host\publish
-}
+```
+
+Boards needs the shared Haven.UI project path for the Boards HUI projection:
+
+```powershell
+dotnet publish HUI/WindowsHost/CakeOS.HuiWindowsHost.csproj -c Release -r win-arm64 --self-contained true `
+  -p:HavenUiProjectPath="$PWD\HUI\vendor\Haven.UI\Haven.UI.csproj" `
+  -o artifacts\hui-windows-host\publish
+```
 
 ## Run
 
 ```powershell
+# Canvas (real Rnote engine)
 $env:CAKEOS_HUI_CANVAS_PREVIEW = "1"
+$env:CAKEOS_HUI_BOARDS_PREVIEW = $null
 .\artifacts\hui-windows-host\publish\cakeos-hui-windows-preview.exe
-# headless CI smoke: CAKEOS_HUI_PREVIEW_SELF_TEST=1 + CAKEOS_HUI_PREVIEW_AUTO_EXIT_MS=8000
+# headless smoke: CAKEOS_HUI_PREVIEW_SELF_TEST=1 + CAKEOS_HUI_PREVIEW_AUTO_EXIT_MS=8000
+
+# Boards (real contract session + HUI projection; store under Documents\CakeOS\Boards)
+$env:CAKEOS_HUI_CANVAS_PREVIEW = $null
+$env:CAKEOS_HUI_BOARDS_PREVIEW = "1"
+.\artifacts\hui-windows-host\publish\cakeos-hui-windows-preview.exe
 ```
+
+Canvas and Boards modes are exclusive; Canvas takes precedence if both are set.
