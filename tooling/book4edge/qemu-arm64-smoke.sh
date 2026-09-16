@@ -43,7 +43,7 @@ qemu-system-aarch64 \
   -bios "$FW" \
   -cdrom "$ISO" \
   -display none \
-  -device virtio-gpu-pci \
+  -device ramfb \
   -serial file:"$SERIAL" \
   -monitor unix:"$MON",server=on,wait=off \
   -boot order=d \
