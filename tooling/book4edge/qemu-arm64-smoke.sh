@@ -37,19 +37,33 @@ fi
 echo "- Firmware: \`$FW\`" >> "$REPORT"
 
 rm -f "$MON"
+: > "$SERIAL"
 qemu-system-aarch64 \
   -M virt -cpu max -m 4096 \
   -bios "$FW" \
   -cdrom "$ISO" \
-  -display none -vga none \
+  -display none \
+  -device virtio-gpu-pci \
   -serial file:"$SERIAL" \
-  -monitor unix:"$MON",server=nowait \
+  -monitor unix:"$MON",server=on,wait=off \
   -boot order=d \
   >"$QLOG" 2>&1 &
 QEMU_PID=$!
 echo "- QEMU PID: $QEMU_PID" >> "$REPORT"
 
-sleep "$WAIT"
+# Fail fast: if QEMU exits in the first 30s, the command line is wrong.
+sleep 30
+if ! kill -0 "$QEMU_PID" 2>/dev/null; then
+  {
+    echo "- VM died within 30s (command-line/firmware problem)"
+    echo "- VERDICT: QEMU-SMOKE-BLOCKED (see qemu.log)"
+  } >> "$REPORT"
+  cat "$REPORT"
+  cat "$QLOG"
+  exit 1
+fi
+
+sleep "$((WAIT - 30))"
 
 ALIVE="no"
 if kill -0 "$QEMU_PID" 2>/dev/null; then ALIVE="yes"; fi
@@ -93,6 +107,11 @@ if [ -f "$SERIAL" ]; then FOUND=$(grep -ci -e 'EDK II' -e UEFI -e GRUB -e 'Linux
   fi
   echo
   echo "Reminder: QEMU virt results must never be reported as Book4 Edge hardware support."
+  echo
+  echo "## qemu.log (first 20 lines)"
+  echo '```'
+  head -20 "$QLOG" 2>/dev/null || true
+  echo '```'
 } >> "$REPORT"
 
 cat "$REPORT"
