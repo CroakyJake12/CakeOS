@@ -54,7 +54,9 @@ ABI v3, shared HuiRenderer, HUI-native CanvasRoot, Boards Route-A host).
   launch pending below)
 - BLOCKERS: none for integration. AppFlowy PoC (Flutter) not run on this
   laptop (no Flutter SDK); donor-drag proof rests on existing PoC evidence.
-- SCREENSHOT EVIDENCE: pending (Windows ARM64 Boards launch next)
+- SCREENSHOT EVIDENCE: `boards-hui1.png` captured at 1200x800 (windowed)
+  showing Boards application with groups/lanes, header, toolbar, cards,
+  status bar — **runtime verified on Windows ARM64 laptop**
 
 ## Laptop-side Boards inventory task
 
