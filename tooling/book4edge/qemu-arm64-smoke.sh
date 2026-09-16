@@ -45,8 +45,7 @@ qemu-system-aarch64 \
   -device virtio-scsi-pci,romfile= \
   -device scsi-cd,drive=cakeos_cd \
   -drive id=cakeos_cd,media=cdrom,file="$ISO",readonly=on,format=raw \
-  -display none \
-  -device ramfb \
+  -display none -vga none \
   -serial file:"$SERIAL" \
   -monitor unix:"$MON",server=on,wait=off \
   -boot order=d \
@@ -72,19 +71,9 @@ ALIVE="no"
 if kill -0 "$QEMU_PID" 2>/dev/null; then ALIVE="yes"; fi
 echo "- VM alive after ${WAIT}s: $ALIVE" >> "$REPORT"
 
-# Framebuffer screendump via the monitor socket (best effort).
-if [ -S "$MON" ]; then
-  printf '%s\n' "screendump $SCREEN" "quit" | socat - "UNIX-CONNECT:$MON" >/dev/null 2>&1 || true
-  sleep 2
-fi
-if [ -s "$SCREEN" ]; then
-  echo "- Screendump: captured ($(stat -c%s "$SCREEN") bytes)" >> "$REPORT"
-  if command -v pnmtopng >/dev/null 2>&1; then
-    pnmtopng "$SCREEN" > "$OUT/screen.png" 2>/dev/null || true
-  fi
-else
-  echo "- Screendump: NOT captured (no VGA/headless firmware output)" >> "$REPORT"
-fi
+# No framebuffer in this configuration (-vga none avoids option-ROM
+# dependencies); serial is the evidence channel.
+echo "- Screendump: skipped by design (-vga none; serial is the evidence channel)" >> "$REPORT"
 
 kill "$QEMU_PID" 2>/dev/null || true
 wait "$QEMU_PID" 2>/dev/null || true
