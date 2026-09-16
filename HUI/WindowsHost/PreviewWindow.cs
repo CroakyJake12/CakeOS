@@ -3,6 +3,7 @@ using Avalonia.Controls;
 using Avalonia.Media;
 using CakeOS.Platform;
 using Haven.UI.Components;
+using HuiPage = Haven.UI.Components.Page;
 
 namespace CakeOS.HuiWindowsHost;
 
@@ -25,6 +26,21 @@ public sealed class PreviewWindow : Window
         Title = _canvasMode ? "CakeOS HUI Canvas / Rnote Preview (Windows)" : "CakeOS HUI Windows Preview";
         Width = 960;
         Height = 600;
+        MinWidth = 720;
+        MinHeight = 480;
+        Background = new SolidColorBrush(Color.Parse("#111318"));
+        Content = _surface;
+        Closed += (_, _) => _surface.Dispose();
+    }
+
+    /// <summary>Mounts a caller-owned HUI page (e.g. a Boards session scene).</summary>
+    public PreviewWindow(HuiPage page, string title)
+    {
+        ArgumentNullException.ThrowIfNull(page);
+        _surface = new HuiPreviewSurface(page);
+        Title = title;
+        Width = 1100;
+        Height = 700;
         MinWidth = 720;
         MinHeight = 480;
         Background = new SolidColorBrush(Color.Parse("#111318"));
