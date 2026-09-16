@@ -19,6 +19,30 @@ public static class AppFlowyBoardEventAdapter
         string toGroupId,
         int toIndex) =>
         new(fromGroupId, fromIndex, toGroupId, toIndex);
+
+    /// <summary>Donor <c>addGroup</c>/<c>insertGroup</c> (optional index) as a neutral command.</summary>
+    public static CreateGroupCommand CreateGroup(string groupId, string title, int? toIndex = null) =>
+        new(groupId, title, toIndex);
+
+    /// <summary>Donor <c>removeGroup</c> as a neutral command.</summary>
+    public static RemoveGroupCommand RemoveGroup(string groupId) =>
+        new(groupId);
+
+    /// <summary>Donor <c>updateGroupName</c> as a neutral command.</summary>
+    public static RenameGroupCommand RenameGroup(string groupId, string title) =>
+        new(groupId, title);
+
+    /// <summary>Donor <c>addGroupItem</c> as a neutral command.</summary>
+    public static CreateCardCommand AddCard(string groupId, string cardId, string title) =>
+        new(groupId, cardId, title);
+
+    /// <summary>Donor <c>removeGroupItem</c>/<c>removeAt</c> as a neutral command.</summary>
+    public static RemoveCardCommand RemoveCard(string cardId) =>
+        new(cardId);
+
+    /// <summary>Donor <c>updateGroupItem</c>/<c>replaceOrInsertItem</c> title update as a neutral command.</summary>
+    public static RenameCardCommand RenameCard(string cardId, string title) =>
+        new(cardId, title);
 }
 
 public interface IHavenBoardStore

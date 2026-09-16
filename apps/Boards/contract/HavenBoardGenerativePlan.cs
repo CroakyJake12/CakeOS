@@ -54,6 +54,10 @@ public static class HavenBoardGenerativePlanner
     public static bool IsAllowed(HavenBoardCommand command) => command switch
     {
         CreateCardCommand => true,
+        RenameCardCommand => true,
+        RemoveCardCommand => true,
+        CreateGroupCommand => true,
+        RemoveGroupCommand => true,
         RenameGroupCommand => true,
         MoveGroupCommand => true,
         MoveCardCommand => true,
@@ -77,9 +81,30 @@ public static class HavenBoardGenerativePlanner
                 ValidateGeneratedCardId(create.CardId);
                 ValidateGeneratedTitle(create.Title, nameof(create.Title));
                 break;
+            case RenameCardCommand renameCard:
+                ValidateGeneratedTitle(renameCard.Title, nameof(renameCard.Title));
+                break;
+            case CreateGroupCommand createGroup:
+                ValidateGeneratedGroupId(createGroup.GroupId);
+                ValidateGeneratedTitle(createGroup.Title, nameof(createGroup.Title));
+                break;
             case RenameGroupCommand rename:
                 ValidateGeneratedTitle(rename.Title, nameof(rename.Title));
                 break;
+        }
+    }
+
+    private static void ValidateGeneratedGroupId(string value)
+    {
+        if (string.IsNullOrWhiteSpace(value) || value.Length > MaxGeneratedCardIdLength)
+            throw new InvalidOperationException(
+                $"Generated group IDs must contain 1 to {MaxGeneratedCardIdLength} characters.");
+
+        if (value.Any(character =>
+                !char.IsAsciiLetterOrDigit(character) && character is not '-' and not '_'))
+        {
+            throw new InvalidOperationException(
+                "Generated group IDs may contain only ASCII letters, digits, '-' and '_'.");
         }
     }
 

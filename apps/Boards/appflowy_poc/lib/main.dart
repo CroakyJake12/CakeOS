@@ -55,6 +55,7 @@ class _HavenBoardsPocPageState extends State<HavenBoardsPocPage> {
   bool _panMode = false;
   String _status = 'Local-first AppFlowy Board proof';
   int _nextCard = 4;
+  int _nextGroup = 4;
 
   @override
   void initState() {
@@ -135,6 +136,7 @@ class _HavenBoardsPocPageState extends State<HavenBoardsPocPage> {
             .toList(),
       );
       _nextCard = _largestCardNumber(groups) + 1;
+      _nextGroup = _largestGroupNumber(groups) + 1;
       final rnote = document['rnote'];
       final viewport = document['viewport'];
       if (_ink != null && rnote is String && rnote.isNotEmpty) {
@@ -147,7 +149,15 @@ class _HavenBoardsPocPageState extends State<HavenBoardsPocPage> {
     }
   }
 
-  int _largestCardNumber(List<BoardGroupSnapshot> groups) {
+  int _largestGroupNumber(List<BoardGroupSnapshot> groups) {
+    var largest = 3;
+    for (final group in groups) {
+      final match = RegExp(r'^group-(\d+)$').firstMatch(group.id);
+      final value = match == null ? null : int.tryParse(match.group(1)!);
+      if (value != null && value > largest) largest = value;
+    }
+    return largest;
+  }
     var largest = 3;
     for (final card in groups.expand((group) => group.cards)) {
       final match = RegExp(r'^card-(\d+)$').firstMatch(card.id);
@@ -192,6 +202,27 @@ class _HavenBoardsPocPageState extends State<HavenBoardsPocPage> {
     final card = HavenBoardItem('card-${_nextCard++}', 'New card');
     _controller.addGroupItem(groupId, card);
     unawaited(_persist('Card created'));
+  }
+
+  void _deleteCard(String groupId, HavenBoardItem item) {
+    _controller.removeGroupItem(groupId, item.id);
+    unawaited(_persist('Card deleted'));
+  }
+
+  void _addGroup() {
+    final id = 'group-${_nextGroup++}';
+    _controller.addGroup(AppFlowyGroupData(id: id, name: 'New group', items: []));
+    unawaited(_persist('Group created'));
+  }
+
+  void _deleteGroup(String groupId) {
+    _controller.removeGroup(groupId);
+    unawaited(_persist('Group deleted'));
+  }
+
+  void _renameGroup(String groupId, String name) {
+    _controller.getGroupController(groupId)?.updateGroupName(name.trim().isEmpty ? 'Untitled group' : name.trim());
+    unawaited(_persist('Group renamed'));
   }
 
   void _moveCardWithin(String groupId, HavenBoardItem item, int delta) {
@@ -284,6 +315,11 @@ class _HavenBoardsPocPageState extends State<HavenBoardsPocPage> {
             onPressed: widget.enablePersistence ? () => unawaited(_persist('Manual save')) : null,
             icon: const Icon(Icons.save_outlined),
           ),
+          IconButton(
+            tooltip: 'Add group',
+            onPressed: () => _addGroup(),
+            icon: const Icon(Icons.view_column_outlined),
+          ),
         ],
       ),
       body: Column(
@@ -349,9 +385,17 @@ class _HavenBoardsPocPageState extends State<HavenBoardsPocPage> {
       child: Row(
         children: [
           Expanded(
-            child: Text(
-              group.headerData.groupName,
+            // Donor multi-board example pattern: the header name is editable
+            // and commits through updateGroupName, then persists locally.
+            child: TextFormField(
+              key: ValueKey('group-name-${group.id}'),
+              initialValue: group.headerData.groupName,
+              decoration: const InputDecoration(
+                border: InputBorder.none,
+                isDense: true,
+              ),
               style: const TextStyle(fontWeight: FontWeight.w700),
+              onFieldSubmitted: (value) => _renameGroup(group.id, value),
             ),
           ),
           IconButton(
@@ -370,6 +414,11 @@ class _HavenBoardsPocPageState extends State<HavenBoardsPocPage> {
             tooltip: 'Add card to ${group.headerData.groupName}',
             onPressed: () => _addCard(group.id),
             icon: const Icon(Icons.add),
+          ),
+          IconButton(
+            tooltip: 'Delete group ${group.headerData.groupName}',
+            onPressed: () => _deleteGroup(group.id),
+            icon: const Icon(Icons.delete_outline),
           ),
         ],
       ),
@@ -418,6 +467,11 @@ class _HavenBoardsPocPageState extends State<HavenBoardsPocPage> {
                         ? () => _moveCardAcross(groupId, item, 1)
                         : null,
                     icon: const Icon(Icons.keyboard_arrow_right),
+                  ),
+                  IconButton(
+                    tooltip: 'Delete card',
+                    onPressed: () => _deleteCard(groupId, item),
+                    icon: const Icon(Icons.delete_outline),
                   ),
                 ],
               ),

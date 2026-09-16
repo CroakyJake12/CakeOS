@@ -20,6 +20,8 @@ $harness = Join-Path $boards 'appflowy_poc/lib/main.dart'
 $flutterTests = Join-Path $boards 'appflowy_poc/test/appflowy_board_poc_test.dart'
 $testProject = Join-Path $boards 'tests/CakeOS.Apps.Boards.Tests.csproj'
 $contractTests = Join-Path $boards 'tests/HavenBoardContractTests.cs'
+$crudContractTests = Join-Path $boards 'tests/HavenBoardGroupCardCrudTests.cs'
+$crudHuiTests = Join-Path $boards 'hui-tests/HavenBoardsCrudHuiTests.cs'
 $freeformContractTests = Join-Path $boards 'tests/HavenBoardFreeformContractTests.cs'
 
 $required = @(
@@ -41,6 +43,8 @@ $required = @(
     $flutterTests,
     $testProject,
     $contractTests,
+    $crudContractTests,
+    $crudHuiTests,
     $freeformContractTests
 )
 $missing = $required | Where-Object { -not (Test-Path -LiteralPath $_) }
@@ -77,6 +81,14 @@ if ($contractText -notmatch 'cardsById\.TryAdd' -or
     $contractText -notmatch 'hierarchy contains a cycle') {
     throw 'Hierarchy validation must reject duplicate IDs, missing parents, and cycles.'
 }
+if ($contractText -notmatch 'CreateGroupCommand' -or
+    $contractText -notmatch 'RemoveGroupCommand' -or
+    $contractText -notmatch 'RenameCardCommand' -or
+    $contractText -notmatch 'RemoveCardCommand' -or
+    $contractText -notmatch 'OrphanChildren' -or
+    $contractText -notmatch 'ValidateNewGroupId') {
+    throw 'Neutral Haven board contract must retain donor-parity group/card CRUD with orphan-safe hierarchy.'
+}
 if ($contractText -notmatch 'HavenBoardFreeformLayout' -or
     $contractText -notmatch 'SetFreeformCardFrameCommand' -or
     $contractText -notmatch 'RemoveFreeformCardFrameCommand' -or
@@ -107,6 +119,19 @@ if ($huiText -notmatch 'SetState\(HavenElementState\.Disabled,\s*!enabled\)' -or
 if ($huiText -notmatch 'Nested card') {
     throw 'HUI board scene must preserve hierarchy presentation for nested cards.'
 }
+if ($huiText -notmatch 'RenameGroupCommand' -or
+    $huiText -notmatch 'RenameCardCommand' -or
+    $huiText -notmatch 'RemoveCardCommand' -or
+    $huiText -notmatch 'RemoveGroupCommand' -or
+    $huiText -notmatch 'CreateGroupCommand') {
+    throw 'HUI board scene must emit donor-parity group/card CRUD commands, not movement alone.'
+}
+if ($huiText -notmatch 'HavenInput = Haven\.UI\.Components\.Input' -or
+    $huiText -notmatch 'Save group name' -or
+    $huiText -notmatch 'Save card name' -or
+    $huiText -notmatch 'Add group to board') {
+    throw 'HUI board scene must offer working rename/add/delete controls through shared HUI primitives.'
+}
 
 $freeformHuiText = Get-Content -LiteralPath $freeformHui -Raw
 if ($freeformHuiText -match '(?mi)^\s*using\s+(AppFlowy|Avalonia)\b|package:(appflowy_board|flutter)') {
@@ -133,26 +158,24 @@ if ($huiSessionText -match 'HttpClient|WebSocket|https?://') {
 }
 if ($huiSessionText -notmatch 'Scene\.CommandRequested \+= OnSceneCommandRequested' -or
     $huiSessionText -notmatch 'await _store\.SaveAsync\(updated' -or
-    $huiSessionText -notmatch 'Snapshot = updated') {
+    $huiSessionText -notmatch 'PublishDurableSnapshot\(updated') {
     throw 'Composed HUI session must bind typed scene commands through durable storage.'
 }
 if ($huiSessionText -notmatch 'FreeformScene\.CommandRequested \+= OnSceneCommandRequested' -or
-    $huiSessionText -notmatch 'FreeformScene\.SetSnapshot\(updated\)') {
+    $huiSessionText -notmatch 'FreeformScene\.SetSnapshot\(snapshot\)') {
     throw 'Composed HUI session must route freeform HUI commands through the same durable snapshot boundary.'
 }
 if ($huiSessionText -notmatch 'HavenBoardReducer\.Validate\(snapshot\)') {
     throw 'Composed HUI session must validate persisted board hierarchy/freeform state before rendering.'
 }
 $sessionSaveIndex = $huiSessionText.IndexOf('await _store.SaveAsync(updated', [System.StringComparison]::Ordinal)
-$sessionPublishIndex = $huiSessionText.IndexOf('Snapshot = updated', [System.StringComparison]::Ordinal)
-$sessionFreeformPublishIndex = $huiSessionText.IndexOf('FreeformScene.SetSnapshot(updated)', [System.StringComparison]::Ordinal)
+$sessionPublishIndex = $huiSessionText.IndexOf('PublishDurableSnapshot(updated', [System.StringComparison]::Ordinal)
 if ($sessionSaveIndex -lt 0 -or $sessionPublishIndex -lt 0 -or $sessionSaveIndex -gt $sessionPublishIndex) {
     throw 'Composed HUI session must persist a mutation before publishing it as the visible snapshot.'
 }
-if ($sessionFreeformPublishIndex -lt 0 -or $sessionSaveIndex -gt $sessionFreeformPublishIndex) {
+if ($huiSessionText -notmatch '(?s)private void PublishDurableSnapshot\(HavenBoardSnapshot snapshot.*?FreeformScene\.SetSnapshot\(snapshot\)') {
     throw 'Composed HUI session must persist a mutation before publishing it to the freeform projection.'
 }
-
 $huiProjectText = Get-Content -LiteralPath $huiProject -Raw
 if ($huiProjectText -notmatch 'HavenUiProjectPath' -or
     $huiProjectText -notmatch 'RequireRealHavenUi' -or
@@ -257,6 +280,23 @@ if ($freeformContractTestsText -notmatch 'Freeform_frame_can_be_added_replaced_a
     $freeformContractTestsText -notmatch 'Lane_moves_and_hierarchy_changes_preserve_freeform_geometry' -or
     $freeformContractTestsText -notmatch 'Freeform_layout_round_trips_through_local_store') {
     throw 'Contract tests must cover freeform lifecycle, validation, structured-move preservation, and local persistence.'
+}
+
+$crudContractTestsText = Get-Content -LiteralPath $crudContractTests -Raw
+if ($crudContractTestsText -notmatch 'Create_group_appends_with_stable_id_and_bumps_version' -or
+    $crudContractTestsText -notmatch 'Remove_group_drops_cards_frames_and_orphans_external_children' -or
+    $crudContractTestsText -notmatch 'Remove_card_drops_frame_and_orphans_children_without_touching_siblings' -or
+    $crudContractTestsText -notmatch 'Rename_card_updates_title_and_normalises_blank' -or
+    $crudContractTestsText -notmatch 'Event_adapter_maps_donor_crud_shapes_to_typed_commands') {
+    throw 'Contract tests must cover donor-parity group/card CRUD, orphan safety, and adapter mapping.'
+}
+
+$crudHuiTestsText = Get-Content -LiteralPath $crudHuiTests -Raw
+if ($crudHuiTestsText -notmatch 'Group_rename_input_commits_typed_command_with_edited_text' -or
+    $crudHuiTestsText -notmatch 'Card_rename_and_delete_emit_typed_commands_with_edited_text' -or
+    $crudHuiTestsText -notmatch 'Crud_scene_commands_flush_to_disk_and_survive_reopen' -or
+    $crudHuiTestsText -notmatch 'Remove_group_flushes_to_disk_and_survives_reopen') {
+    throw 'HUI tests must cover working rename/delete/add controls and durable reopen.'
 }
 
 Write-Host 'Haven Boards AppFlowy foundation static checks passed.'

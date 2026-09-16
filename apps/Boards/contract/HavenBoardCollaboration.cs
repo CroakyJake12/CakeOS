@@ -56,6 +56,10 @@ public sealed record HavenBoardCollaborationBatch(
     public static bool IsStructuralSyncCommand(HavenBoardCommand command) => command switch
     {
         CreateCardCommand => true,
+        RenameCardCommand => true,
+        RemoveCardCommand => true,
+        CreateGroupCommand => true,
+        RemoveGroupCommand => true,
         RenameGroupCommand => true,
         MoveGroupCommand => true,
         MoveCardCommand => true,
