@@ -39,7 +39,31 @@ collect wifi-fw.txt sh -c 'dmesg | grep -Ei "ath12k|wcn7850|board-2.bin|BDF|cali
 collect usb-video.txt sh -c 'ls -l /dev/video* /dev/media* 2>/dev/null; v4l2-ctl --list-devices 2>/dev/null || true'
 collect battery.txt sh -c 'for d in /sys/class/power_supply/*; do echo "== $d"; cat "$d/type" "$d/status" "$d/capacity" "$d/voltage_now" "$d/current_now" 2>/dev/null; done; upower -d 2>/dev/null | head -40 || true'
 collect audio.txt sh -c 'aplay -l 2>/dev/null; arecord -l 2>/dev/null; wpctl status 2>/dev/null | head -30 || true'
+collect asound.txt sh -c 'cat /proc/asound/cards 2>/dev/null; ls /dev/snd/ 2>/dev/null || true'
+collect pipewire.txt sh -c 'systemctl --user status pipewire wireplumber 2>/dev/null | head -30; pactl info 2>/dev/null | head -15 || true'
+collect bluetooth.txt sh -c 'bluetoothctl list 2>/dev/null; hciconfig -a 2>/dev/null; dmesg | grep -Ei "bluetooth|btusb|hci0|qca9377|wcn" | head -20 || true'
+collect thermal.txt sh -c 'for z in /sys/class/thermal/thermal_zone*; do echo "== $z $(cat "$z/type" 2>/dev/null)"; cat "$z/temp" 2>/dev/null; done || true'
 collect touch-evtest.txt sh -c 'evtest --list 2>/dev/null || libinput list-devices 2>/dev/null | grep -iE "touch|pen|finger" || true'
+
+# Machine-readable presence summary. Statuses are DETECTED / NOT_DETECTED
+# (detection only — never functional proof; no PASS without hardware test).
+summary="$work/hwtest-summary.json"
+present() { grep -Eq "$2" "$work/$1" 2>/dev/null; }
+status_of() { if present "$@"; then printf 'DETECTED'; else printf 'NOT_DETECTED'; fi; }
+{
+    echo '{'
+    echo '  "schema": 1,'
+    echo "  \"stamp\": \"$stamp\","
+    echo "  \"wifi_ath12k\": \"$(status_of dmesg-qcom.txt 'ath12k')\","
+    echo "  \"bluetooth_hci\": \"$(status_of bluetooth.txt 'hci[0-9]|BD Address')\","
+    echo "  \"audio_cards\": \"$(status_of asound.txt '[0-9] +\\[')\","
+    echo "  \"touch_input\": \"$(status_of input-devices.txt 'Touchscreen|touchscreen|ELAN|Goodix|FTS')\","
+    echo "  \"battery\": \"$(status_of battery.txt 'BAT|Battery')\","
+    echo "  \"uvc_video\": \"$(status_of usb-video.txt '/dev/video')\","
+    echo "  \"remoteproc\": \"$(status_of remoteproc.txt 'remoteproc[0-9]')\","
+    echo "  \"fastrpc\": \"$(status_of remoteproc.txt 'fastrpc')\""
+    echo '}'
+} > "$summary"
 
 if command -v cakeos-canvas-rnote >/dev/null 2>&1; then
     collect canvas-version.txt sh -c 'dpkg-query -W -f="${Version}\n" cakeos-canvas-rnote'
