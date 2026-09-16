@@ -9,6 +9,7 @@ if [[ ! -f "$root/HUI/vendor/Haven.UI/Haven.UI.csproj" ]]; then
 fi
 
 python3 "$root/HUI/patches/apply-linux-migration-patches.py"
+python3 "$root/HUI/patches/apply-canvas-hui-additions.py"
 
 out="$root/artifacts/hui-linux-host/publish"
 rm -rf "$out"

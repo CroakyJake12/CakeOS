@@ -90,7 +90,7 @@ try {
   while ($p1.MainWindowHandle -eq 0 -and (Get-Date) -lt $deadline) { Start-Sleep -Milliseconds 500; $p1.Refresh() }
   if ($p1.MainWindowHandle -eq 0) { Verdict 'FAILED' 'no main window appeared within 30s' }
   $h = $p1.MainWindowHandle
-  [WinCanvas]::SetWindowPos($h, [IntPtr]::Zero, 60, 10, 1000, 915, 0x0040) | Out-Null
+  [WinCanvas]::SetWindowPos($h, [IntPtr]::Zero, 60, 10, 1100, 850, 0x0040) | Out-Null
   [WinCanvas]::SetForegroundWindow($h) | Out-Null
   Start-Sleep -Seconds 6
   $r = New-Object WinCanvas+RECT
@@ -99,9 +99,9 @@ try {
   [WinCanvas]::GetClientRect($h, [ref]$c) | Out-Null
   $cw = $c.R - $c.L; $ch = $c.B - $c.T
   Write-Host "window rect: $($r.L),$($r.T) $($r.R - $r.L)x$($r.B - $r.T) client: ${cw}x$ch"
-  # Canvas ink region sits below the header/tool rows (verified by screenshot
-  # on this machine: white Rnote area in the lower client region).
-  foreach ($frac in @(0.62, 0.72, 0.82)) {
+  # Canvas ink region fills the window below the compact header/toolbar/
+  # options rows (verified by screenshot on this machine).
+  foreach ($frac in @(0.35, 0.55, 0.75)) {
     $y = [int]($ch * $frac)
     Drag $h ([int]($cw * 0.22)) $y ([int]($cw * 0.72)) ($y + 16)
   }

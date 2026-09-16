@@ -20,6 +20,7 @@ internal sealed class StubCanvasSession : ICanvasSession
     public CanvasTool CurrentTool { get; private set; } = CanvasTool.Pen;
     public byte[] SavedPayload { get; set; } = [1, 2, 3, 4];
     public bool ThrowOnSave { get; set; }
+    public bool ReturnEmptyFrame { get; set; }
 
     public bool CanUndo => _historyIndex >= 0;
     public bool CanRedo => _historyIndex < _history.Count - 1;
@@ -79,8 +80,12 @@ internal sealed class StubCanvasSession : ICanvasSession
         return true;
     }
 
-    public CanvasSvgFrame RenderSvg() =>
-        new(new CanvasDocumentBounds(0, 0, 100, 100), "<svg></svg>");
+    public CanvasSvgFrame RenderSvg()
+    {
+        if (ReturnEmptyFrame)
+            throw new InvalidOperationException("Canvas native bridge returned an empty SVG frame.");
+        return new(new CanvasDocumentBounds(0, 0, 100, 100), "<svg></svg>");
+    }
 
     public byte[] SaveRnote()
     {

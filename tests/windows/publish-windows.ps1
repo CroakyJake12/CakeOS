@@ -37,6 +37,16 @@ if (-not (Test-Path -LiteralPath $VcpkgPkgConfig)) { Blocked "PKG_CONFIG dir mis
 $env:PKG_CONFIG_PATH = $VcpkgPkgConfig
 $env:PATH = "$([IO.Path]::GetDirectoryName($pkgconf));$VcpkgBin;$env:PATH"
 
+Write-Host "--- HUI vendor additions (donor-safe patch, idempotent) ---"
+$pythons = @('python', 'python3', 'py') | ForEach-Object { Get-Command $_ -ErrorAction SilentlyContinue } | Select-Object -ExpandProperty Source
+$patch = Join-Path $Repo 'HUI\patches\apply-canvas-hui-additions.py'
+$patched = $false
+foreach ($py in $pythons) {
+  & $py $patch 2>&1 | Select-Object -Last 3
+  if ($LASTEXITCODE -eq 0) { $patched = $true; break }
+}
+if (-not $patched) { Write-Host "WARNING: no Python to run HUI patch script; vendor icons must already be patched" }
+
 Write-Host "--- cargo build (Rnote cdylib) ---"
 & cargo build --release --manifest-path (Join-Path $Repo 'apps\canvas\rnote-poc\Cargo.toml') --lib
 if ($LASTEXITCODE -ne 0) { Blocked "cargo build failed (exit $LASTEXITCODE)" }

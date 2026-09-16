@@ -37,8 +37,7 @@ public sealed class App : Application
             if (canvasMode)
             {
                 var controller = new CanvasController(() => new CanvasNativeSession());
-                var shell = new CanvasShell(controller, CanvasPaths.DefaultDocumentsDir());
-                window = new PreviewWindow(shell);
+                window = new PreviewWindow(controller);
                 desktop.MainWindow = window;
             }
             else

@@ -6,9 +6,9 @@ namespace CakeOS.Canvas.App;
 /// against an <see cref="ICanvasSession"/>. The Avalonia shell only binds to
 /// this; unit tests drive it with a stub session.
 /// </summary>
-public sealed class CanvasController : IDisposable
+public sealed partial class CanvasController : IDisposable
 {
-    public const double MinZoom = 1d;
+    public const double MinZoom = 0.25d;
     public const double MaxZoom = 32d;
     public const double DefaultZoom = 4d;
     public const double MinToolWidth = 1d;
