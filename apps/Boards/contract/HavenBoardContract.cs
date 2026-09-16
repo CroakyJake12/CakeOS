@@ -59,6 +59,10 @@ public enum HavenBoardAttachmentAvailability
 public abstract record HavenBoardCommand;
 
 public sealed record CreateCardCommand(string GroupId, string CardId, string Title) : HavenBoardCommand;
+public sealed record RenameCardCommand(string CardId, string Title) : HavenBoardCommand;
+public sealed record RemoveCardCommand(string CardId) : HavenBoardCommand;
+public sealed record CreateGroupCommand(string GroupId, string Title, int? ToIndex = null) : HavenBoardCommand;
+public sealed record RemoveGroupCommand(string GroupId) : HavenBoardCommand;
 public sealed record RenameGroupCommand(string GroupId, string Title) : HavenBoardCommand;
 public sealed record MoveGroupCommand(int FromIndex, int ToIndex) : HavenBoardCommand;
 public sealed record MoveCardCommand(string FromGroupId, int FromIndex, string ToGroupId, int ToIndex) : HavenBoardCommand;
@@ -98,9 +102,51 @@ public static class HavenBoardReducer
             case CreateCardCommand create:
             {
                 var target = FindGroup(groups, create.GroupId);
-                if (groups.SelectMany(group => group.Cards).Any(card => card.Id == create.CardId))
-                    throw new InvalidOperationException($"Card '{create.CardId}' already exists.");
+                ValidateNewCardId(groups, create.CardId);
                 target.Cards.Add(new HavenBoardCard(create.CardId, NormaliseTitle(create.Title, "Untitled card")));
+                break;
+            }
+            case RenameCardCommand renameCard:
+            {
+                var located = FindCard(groups, renameCard.CardId);
+                located.Group.Cards[located.Index] = located.Card with
+                {
+                    Title = NormaliseTitle(renameCard.Title, "Untitled card")
+                };
+                break;
+            }
+            case RemoveCardCommand removeCard:
+            {
+                var located = FindCard(groups, removeCard.CardId);
+                located.Group.Cards.RemoveAt(located.Index);
+                freeformItems.RemoveAll(item =>
+                    string.Equals(item.CardId, removeCard.CardId, StringComparison.Ordinal));
+                OrphanChildren(groups, removeCard.CardId);
+                break;
+            }
+            case CreateGroupCommand createGroup:
+            {
+                ValidateNewGroupId(groups, createGroup.GroupId);
+                var insertAt = createGroup.ToIndex ?? groups.Count;
+                insertAt = Math.Clamp(insertAt, 0, groups.Count);
+                groups.Insert(insertAt, new MutableGroup(
+                    createGroup.GroupId,
+                    NormaliseTitle(createGroup.Title, "Untitled group"),
+                    []));
+                break;
+            }
+            case RemoveGroupCommand removeGroup:
+            {
+                var index = groups.FindIndex(group =>
+                    string.Equals(group.Id, removeGroup.GroupId, StringComparison.Ordinal));
+                if (index < 0)
+                    throw new InvalidOperationException($"Board group '{removeGroup.GroupId}' does not exist.");
+
+                var removedCardIds = groups[index].Cards.Select(card => card.Id).ToHashSet(StringComparer.Ordinal);
+                groups.RemoveAt(index);
+                freeformItems.RemoveAll(item => removedCardIds.Contains(item.CardId));
+                foreach (var removedCardId in removedCardIds)
+                    OrphanChildren(groups, removedCardId);
                 break;
             }
             case RenameGroupCommand rename:
@@ -257,6 +303,44 @@ public static class HavenBoardReducer
     private static MutableGroup FindGroup(IReadOnlyList<MutableGroup> groups, string id) =>
         groups.FirstOrDefault(group => string.Equals(group.Id, id, StringComparison.Ordinal))
         ?? throw new InvalidOperationException($"Board group '{id}' does not exist.");
+
+    private static void ValidateNewCardId(IReadOnlyList<MutableGroup> groups, string cardId)
+    {
+        ValidateStableId(cardId, "Card", 128);
+        if (groups.SelectMany(group => group.Cards).Any(card => string.Equals(card.Id, cardId, StringComparison.Ordinal)))
+            throw new InvalidOperationException($"Card '{cardId}' already exists.");
+    }
+
+    private static void ValidateNewGroupId(IReadOnlyList<MutableGroup> groups, string groupId)
+    {
+        ValidateStableId(groupId, "Group", 128);
+        if (groups.Any(group => string.Equals(group.Id, groupId, StringComparison.Ordinal)))
+            throw new InvalidOperationException($"Board group '{groupId}' already exists.");
+    }
+
+    /// <summary>
+    /// Donor group/card IDs are opaque stable strings (the donor example even uses
+    /// display-style IDs such as "To Do"), so the neutral contract requires only
+    /// non-empty, bounded IDs. Stricter charsets live at narrower boundaries
+    /// (generative plans, board storage paths).
+    /// </summary>
+    private static void ValidateStableId(string value, string label, int maxLength)
+    {
+        if (string.IsNullOrWhiteSpace(value) || value.Length > maxLength)
+            throw new InvalidOperationException($"{label} ID must contain 1 to {maxLength} characters.");
+    }
+
+    private static void OrphanChildren(IReadOnlyList<MutableGroup> groups, string removedCardId)
+    {
+        foreach (var group in groups)
+        {
+            for (var index = 0; index < group.Cards.Count; index++)
+            {
+                if (string.Equals(group.Cards[index].ParentCardId, removedCardId, StringComparison.Ordinal))
+                    group.Cards[index] = group.Cards[index] with { ParentCardId = null };
+            }
+        }
+    }
 
     private static LocatedCard FindCard(IReadOnlyList<MutableGroup> groups, string cardId)
     {

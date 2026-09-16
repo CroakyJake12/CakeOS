@@ -139,6 +139,10 @@ public sealed class HavenBoardGenerativeReviewHuiScene : IDisposable
     private static string Describe(HavenBoardCommand command) => command switch
     {
         CreateCardCommand create => $"Create card '{create.Title}'",
+        RenameCardCommand renameCard => $"Rename card to '{renameCard.Title}'",
+        RemoveCardCommand => "Delete a card",
+        CreateGroupCommand createGroup => $"Create group '{createGroup.Title}'",
+        RemoveGroupCommand => "Delete a group",
         RenameGroupCommand rename => $"Rename group to '{rename.Title}'",
         MoveGroupCommand => "Reorder a group",
         MoveCardCommand => "Move a card",

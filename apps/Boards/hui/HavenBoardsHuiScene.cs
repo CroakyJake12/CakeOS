@@ -2,6 +2,7 @@ using CakeOS.Apps.Boards.Contract;
 using Haven.UI;
 using Haven.UI.Components;
 using HavenButton = Haven.UI.Components.Button;
+using HavenInput = Haven.UI.Components.Input;
 using HavenText = Haven.UI.Components.Text;
 
 namespace CakeOS.Apps.Boards.Hui;
@@ -26,6 +27,18 @@ public sealed class HavenBoardsHuiScene : IDisposable
         BoardLanes = Get<Container>("BoardLanes");
         BoardTitle = Get<HavenText>("BoardTitle");
         Status = Get<HavenText>("Status");
+
+        var toolbar = Get<Container>("BoardToolbar");
+        var addGroup = new HavenButton { Content = "Add group", Variant = ButtonVariant.Secondary };
+        addGroup.Accessibility.AccessibleName = "Add group to board";
+        addGroup.SetValue(HavenProperties.MinHeight, HavenLength.Px(34));
+        EventHandler addGroupHandler = (_, _) =>
+            CommandRequested?.Invoke(
+                this,
+                new CreateGroupCommand($"group-{Guid.NewGuid():N}", "New group"));
+        addGroup.Invoked += addGroupHandler;
+        _wiredButtons.Add(addGroup);
+        toolbar.Add(addGroup);
     }
 
     public Page Root { get; }
@@ -91,11 +104,25 @@ public sealed class HavenBoardsHuiScene : IDisposable
         header.SetValue(HavenProperties.Width, HavenLength.Percent(100));
         header.SetValue(HavenProperties.Gap, HavenLength.Px(6));
 
-        var title = new HavenText { Content = group.Title };
-        title.SetValue(HavenProperties.FontSize, 15d);
-        title.SetValue(HavenProperties.FontWeight, 700);
-        title.SetValue(HavenProperties.Width, HavenLength.Percent(100));
-        header.Add(title);
+        // Donor group headers pair the group name with editing affordances
+        // (the donor example edits via TextField + updateGroupName). The name
+        // input is committed explicitly so keyboard and pointer users share
+        // one typed command path.
+        var nameInput = new HavenInput { SubmitOnEnter = true };
+        nameInput.Text = group.Title;
+        nameInput.Accessibility.AccessibleName = $"Rename group {group.Title}";
+        nameInput.SetValue(HavenProperties.Width, HavenLength.Percent(100));
+        nameInput.SetValue(HavenProperties.MinHeight, HavenLength.Px(34));
+        header.Add(nameInput);
+
+        var saveName = new HavenButton { Content = "Save", Variant = ButtonVariant.Tertiary };
+        saveName.Accessibility.AccessibleName = $"Save group name {group.Title}";
+        saveName.SetValue(HavenProperties.MinHeight, HavenLength.Px(30));
+        EventHandler saveNameHandler = (_, _) =>
+            CommandRequested?.Invoke(this, new RenameGroupCommand(group.Id, nameInput.Text));
+        saveName.Invoked += saveNameHandler;
+        _wiredButtons.Add(saveName);
+        header.Add(saveName);
 
         header.Add(ActionButton(
             "Left",
@@ -118,7 +145,27 @@ public sealed class HavenBoardsHuiScene : IDisposable
         add.Invoked += addHandler;
         _wiredButtons.Add(add);
         header.Add(add);
+
+        var remove = new HavenButton { Content = "Delete", Variant = ButtonVariant.Tertiary };
+        remove.Accessibility.AccessibleName = $"Delete group {group.Title}";
+        remove.SetValue(HavenProperties.MinHeight, HavenLength.Px(30));
+        EventHandler removeHandler = (_, _) =>
+            CommandRequested?.Invoke(this, new RemoveGroupCommand(group.Id));
+        remove.Invoked += removeHandler;
+        _wiredButtons.Add(remove);
+        header.Add(remove);
         lane.Add(header);
+
+        if (group.Cards.Count > 0)
+        {
+            var count = new HavenText
+            {
+                Content = group.Cards.Count == 1 ? "1 card" : $"{group.Cards.Count} cards"
+            };
+            count.SetValue(HavenProperties.Foreground, "TextSecondary");
+            count.SetValue(HavenProperties.FontSize, 11d);
+            lane.Add(count);
+        }
 
         if (group.Cards.Count == 0)
         {
@@ -148,10 +195,29 @@ public sealed class HavenBoardsHuiScene : IDisposable
         surface.SetValue(HavenProperties.Radius, HavenCornerRadius.Uniform(HavenLength.Px(12)));
         surface.Accessibility.AccessibleName = $"Board card {card.Title}";
 
-        var title = new HavenText { Content = card.Title };
-        title.SetValue(HavenProperties.FontSize, 13d);
-        title.SetValue(HavenProperties.FontWeight, 600);
-        surface.Add(title);
+        // Donor cards carry app-provided content updated via updateGroupItem /
+        // replaceOrInsertItem. The neutral equivalent is an explicit rename
+        // committed as a typed command.
+        var nameRow = new Container { Layout = HavenLayout.Horizontal };
+        nameRow.SetValue(HavenProperties.Width, HavenLength.Percent(100));
+        nameRow.SetValue(HavenProperties.Gap, HavenLength.Px(6));
+
+        var nameInput = new HavenInput { SubmitOnEnter = true };
+        nameInput.Text = card.Title;
+        nameInput.Accessibility.AccessibleName = $"Rename card {card.Title}";
+        nameInput.SetValue(HavenProperties.Width, HavenLength.Percent(100));
+        nameInput.SetValue(HavenProperties.MinHeight, HavenLength.Px(34));
+        nameRow.Add(nameInput);
+
+        var saveName = new HavenButton { Content = "Save", Variant = ButtonVariant.Tertiary };
+        saveName.Accessibility.AccessibleName = $"Save card name {card.Title}";
+        saveName.SetValue(HavenProperties.MinHeight, HavenLength.Px(30));
+        EventHandler saveNameHandler = (_, _) =>
+            CommandRequested?.Invoke(this, new RenameCardCommand(card.Id, nameInput.Text));
+        saveName.Invoked += saveNameHandler;
+        _wiredButtons.Add(saveName);
+        nameRow.Add(saveName);
+        surface.Add(nameRow);
 
         var details = CardDetails(card);
         if (details.Length > 0)
@@ -165,6 +231,13 @@ public sealed class HavenBoardsHuiScene : IDisposable
         var actions = new Container { Layout = HavenLayout.Horizontal };
         actions.SetValue(HavenProperties.Gap, HavenLength.Px(4));
         actions.SetValue(HavenProperties.Width, HavenLength.Percent(100));
+
+        // Donor removeGroupItem/removeWhere as an explicit keyboard command.
+        actions.Add(ActionButton(
+            "Delete",
+            $"Delete card {card.Title}",
+            true,
+            new RemoveCardCommand(card.Id)));
 
         actions.Add(ActionButton(
             "Up",
@@ -261,11 +334,12 @@ public sealed class HavenBoardsHuiScene : IDisposable
     private static Page BuildRoot()
     {
         const string markup = """
-            <Page Name="BoardsRoot" Layout="Grid" Width="100%" Height="100%" Rows="Auto Auto 1fr Auto" Gap="12px" Padding="22px" Background="Surface">
+            <Page Name="BoardsRoot" Layout="Grid" Width="100%" Height="100%" Rows="Auto Auto Auto 1fr Auto" Gap="12px" Padding="22px" Background="Surface">
               <Text Name="BoardTitle" Row="0" Content="Haven Boards" Level="H1" />
               <Text Row="1" Content="Structured board · local first" Foreground="TextSecondary" FontSize="12" />
-              <Container Name="BoardLanes" Row="2" Layout="Horizontal" Width="100%" Height="100%" Overflow="Scroll" Clip="true" Gap="12px" />
-              <Text Name="Status" Row="3" Content="" Foreground="TextSecondary" FontSize="11" Visibility="Collapsed" />
+              <Container Name="BoardToolbar" Row="2" Layout="Horizontal" Width="100%" Gap="8px" />
+              <Container Name="BoardLanes" Row="3" Layout="Horizontal" Width="100%" Height="100%" Overflow="Scroll" Clip="true" Gap="12px" />
+              <Text Name="Status" Row="4" Content="" Foreground="TextSecondary" FontSize="11" Visibility="Collapsed" />
             </Page>
             """;
         return (Page)new HavenMarkupParser().Parse(markup, "Boards.hui");

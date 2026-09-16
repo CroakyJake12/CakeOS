@@ -11,9 +11,15 @@ The scene follows the preserved CakeAI/HavenUI scene API at the reviewed donor b
 Every drag/reorder operation has an explicit command path:
 
 - group left/right;
+- group add/delete/rename (inline name field with explicit Save);
 - card up/down;
 - card previous/next group;
-- add card.
+- card add/delete/rename (inline name field with explicit Save);
+- card count projected per lane as derived data.
+
+Pointer drag-and-drop remains unavailable until the shared HUI runtime ships a
+reusable drag primitive (recorded NEEDS-FROM-W4); the keyboard controls above
+are the working equivalent and persist through the same typed commands.
 
 The AppFlowy Flutter proof may additionally expose pointer drag-and-drop, but drag is never the sole interaction mechanism.
 

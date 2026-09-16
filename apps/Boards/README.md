@@ -39,6 +39,12 @@ Implemented source:
 - neutral snapshot/command model independent of AppFlowy classes;
 - HUI board scene projecting the neutral model;
 - HUI command emission for group/card movement and card creation;
+- HUI group creation, removal, and inline rename through typed commands;
+- HUI card inline rename and removal through typed commands;
+- neutral group/card CRUD commands mirroring the donor controller surface
+  (addGroup/insertGroup/removeGroup, removeGroupItem, updateGroupItem,
+  updateGroupName) with stable IDs, orphan-safe hierarchy, and freeform-frame
+  cleanup;
 - hierarchy/attachment metadata preserved in the neutral card contract;
 - zero-install static provenance and architecture boundary gate.
 
