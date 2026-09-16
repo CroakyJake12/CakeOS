@@ -66,6 +66,8 @@ public sealed class HuiPreviewSurface : Control, IHavenMeasureContext, IDisposab
             scene.Save.Invoked += (_, _) => SaveCanvasDocument();
             scene.Open.Invoked += (_, _) => OpenCanvasDocument();
             InitializeCanvasFrame(_canvasSession);
+            if (Environment.GetEnvironmentVariable("CAKEOS_HUI_CANVAS_OPEN_AT_START") == "1")
+                OpenCanvasDocument();
         }
         else
         {
@@ -348,6 +350,20 @@ public sealed class HuiPreviewSurface : Control, IHavenMeasureContext, IDisposab
             "CakeOS", "Canvas", "canvas.rnote");
 
     private void SaveCanvasDocument()
+    {
+        SaveCanvasDocumentCore();
+    }
+
+    /// <summary>
+    /// Headless/automation entry to the exact Save-button code path.
+    /// Used by close-window autosave and CI; never invents a result.
+    /// </summary>
+    public void SaveCanvasDocumentOnClose()
+    {
+        SaveCanvasDocumentCore();
+    }
+
+    private void SaveCanvasDocumentCore()
     {
         if (!_canvasMode || _canvasSession is null)
             return;

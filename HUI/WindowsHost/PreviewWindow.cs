@@ -30,7 +30,12 @@ public sealed class PreviewWindow : Window
         MinHeight = 480;
         Background = new SolidColorBrush(Color.Parse("#111318"));
         Content = _surface;
-        Closed += (_, _) => _surface.Dispose();
+        Closed += (_, _) =>
+        {
+            if (_canvasMode && Environment.GetEnvironmentVariable("CAKEOS_HUI_CANVAS_SAVE_ON_CLOSE") == "1")
+                _surface.SaveCanvasDocumentOnClose();
+            _surface.Dispose();
+        };
     }
 
     /// <summary>Mounts a caller-owned HUI page (e.g. a Boards session scene).</summary>
