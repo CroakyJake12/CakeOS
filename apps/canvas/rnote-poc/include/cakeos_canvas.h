@@ -8,12 +8,14 @@
 extern "C" {
 #endif
 
-#define CAKE_CANVAS_ABI_VERSION 2
+#define CAKE_CANVAS_ABI_VERSION 3
 #define CAKE_CANVAS_TOOL_PEN 0
 #define CAKE_CANVAS_TOOL_HIGHLIGHTER 1
 #define CAKE_CANVAS_TOOL_ERASER 2
 #define CAKE_CANVAS_TOOL_SELECTOR 3
 #define CAKE_CANVAS_TOOL_SHAPE 4
+#define CAKE_CANVAS_ERASER_TRASH 0
+#define CAKE_CANVAS_ERASER_SPLIT 1
 #define CAKE_CANVAS_SHAPE_RECTANGLE 0
 #define CAKE_CANVAS_SHAPE_ELLIPSE 1
 #define CAKE_CANVAS_SHAPE_LINE 2
@@ -73,6 +75,22 @@ CakeCanvasStatus cake_canvas_engine_from_rnote(
 
 CakeCanvasStatus cake_canvas_set_stroke_tool(void* handle, uint32_t tool);
 CakeCanvasStatus cake_canvas_set_shape(void* handle, uint32_t shape);
+
+/* Per-tool stroke appearance (ABI 3). Only pen, highlighter and shape accept
+ * a style; other tools report invalid-argument. Width is in Rnote document
+ * units (0.5..200.0); color channels are 0.0..1.0 sRGB + alpha. */
+CakeCanvasStatus cake_canvas_set_pen_style(
+    void* handle,
+    uint32_t tool,
+    double red,
+    double green,
+    double blue,
+    double alpha,
+    double width
+);
+
+/* Eraser width in 1.0..500.0 with trash (0) or split (1) colliding strokes. */
+CakeCanvasStatus cake_canvas_set_eraser(void* handle, double width, uint32_t style);
 CakeCanvasStatus cake_canvas_set_viewport_size(void* handle, double width, double height);
 CakeCanvasStatus cake_canvas_zoom_to(void* handle, double zoom);
 CakeCanvasStatus cake_canvas_pan_by(void* handle, double delta_x, double delta_y);

@@ -6,16 +6,18 @@ use std::slice;
 use futures::executor::block_on;
 
 use crate::{
-    CanvasCoordinateSpace, CanvasPointerSample, CanvasRenderFormat, CanvasShape, CanvasTool,
-    CanvasViewport, HeadlessCanvasEngine,
+    CanvasCoordinateSpace, CanvasPenStyle, CanvasPointerSample, CanvasRenderFormat, CanvasShape,
+    CanvasTool, CanvasViewport, HeadlessCanvasEngine,
 };
 
-pub const CAKE_CANVAS_ABI_VERSION: u32 = 2;
+pub const CAKE_CANVAS_ABI_VERSION: u32 = 3;
 pub const CAKE_CANVAS_TOOL_PEN: u32 = 0;
 pub const CAKE_CANVAS_TOOL_HIGHLIGHTER: u32 = 1;
 pub const CAKE_CANVAS_TOOL_ERASER: u32 = 2;
 pub const CAKE_CANVAS_TOOL_SELECTOR: u32 = 3;
 pub const CAKE_CANVAS_TOOL_SHAPE: u32 = 4;
+pub const CAKE_CANVAS_ERASER_TRASH: u32 = 0;
+pub const CAKE_CANVAS_ERASER_SPLIT: u32 = 1;
 pub const CAKE_CANVAS_SHAPE_RECTANGLE: u32 = 0;
 pub const CAKE_CANVAS_SHAPE_ELLIPSE: u32 = 1;
 pub const CAKE_CANVAS_SHAPE_LINE: u32 = 2;
@@ -280,6 +282,85 @@ pub extern "C" fn cake_canvas_set_shape(
             return CakeCanvasStatus::InvalidArgument;
         };
         let Some(result) = with_engine_mut(handle, |engine| engine.set_shape(shape)) else {
+            return CakeCanvasStatus::InvalidHandle;
+        };
+
+        match result {
+            Ok(()) => CakeCanvasStatus::Ok,
+            Err(_) => CakeCanvasStatus::InvalidState,
+        }
+    })
+}
+
+fn styled_tool_from_abi(tool: u32) -> Option<CanvasTool> {
+    match tool {
+        CAKE_CANVAS_TOOL_PEN => Some(CanvasTool::Pen),
+        CAKE_CANVAS_TOOL_HIGHLIGHTER => Some(CanvasTool::Highlighter),
+        CAKE_CANVAS_TOOL_SHAPE => Some(CanvasTool::Shape),
+        _ => None,
+    }
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn cake_canvas_set_pen_style(
+    handle: *mut c_void,
+    tool: u32,
+    red: f64,
+    green: f64,
+    blue: f64,
+    alpha: f64,
+    width: f64,
+) -> CakeCanvasStatus {
+    guard_status(|| {
+        let Some(tool) = styled_tool_from_abi(tool) else {
+            return CakeCanvasStatus::InvalidArgument;
+        };
+        let style = CanvasPenStyle {
+            color: [red, green, blue, alpha],
+            width,
+        };
+        // Validate at the boundary so callers get InvalidArgument for bad
+        // values and InvalidState only for a mid-stroke change.
+        if handle.is_null() {
+            return CakeCanvasStatus::InvalidHandle;
+        }
+        if style.validate().is_err() {
+            return CakeCanvasStatus::InvalidArgument;
+        }
+        let Some(result) = with_engine_mut(handle, |engine| engine.set_pen_style(tool, style))
+        else {
+            return CakeCanvasStatus::InvalidHandle;
+        };
+
+        match result {
+            Ok(()) => CakeCanvasStatus::Ok,
+            Err(_) => CakeCanvasStatus::InvalidState,
+        }
+    })
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn cake_canvas_set_eraser(
+    handle: *mut c_void,
+    width: f64,
+    style: u32,
+) -> CakeCanvasStatus {
+    guard_status(|| {
+        let split = match style {
+            CAKE_CANVAS_ERASER_TRASH => false,
+            CAKE_CANVAS_ERASER_SPLIT => true,
+            _ => return CakeCanvasStatus::InvalidArgument,
+        };
+        // Mirror the engine limits so bad values report InvalidArgument;
+        // InvalidState then means only a mid-stroke change.
+        if handle.is_null() {
+            return CakeCanvasStatus::InvalidHandle;
+        }
+        if !width.is_finite() || !(1.0..=500.0).contains(&width) {
+            return CakeCanvasStatus::InvalidArgument;
+        }
+        let Some(result) = with_engine_mut(handle, |engine| engine.set_eraser(width, split))
+        else {
             return CakeCanvasStatus::InvalidHandle;
         };
 
@@ -579,7 +660,7 @@ mod tests {
     fn native_bridge_draws_renders_saves_and_reloads() {
         let handle = cake_canvas_engine_new();
         assert!(!handle.is_null());
-        assert_eq!(cake_canvas_abi_version(), 2);
+        assert_eq!(cake_canvas_abi_version(), 3);
 
         assert_eq!(cake_canvas_begin_stroke(handle, sample(120.0, 120.0, 0.2)), CakeCanvasStatus::Ok);
         assert_eq!(cake_canvas_update_stroke(handle, sample(180.0, 155.0, 0.6)), CakeCanvasStatus::Ok);
@@ -670,6 +751,100 @@ mod tests {
             cake_canvas_begin_stroke(handle, invalid),
             CakeCanvasStatus::InvalidArgument
         );
+        cake_canvas_engine_free(handle);
+    }
+
+    #[test]
+    fn pen_style_and_eraser_options_apply_and_validate() {
+        let handle = cake_canvas_engine_new();
+        assert!(!handle.is_null());
+
+        // Configurable tools accept color + width.
+        assert_eq!(
+            cake_canvas_set_pen_style(handle, CAKE_CANVAS_TOOL_PEN, 1.0, 0.0, 0.0, 1.0, 5.0),
+            CakeCanvasStatus::Ok
+        );
+        assert_eq!(
+            cake_canvas_set_pen_style(handle, CAKE_CANVAS_TOOL_HIGHLIGHTER, 1.0, 1.0, 0.0, 0.5, 12.0),
+            CakeCanvasStatus::Ok
+        );
+        assert_eq!(
+            cake_canvas_set_pen_style(handle, CAKE_CANVAS_TOOL_SHAPE, 0.0, 0.0, 1.0, 1.0, 3.0),
+            CakeCanvasStatus::Ok
+        );
+        assert_eq!(
+            cake_canvas_set_eraser(handle, 24.0, CAKE_CANVAS_ERASER_SPLIT),
+            CakeCanvasStatus::Ok
+        );
+        assert_eq!(
+            cake_canvas_set_eraser(handle, 8.0, CAKE_CANVAS_ERASER_TRASH),
+            CakeCanvasStatus::Ok
+        );
+
+        // Tools without a style slot are rejected, not ignored.
+        assert_eq!(
+            cake_canvas_set_pen_style(handle, CAKE_CANVAS_TOOL_ERASER, 1.0, 0.0, 0.0, 1.0, 5.0),
+            CakeCanvasStatus::InvalidArgument
+        );
+        assert_eq!(
+            cake_canvas_set_pen_style(handle, CAKE_CANVAS_TOOL_SELECTOR, 1.0, 0.0, 0.0, 1.0, 5.0),
+            CakeCanvasStatus::InvalidArgument
+        );
+        assert_eq!(
+            cake_canvas_set_pen_style(handle, 999, 1.0, 0.0, 0.0, 1.0, 5.0),
+            CakeCanvasStatus::InvalidArgument
+        );
+
+        // Out-of-range values are argument errors.
+        assert_eq!(
+            cake_canvas_set_pen_style(handle, CAKE_CANVAS_TOOL_PEN, 2.0, 0.0, 0.0, 1.0, 5.0),
+            CakeCanvasStatus::InvalidArgument
+        );
+        assert_eq!(
+            cake_canvas_set_pen_style(handle, CAKE_CANVAS_TOOL_PEN, 1.0, 0.0, 0.0, 1.0, 0.0),
+            CakeCanvasStatus::InvalidArgument
+        );
+        assert_eq!(
+            cake_canvas_set_pen_style(handle, CAKE_CANVAS_TOOL_PEN, f64::NAN, 0.0, 0.0, 1.0, 5.0),
+            CakeCanvasStatus::InvalidArgument
+        );
+        assert_eq!(
+            cake_canvas_set_eraser(handle, 0.5, CAKE_CANVAS_ERASER_TRASH),
+            CakeCanvasStatus::InvalidArgument
+        );
+        assert_eq!(
+            cake_canvas_set_eraser(handle, 24.0, 7),
+            CakeCanvasStatus::InvalidArgument
+        );
+        assert_eq!(
+            cake_canvas_set_pen_style(ptr::null_mut(), CAKE_CANVAS_TOOL_PEN, 1.0, 0.0, 0.0, 1.0, 5.0),
+            CakeCanvasStatus::InvalidHandle
+        );
+
+        // Style changes are rejected mid-stroke like tool changes.
+        assert_eq!(
+            cake_canvas_begin_stroke(handle, sample(10.0, 10.0, 0.5)),
+            CakeCanvasStatus::Ok
+        );
+        assert_eq!(
+            cake_canvas_set_pen_style(handle, CAKE_CANVAS_TOOL_PEN, 0.0, 1.0, 0.0, 1.0, 5.0),
+            CakeCanvasStatus::InvalidState
+        );
+        assert_eq!(
+            cake_canvas_set_eraser(handle, 24.0, CAKE_CANVAS_ERASER_TRASH),
+            CakeCanvasStatus::InvalidState
+        );
+        assert_eq!(
+            cake_canvas_end_stroke(handle, sample(20.0, 20.0, 0.5)),
+            CakeCanvasStatus::Ok
+        );
+
+        // Styled strokes still render and persist through the boundary.
+        let mut frame = CakeCanvasRenderFrame::default();
+        assert_eq!(cake_canvas_render_frame(handle, &mut frame), CakeCanvasStatus::Ok);
+        assert!(frame.len > 200);
+        cake_canvas_render_frame_release(&mut frame);
+
         cake_canvas_engine_free(handle);
     }
 }

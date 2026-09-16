@@ -14,12 +14,15 @@ use anyhow::{Context, Result};
 use nalgebra::Vector2;
 use rnote_compose::penevent::PenEvent;
 use rnote_compose::penpath::Element;
+use rnote_compose::style::smooth::SmoothOptions;
 use rnote_compose::utils::{add_xml_header, wrap_svg_root};
 use rnote_compose::builders::ShapeBuilderType;
+use rnote_compose::Color;
 use rnote_engine::engine::export::{DocExportFormat, DocExportPrefs};
 use rnote_engine::engine::{EngineConfig, EngineConfigShared};
 use rnote_engine::engine::EngineSnapshot;
 use rnote_engine::pens::pensconfig::brushconfig::BrushStyle;
+use rnote_engine::pens::pensconfig::eraserconfig::{EraserConfig, EraserStyle};
 use rnote_engine::pens::{PenMode, PenStyle};
 use rnote_engine::Engine;
 
@@ -96,6 +99,53 @@ impl CanvasShape {
     }
 }
 
+/// Per-tool stroke appearance owned by CakeOS and applied to Rnote's live pen
+/// configuration. Only tools with a real engine style slot are configurable;
+/// anything else is rejected at the boundary rather than silently ignored.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct CanvasPenStyle {
+    /// sRGB + alpha, each channel in 0.0..=1.0.
+    pub color: [f64; 4],
+    /// Stroke width in Rnote document units, 0.5..=200.0.
+    pub width: f64,
+}
+
+impl CanvasPenStyle {
+    pub const MIN_WIDTH: f64 = 0.5;
+    pub const MAX_WIDTH: f64 = 200.0;
+
+    fn from_smooth(options: &SmoothOptions) -> Self {
+        let color = options.stroke_color.unwrap_or(Color::BLACK);
+        Self {
+            color: [color.r, color.g, color.b, color.a],
+            width: options.stroke_width,
+        }
+    }
+
+    pub(crate) fn validate(self) -> Result<()> {
+        for channel in self.color {
+            if !channel.is_finite() || !(0.0..=1.0).contains(&channel) {
+                anyhow::bail!("Canvas pen color channels must be finite and within 0.0..=1.0");
+            }
+        }
+        if !self.width.is_finite() || !(Self::MIN_WIDTH..=Self::MAX_WIDTH).contains(&self.width) {
+            anyhow::bail!("Canvas pen width must be finite and within 0.5..=200.0");
+        }
+        Ok(())
+    }
+
+    fn apply_to(&self, options: &mut SmoothOptions) {
+        options.stroke_color = Some(Color {
+            r: self.color[0],
+            g: self.color[1],
+            b: self.color[2],
+            a: self.color[3],
+        });
+        options.stroke_width = self.width;
+        options.update_piet_stroke_style();
+    }
+}
+
 /// Camera state expressed in Canvas document coordinates.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct CanvasViewport {
@@ -156,6 +206,28 @@ impl CanvasRenderFrame {
     }
 }
 
+/// Style slots mirrored from Rnote's live pen configuration.
+struct SeededStyles {
+    pen: CanvasPenStyle,
+    marker: CanvasPenStyle,
+    shaper: CanvasPenStyle,
+    eraser_width: f64,
+    eraser_split_colliding: bool,
+}
+
+fn seed_styles(config: &EngineConfigShared) -> SeededStyles {
+    let config = config.read();
+    SeededStyles {
+        pen: CanvasPenStyle::from_smooth(&config.pens_config.brush_config.solid_options),
+        marker: CanvasPenStyle::from_smooth(&config.pens_config.brush_config.marker_options),
+        shaper: CanvasPenStyle::from_smooth(&config.pens_config.shaper_config.smooth_options),
+        eraser_width: config.pens_config.eraser_config.width,
+        eraser_split_colliding: matches!(
+            config.pens_config.eraser_config.style,
+            EraserStyle::SplitCollidingStrokes
+        ),
+    }
+}
 /// Smallest engine boundary intended to prove that Rnote can run beneath HUI
 /// without embedding `rnote-ui`.
 #[derive(Debug)]
@@ -164,6 +236,11 @@ pub struct HeadlessCanvasEngine {
     stroke_active: bool,
     tool: CanvasTool,
     shape: CanvasShape,
+    pen_style: CanvasPenStyle,
+    marker_style: CanvasPenStyle,
+    shaper_style: CanvasPenStyle,
+    eraser_width: f64,
+    eraser_split_colliding: bool,
     config: EngineConfigShared,
 }
 
@@ -180,11 +257,19 @@ impl HeadlessCanvasEngine {
         // Keep Rnote's configuration private to the engine while retaining the
         // shared handle needed to select its real marker and shape builders.
         let _ = engine.install_config(&config, None);
+        // Seed CakeOS style slots from the live engine configuration so the
+        // defaults render exactly as before any explicit style change.
+        let seeded = seed_styles(&config);
         let mut canvas = Self {
             engine,
             stroke_active: false,
             tool: CanvasTool::Pen,
             shape: CanvasShape::Rectangle,
+            pen_style: seeded.pen,
+            marker_style: seeded.marker,
+            shaper_style: seeded.shaper,
+            eraser_width: seeded.eraser_width,
+            eraser_split_colliding: seeded.eraser_split_colliding,
             config,
         };
         canvas.configure_tool();
@@ -231,9 +316,78 @@ impl HeadlessCanvasEngine {
                 BrushStyle::Solid
             };
             config.pens_config.shaper_config.builder_type = self.shape.rnote_builder();
+            self.pen_style
+                .apply_to(&mut config.pens_config.brush_config.solid_options);
+            self.marker_style
+                .apply_to(&mut config.pens_config.brush_config.marker_options);
+            self.shaper_style
+                .apply_to(&mut config.pens_config.shaper_config.smooth_options);
+            config.pens_config.eraser_config.width = self.eraser_width;
+            config.pens_config.eraser_config.style = if self.eraser_split_colliding {
+                EraserStyle::SplitCollidingStrokes
+            } else {
+                EraserStyle::TrashCollidingStrokes
+            };
         }
         let _ = self.engine.change_pen_mode(PenMode::Pen);
         let _ = self.engine.change_pen_style(self.tool.rnote_pen_style());
+    }
+
+    /// Current style slot for a configurable tool (pen, highlighter, shape).
+    pub fn pen_style(&self, tool: CanvasTool) -> Option<CanvasPenStyle> {
+        match tool {
+            CanvasTool::Pen => Some(self.pen_style),
+            CanvasTool::Highlighter => Some(self.marker_style),
+            CanvasTool::Shape => Some(self.shaper_style),
+            _ => None,
+        }
+    }
+
+    /// Change the stroke color/width used by subsequent strokes of a
+    /// configurable tool. Rejected for tools without an engine style slot,
+    /// while a stroke is active, or for out-of-range values.
+    pub fn set_pen_style(&mut self, tool: CanvasTool, style: CanvasPenStyle) -> Result<()> {
+        if !matches!(
+            tool,
+            CanvasTool::Pen | CanvasTool::Highlighter | CanvasTool::Shape
+        ) {
+            anyhow::bail!("Canvas tool has no configurable stroke style");
+        }
+        if self.stroke_active {
+            anyhow::bail!("cannot change Canvas pen style while a stroke is active");
+        }
+        style.validate()?;
+        match tool {
+            CanvasTool::Pen => self.pen_style = style,
+            CanvasTool::Highlighter => self.marker_style = style,
+            CanvasTool::Shape => self.shaper_style = style,
+            _ => unreachable!("tool checked above"),
+        }
+        self.configure_tool();
+        Ok(())
+    }
+
+    /// Current eraser width and split-colliding behaviour.
+    pub fn eraser(&self) -> (f64, bool) {
+        (self.eraser_width, self.eraser_split_colliding)
+    }
+
+    /// Change eraser width (1.0..=500.0, matching Rnote limits) and whether
+    /// colliding strokes are split instead of trashed. Applies to subsequent
+    /// eraser strokes; rejected while a stroke is active.
+    pub fn set_eraser(&mut self, width: f64, split_colliding: bool) -> Result<()> {
+        if self.stroke_active {
+            anyhow::bail!("cannot change Canvas eraser while a stroke is active");
+        }
+        if !width.is_finite()
+            || !(EraserConfig::WIDTH_MIN..=EraserConfig::WIDTH_MAX).contains(&width)
+        {
+            anyhow::bail!("Canvas eraser width must be finite and within 1.0..=500.0");
+        }
+        self.eraser_width = width;
+        self.eraser_split_colliding = split_colliding;
+        self.configure_tool();
+        Ok(())
     }
 
     /// Begin a freehand stroke. Device arbitration (mouse/touch/stylus/palm
@@ -501,11 +655,17 @@ impl HeadlessCanvasEngine {
         let config = EngineConfigShared::from(EngineConfig::default());
         let _ = engine.install_config(&config, None);
         let _ = engine.load_snapshot(snapshot);
+        let seeded = seed_styles(&config);
         let mut canvas = Self {
             engine,
             stroke_active: false,
             tool: CanvasTool::Pen,
             shape: CanvasShape::Rectangle,
+            pen_style: seeded.pen,
+            marker_style: seeded.marker,
+            shaper_style: seeded.shaper,
+            eraser_width: seeded.eraser_width,
+            eraser_split_colliding: seeded.eraser_split_colliding,
             config,
         };
         canvas.configure_tool();
@@ -663,6 +823,47 @@ mod tests {
             let state = restored.debug_state_json().unwrap();
             assert!(state.contains("stroke_components"));
         });
+    }
+
+    #[test]
+    fn pen_styles_default_to_engine_values_and_round_trip() {
+        let mut canvas = HeadlessCanvasEngine::new();
+
+        // Seeded from the live engine: pen is black, marker is wide.
+        let pen = canvas.pen_style(CanvasTool::Pen).unwrap();
+        assert_eq!(pen.color, [0.0, 0.0, 0.0, 1.0]);
+        assert!(pen.width > 0.0);
+        let marker = canvas.pen_style(CanvasTool::Highlighter).unwrap();
+        assert!(marker.width >= pen.width);
+        assert!(canvas.pen_style(CanvasTool::Eraser).is_none());
+        assert!(canvas.pen_style(CanvasTool::Selector).is_none());
+
+        let red = CanvasPenStyle {
+            color: [1.0, 0.0, 0.0, 1.0],
+            width: 5.0,
+        };
+        canvas.set_pen_style(CanvasTool::Pen, red).unwrap();
+        assert_eq!(canvas.pen_style(CanvasTool::Pen).unwrap(), red);
+
+        // Rejections leave the stored style untouched.
+        assert!(canvas.set_pen_style(CanvasTool::Eraser, red).is_err());
+        assert!(
+            canvas
+                .set_pen_style(CanvasTool::Pen, CanvasPenStyle {
+                    color: [1.0, 0.0, 0.0, 1.0],
+                    width: 0.0,
+                })
+                .is_err()
+        );
+        assert_eq!(canvas.pen_style(CanvasTool::Pen).unwrap(), red);
+
+        let (width, split) = canvas.eraser();
+        assert!(width >= 1.0);
+        assert!(!split);
+        canvas.set_eraser(30.0, true).unwrap();
+        assert_eq!(canvas.eraser(), (30.0, true));
+        assert!(canvas.set_eraser(0.0, false).is_err());
+        assert_eq!(canvas.eraser(), (30.0, true));
     }
 
     #[test]
