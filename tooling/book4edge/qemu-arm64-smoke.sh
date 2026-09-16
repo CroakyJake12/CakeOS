@@ -44,7 +44,7 @@ qemu-system-aarch64 \
   -nic none \
   -device virtio-scsi-pci,romfile= \
   -device scsi-cd,drive=cakeos_cd \
-  -drive id=cakeos_cd,media=cdrom,file="$ISO",readonly=on,format=raw \
+  -drive id=cakeos_cd,if=none,media=cdrom,file="$ISO",readonly=on,format=raw \
   -display none -vga none \
   -serial file:"$SERIAL" \
   -monitor unix:"$MON",server=on,wait=off \
