@@ -1,7 +1,8 @@
 using Avalonia;
 using Avalonia.Controls.ApplicationLifetimes;
+using Avalonia.Themes.Fluent;
 using Avalonia.Threading;
-using CakeOS.HuiLinuxHost.Canvas;
+using CakeOS.Canvas.App;
 using CakeOS.Platform;
 using Microsoft.Extensions.DependencyInjection;
 
@@ -12,6 +13,11 @@ public sealed class App : Application
     internal static IHuiRootProvider? RootProvider { get; set; }
     internal static IServiceProvider? Services { get; private set; }
 
+    public App()
+    {
+        Styles.Add(new FluentTheme());
+    }
+
     public override void OnFrameworkInitializationCompleted()
     {
         if (ApplicationLifetime is IClassicDesktopStyleApplicationLifetime desktop)
@@ -20,13 +26,24 @@ public sealed class App : Application
             ConfigureServices(serviceCollection);
             Services = serviceCollection.BuildServiceProvider();
 
-            if (Environment.GetEnvironmentVariable("CAKEOS_HUI_CANVAS_PREVIEW") == "1")
-                CanvasManagedBoundaryProof.Run();
+            var canvasMode = Environment.GetEnvironmentVariable("CAKEOS_HUI_CANVAS_PREVIEW") == "1";
+            if (canvasMode)
+                CanvasBoundaryProof.Run();
 
-            var root = RootProvider is null
-                ? null
-                : RootProvider.CreateRoot(Services) ?? throw new InvalidOperationException("HUI root provider returned null.");
-            var window = new PreviewWindow(root);
+            PreviewWindow window;
+            if (canvasMode)
+            {
+                var controller = new CanvasController(() => new CanvasNativeSession());
+                var shell = new CanvasShell(controller, CanvasPaths.DefaultDocumentsDir());
+                window = new PreviewWindow(shell);
+            }
+            else
+            {
+                var root = RootProvider is null
+                    ? null
+                    : RootProvider.CreateRoot(Services) ?? throw new InvalidOperationException("HUI root provider returned null.");
+                window = new PreviewWindow(root);
+            }
             desktop.MainWindow = window;
 
             window.Opened += async (_, _) =>

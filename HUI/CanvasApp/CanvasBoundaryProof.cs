@@ -1,6 +1,11 @@
-namespace CakeOS.HuiLinuxHost.Canvas;
+namespace CakeOS.Canvas.App;
 
-internal static class CanvasManagedBoundaryProof
+/// <summary>
+/// Startup proof that the managed boundary drives the REAL native Rnote
+/// engine end to end. Runs against CanvasNativeSession only by design:
+/// a stub would prove nothing. Markers feed CI smoke tests.
+/// </summary>
+public static class CanvasBoundaryProof
 {
     public static void Run()
     {
@@ -32,6 +37,19 @@ internal static class CanvasManagedBoundaryProof
 
         if (!source.Undo() || !source.Redo())
             throw new InvalidOperationException("Managed Canvas proof could not undo and redo a completed Rnote operation.");
+
+        // ABI v3 tool appearance must round-trip through real strokes.
+        source.SetPenStyle(CanvasTool.Pen, new CanvasRgba(1, 0, 0, 1), 5);
+        source.SetTool(CanvasTool.Pen);
+        source.BeginStroke(120, 300, 0.6);
+        source.EndStroke(300, 300, 0.6);
+        source.SetEraser(24, CanvasEraserStyle.Split);
+        source.SetTool(CanvasTool.Eraser);
+        source.BeginStroke(200, 290, 0.6);
+        source.EndStroke(200, 310, 0.6);
+        source.SetEraser(12, CanvasEraserStyle.Trash);
+        if (!source.Undo() || !source.Undo() || !source.Redo() || !source.Redo())
+            throw new InvalidOperationException("Managed Canvas proof could not replay styled strokes through history.");
 
         var before = source.RenderSvg();
         var payload = source.SaveRnote();

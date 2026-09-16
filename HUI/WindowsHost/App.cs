@@ -1,9 +1,10 @@
 using Avalonia;
 using Avalonia.Controls.ApplicationLifetimes;
+using Avalonia.Themes.Fluent;
 using Avalonia.Threading;
 using CakeOS.Apps.Boards.Contract;
 using CakeOS.Apps.Boards.Hui;
-using CakeOS.HuiWindowsHost.Canvas;
+using CakeOS.Canvas.App;
 using CakeOS.Platform;
 using Microsoft.Extensions.DependencyInjection;
 using System.Runtime.InteropServices;
@@ -15,6 +16,11 @@ public sealed class App : Application
     internal static IHuiRootProvider? RootProvider { get; set; }
     internal static IServiceProvider? Services { get; private set; }
 
+    public App()
+    {
+        Styles.Add(new FluentTheme());
+    }
+
     public override void OnFrameworkInitializationCompleted()
     {
         if (ApplicationLifetime is IClassicDesktopStyleApplicationLifetime desktop)
@@ -23,27 +29,37 @@ public sealed class App : Application
             ConfigureServices(serviceCollection);
             Services = serviceCollection.BuildServiceProvider();
 
-            if (Environment.GetEnvironmentVariable("CAKEOS_HUI_CANVAS_PREVIEW") == "1")
-                CanvasManagedBoundaryProof.Run();
+            var canvasMode = Environment.GetEnvironmentVariable("CAKEOS_HUI_CANVAS_PREVIEW") == "1";
+            if (canvasMode)
+                CanvasBoundaryProof.Run();
 
             PreviewWindow window;
-            HavenBoardsHuiSession? boardsSession = null;
-            if (Environment.GetEnvironmentVariable("CAKEOS_HUI_BOARDS_PREVIEW") == "1"
-                && Environment.GetEnvironmentVariable("CAKEOS_HUI_CANVAS_PREVIEW") != "1")
+            if (canvasMode)
             {
-                boardsSession = OpenBoardsSession();
-                window = new PreviewWindow(boardsSession.Scene.Root, "CakeOS Boards (Windows)");
-                var captured = boardsSession;
-                window.Closed += async (_, _) => await captured.DisposeAsync().ConfigureAwait(false);
+                var controller = new CanvasController(() => new CanvasNativeSession());
+                var shell = new CanvasShell(controller, CanvasPaths.DefaultDocumentsDir());
+                window = new PreviewWindow(shell);
+                desktop.MainWindow = window;
             }
             else
             {
-                var root = RootProvider is null
-                    ? null
-                    : RootProvider.CreateRoot(Services) ?? throw new InvalidOperationException("HUI root provider returned null.");
-                window = new PreviewWindow(root);
+                HavenBoardsHuiSession? boardsSession = null;
+                if (Environment.GetEnvironmentVariable("CAKEOS_HUI_BOARDS_PREVIEW") == "1")
+                {
+                    boardsSession = OpenBoardsSession();
+                    window = new PreviewWindow(boardsSession.Scene.Root, "CakeOS Boards (Windows)");
+                    var captured = boardsSession;
+                    window.Closed += async (_, _) => await captured.DisposeAsync().ConfigureAwait(false);
+                }
+                else
+                {
+                    var root = RootProvider is null
+                        ? null
+                        : RootProvider.CreateRoot(Services) ?? throw new InvalidOperationException("HUI root provider returned null.");
+                    window = new PreviewWindow(root);
+                }
+                desktop.MainWindow = window;
             }
-            desktop.MainWindow = window;
 
             window.Opened += async (_, _) =>
             {

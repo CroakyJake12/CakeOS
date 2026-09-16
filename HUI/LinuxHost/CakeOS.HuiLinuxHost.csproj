@@ -7,8 +7,10 @@
   <ItemGroup>
     <ProjectReference Include="..\Platform\CakeOS.Platform.csproj" />
     <ProjectReference Include="..\vendor\Haven.UI\Haven.UI.csproj" />
+    <ProjectReference Include="..\CanvasApp\CakeOS.Canvas.App.csproj" />
     <PackageReference Include="Avalonia" Version="12.0.1" />
     <PackageReference Include="Avalonia.Desktop" Version="12.0.1" />
+    <PackageReference Include="Avalonia.Themes.Fluent" Version="12.0.1" />
     <PackageReference Include="Svg.Controls.Skia.Avalonia" Version="12.0.0.17" />
     <PackageReference Include="Microsoft.Extensions.DependencyInjection" Version="9.0.0" />
   </ItemGroup>

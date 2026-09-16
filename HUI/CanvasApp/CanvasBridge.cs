@@ -1,9 +1,9 @@
 using System.Runtime.InteropServices;
 using System.Text;
 
-namespace CakeOS.HuiWindowsHost.Canvas;
+namespace CakeOS.Canvas.App;
 
-internal enum CanvasTool : uint
+public enum CanvasTool : uint
 {
     Pen = 0,
     Highlighter = 1,
@@ -12,7 +12,7 @@ internal enum CanvasTool : uint
     Shape = 4,
 }
 
-internal enum CanvasShape : uint
+public enum CanvasShape : uint
 {
     Rectangle = 0,
     Ellipse = 1,
@@ -20,12 +20,45 @@ internal enum CanvasShape : uint
     Arrow = 3,
 }
 
-internal readonly record struct CanvasDocumentBounds(double X, double Y, double Width, double Height);
-internal readonly record struct CanvasSvgFrame(CanvasDocumentBounds Bounds, string Svg);
-
-internal sealed class CanvasNativeSession : IDisposable
+public enum CanvasEraserStyle : uint
 {
-    private const uint ExpectedAbiVersion = 2;
+    Trash = 0,
+    Split = 1,
+}
+
+public readonly record struct CanvasRgba(double R, double G, double B, double A);
+
+public readonly record struct CanvasPenStyle(CanvasRgba Color, double Width);
+
+public readonly record struct CanvasDocumentBounds(double X, double Y, double Width, double Height);
+
+public readonly record struct CanvasSvgFrame(CanvasDocumentBounds Bounds, string Svg);
+
+/// <summary>Seam for unit-testing controller logic without the native library.</summary>
+public interface ICanvasSession : IDisposable
+{
+    bool CanUndo { get; }
+    bool CanRedo { get; }
+    void SetTool(CanvasTool tool);
+    void SetShape(CanvasShape shape);
+    void SetPenStyle(CanvasTool tool, CanvasRgba color, double width);
+    void SetEraser(double width, CanvasEraserStyle style);
+    void SetViewportSize(double width, double height);
+    void ZoomTo(double zoom);
+    void PanBy(double deltaX, double deltaY);
+    void BeginStroke(double x, double y, double pressure, double tiltX = 0, double tiltY = 0);
+    void UpdateStroke(double x, double y, double pressure, double tiltX = 0, double tiltY = 0);
+    void EndStroke(double x, double y, double pressure, double tiltX = 0, double tiltY = 0);
+    bool Undo();
+    bool Redo();
+    CanvasSvgFrame RenderSvg();
+    byte[] SaveRnote();
+}
+
+/// <summary>Managed boundary over the real Rnote engine (ABI v3).</summary>
+public sealed class CanvasNativeSession : ICanvasSession
+{
+    private const uint ExpectedAbiVersion = 3;
     private const uint ExpectedRenderFormatSvg = 1;
     private const uint ExpectedCoordinateSpaceDocument = 1;
 
@@ -50,6 +83,23 @@ internal sealed class CanvasNativeSession : IDisposable
 
     ~CanvasNativeSession() => Dispose(disposing: false);
 
+    public static ICanvasSession CreateNew() => new CanvasNativeSession();
+
+    public static ICanvasSession FromRnote(byte[] bytes)
+    {
+        ArgumentNullException.ThrowIfNull(bytes);
+        if (bytes.Length == 0)
+            throw new ArgumentException("Canvas Rnote payload must not be empty.", nameof(bytes));
+
+        ValidateAbi();
+        var status = Native.cake_canvas_engine_from_rnote(bytes, (nuint)bytes.Length, out var handle);
+        EnsureOk(status, "restore Rnote payload");
+        if (handle == IntPtr.Zero)
+            throw new InvalidOperationException("Canvas native Rnote restore succeeded without returning an engine handle.");
+
+        return new CanvasNativeSession(handle);
+    }
+
     public bool CanUndo
     {
         get
@@ -68,21 +118,6 @@ internal sealed class CanvasNativeSession : IDisposable
         }
     }
 
-    public static CanvasNativeSession FromRnote(byte[] bytes)
-    {
-        ArgumentNullException.ThrowIfNull(bytes);
-        if (bytes.Length == 0)
-            throw new ArgumentException("Canvas Rnote payload must not be empty.", nameof(bytes));
-
-        ValidateAbi();
-        var status = Native.cake_canvas_engine_from_rnote(bytes, (nuint)bytes.Length, out var handle);
-        EnsureOk(status, "restore Rnote payload");
-        if (handle == IntPtr.Zero)
-            throw new InvalidOperationException("Canvas native Rnote restore succeeded without returning an engine handle.");
-
-        return new CanvasNativeSession(handle);
-    }
-
     public void SetTool(CanvasTool tool)
     {
         ThrowIfDisposed();
@@ -93,6 +128,20 @@ internal sealed class CanvasNativeSession : IDisposable
     {
         ThrowIfDisposed();
         EnsureOk(Native.cake_canvas_set_shape(_handle, (uint)shape), "set shape");
+    }
+
+    public void SetPenStyle(CanvasTool tool, CanvasRgba color, double width)
+    {
+        ThrowIfDisposed();
+        EnsureOk(
+            Native.cake_canvas_set_pen_style(_handle, (uint)tool, color.R, color.G, color.B, color.A, width),
+            "set pen style");
+    }
+
+    public void SetEraser(double width, CanvasEraserStyle style)
+    {
+        ThrowIfDisposed();
+        EnsureOk(Native.cake_canvas_set_eraser(_handle, width, (uint)style), "set eraser");
     }
 
     public void SetViewportSize(double width, double height)
@@ -313,6 +362,13 @@ internal sealed class CanvasNativeSession : IDisposable
 
         [DllImport(Library, CallingConvention = CallingConvention.Cdecl)]
         internal static extern CanvasStatus cake_canvas_set_shape(IntPtr handle, uint shape);
+
+        [DllImport(Library, CallingConvention = CallingConvention.Cdecl)]
+        internal static extern CanvasStatus cake_canvas_set_pen_style(
+            IntPtr handle, uint tool, double red, double green, double blue, double alpha, double width);
+
+        [DllImport(Library, CallingConvention = CallingConvention.Cdecl)]
+        internal static extern CanvasStatus cake_canvas_set_eraser(IntPtr handle, double width, uint style);
 
         [DllImport(Library, CallingConvention = CallingConvention.Cdecl)]
         internal static extern CanvasStatus cake_canvas_set_viewport_size(IntPtr handle, double width, double height);
