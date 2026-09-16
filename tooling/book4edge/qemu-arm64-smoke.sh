@@ -41,7 +41,10 @@ rm -f "$MON"
 qemu-system-aarch64 \
   -M virt -cpu max -m 4096 \
   -bios "$FW" \
-  -cdrom "$ISO" \
+  -nic none \
+  -device virtio-scsi-pci,romfile= \
+  -device scsi-cd,drive=cakeos_cd \
+  -drive id=cakeos_cd,media=cdrom,file="$ISO",readonly=on,format=raw \
   -display none \
   -device ramfb \
   -serial file:"$SERIAL" \
