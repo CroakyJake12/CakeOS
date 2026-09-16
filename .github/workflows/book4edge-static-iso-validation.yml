@@ -47,10 +47,13 @@ jobs:
             --repo CroakyJake12/CakeOS \
             --name cakeos-book4edge16-arm64-iso \
             --dir work/dl
-          ls -l work/dl
-          unzip -j 'work/dl/*.zip' -d work/iso 2>/dev/null || true
-          ls -l work/iso work/dl
-          ISO=$(find work -maxdepth 2 -name '*.iso' | head -n 1)
+          ls -R work/dl
+          # gh run download already extracts artifact files; handle a zip too.
+          if compgen -G 'work/dl/*.zip' > /dev/null; then
+            mkdir -p work/iso
+            unzip -j 'work/dl/*.zip' -d work/iso
+          fi
+          ISO=$(find work -maxdepth 3 -name '*.iso' | head -n 1)
           test -n "$ISO" || { echo "No ISO found in artifact" >&2; exit 1; }
           echo "ISO_PATH=$ISO" >> "$GITHUB_ENV"
           echo "Using ISO: $ISO"
