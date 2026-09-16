@@ -825,6 +825,7 @@ public sealed class HuiPreviewSurface : Control, IHavenMeasureContext, IDisposab
     private static Color ColorFor(HavenBrush brush) => brush switch
     {
         HavenSolidBrush solid => Color.FromArgb(solid.A, solid.R, solid.G, solid.B),
+        HavenTokenBrush token when TryParseHex(token.Token, out var hex) => hex,
         HavenTokenBrush token when token.Token.Contains("Accent", StringComparison.OrdinalIgnoreCase) => Color.Parse("#8A7CFF"),
         HavenTokenBrush token when token.Token.Contains("Secondary", StringComparison.OrdinalIgnoreCase) => Color.Parse("#A8AFBD"),
         HavenTokenBrush token when token.Token.Contains("Text", StringComparison.OrdinalIgnoreCase) => Color.Parse("#F5F7FB"),
@@ -832,6 +833,31 @@ public sealed class HuiPreviewSurface : Control, IHavenMeasureContext, IDisposab
         HavenTokenBrush => Color.Parse("#242834"),
         _ => Color.Parse("#242834"),
     };
+
+    /// <summary>
+    /// Generic #RRGGBB / #AARRGGBB brush support for shared components such as
+    /// ColourPicker swatches. Unknown tokens keep the existing fallback below.
+    /// </summary>
+    private static bool TryParseHex(string? token, out Color color)
+    {
+        color = Colors.Transparent;
+        if (string.IsNullOrWhiteSpace(token)) return false;
+        var text = token.Trim();
+        if (!text.StartsWith('#')) return false;
+        text = text[1..];
+        if (text.Length is not (6 or 8)) return false;
+        foreach (var ch in text)
+            if (!Uri.IsHexDigit(ch)) return false;
+        try
+        {
+            color = Color.Parse("#" + text);
+            return true;
+        }
+        catch (FormatException)
+        {
+            return false;
+        }
+    }
 
     private static Color ApplyOpacity(Color color, double opacity)
     {
